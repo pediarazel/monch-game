@@ -1,0 +1,12 @@
+require('dotenv').config();
+
+const directUrl = process.env.DATABASE_URL;
+if (!directUrl) {
+  throw new Error('Missing DATABASE_URL in environment (check .env file)');
+}
+
+module.exports = {
+  datasources: {
+    db: { url: directUrl }
+  }
+};

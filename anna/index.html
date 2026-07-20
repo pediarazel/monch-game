@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>منچ آنلاین</title>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body{
+      margin:0;background:#050505;color:#fff;font-family:sans-serif;
+      display:flex;flex-direction:column;align-items:center;padding:10px;
+      user-select:none;
+    }
+    h2{ margin:8px 0 10px; color:#fff; font-size:20px; }
+    .wrap{ width:100%; max-width:860px; display:flex; flex-direction:column; gap:12px; align-items:center; }
+
+    canvas{
+      width:min(96vw,600px);
+      height:min(96vw,600px);
+      background:#111;border:2px solid #333;border-radius:16px;
+      touch-action:manipulation;
+    }
+
+    .panel{
+      width:min(96vw,700px);
+      display:flex; flex-wrap:wrap; gap:10px;
+      justify-content:center; align-items:center;
+      background:#101010;border:1px solid #252525;border-radius:14px;
+      padding:12px;
+    }
+
+    .row{ width:100%; max-width:700px; display:flex; flex-wrap:wrap; gap:10px; justify-content:center; align-items:center; }
+
+    .dice{
+      width:70px;height:70px;border-radius:14px;
+      background:linear-gradient(145deg,#1d1d1d,#080808);
+      border:2px solid #555;display:flex;align-items:center;justify-content:center;
+      font-size:30px;font-weight:bold;color:#fff;
+    }
+    .dice.rolling{ animation:shake 0.08s linear infinite; }
+    @keyframes shake{ 0%{ transform:rotate(-3deg);} 50%{ transform:rotate(3deg);} 100%{ transform:rotate(-3deg);} }
+
+    button{
+      border:none;background:#fff;color:#000;border-radius:12px;
+      padding:12px 18px;font-size:15px;font-weight:bold;cursor:pointer;
+      transition:background 0.2s;
+    }
+    button:active{ background:#ccc; }
+    button:disabled{ opacity:0.4; cursor:not-allowed; }
+
+    .info{ width:100%; text-align:center; font-size:14px; line-height:1.8; margin-top:5px; }
+    .tag{ display:inline-block; padding:2px 8px; border-radius:4px; font-weight:bold; color:#000; }
+    .red{ background:#ff4d4d; }
+    .green{ background:#2ecc71; }
+    .yellow{ background:#f1c40f; }
+    .blue{ background:#3498db; }
+    .muted{ color:#cbd5e1; font-size:13px; }
+    input, select{
+      width:100%;
+      border:none;border-radius:10px;padding:12px;font-size:15px;
+      background:#1f2937;color:#fff;outline:none;
+    }
+    .card{
+      width:100%; max-width:420px;
+      background:#111827;border-radius:16px;padding:16px;
+      box-shadow:0 10px 30px rgba(0,0,0,0.35);
+    }
+    .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    pre#debug{
+      text-align:left;
+      width:100%;
+      background:#0b1220;
+      border:1px solid #23314f;
+      border-radius:12px;
+      padding:10px;
+      overflow:auto;
+      max-height:220px;
+      font-size:12px;
+      color:#e5e7eb;
+      margin:10px 0 0;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <h2>منچ آنلاین</h2>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+      <div>
+        <div style="font-size:18px; font-weight:700;">ورود / ثبت‌نام</div>
+        <div class="muted" id="authHint">با توکن وارد می‌شویم تا بازی آنلاین هماهنگ باشد.</div>
+      </div>
+      <button id="logoutBtn" style="background:#ef4444;color:#fff;">خروج</button>
+    </div>
+
+    <div style="height:10px;"></div>
+
+    <div class="grid2">
+      <div>
+        <label class="muted" for="username">نام کاربری</label>
+        <input id="username" type="text" placeholder="مثلاً ali" />
+      </div>
+      <div>
+        <label class="muted" for="password">رمز عبور</label>
+        <input id="password" type="password" placeholder="رمز" />
+      </div>
+    </div>
+
+    <div style="height:10px;"></div>
+
+    <div class="row">
+      <button id="loginBtn">ورود</button>
+      <button id="registerBtn" style="background:#22c55e;color:#fff;">ثبت‌نام</button>
+    </div>
+
+    <div style="height:10px;"></div>
+    <div class="muted" style="direction:ltr;">(توکن در LocalStorage ذخیره می‌شود)</div>
+
+    <div style="height:10px;"></div>
+    <div class="muted" style="text-align:center; width:100%;">
+      موجودی شما: <b id="balanceValue">0</b>
+    </div>
+
+    <div id="authResult" class="info" style="margin:0; color:#e2e8f0;"></div>
+    <pre id="debug" aria-label="debug"></pre>
+  </div>
+
+  <div class="panel">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px; width:100%;">
+      <div class="muted">شناسه بازی (matchId) را بده</div>
+
+      <div style="display:flex; gap:10px; width:100%; justify-content:center; flex-wrap:wrap;">
+        <input id="matchIdInput" type="number" min="1" value="1" style="max-width:220px;" />
+
+        <div style="max-width:220px; width:100%;">
+          <label class="muted" for="tierInput" style="display:block; margin-bottom:6px; text-align:center;">Tier</label>
+          <select id="tierInput">
+            <option value="20">20</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+
+        <button id="joinBtn" style="background:#3b82f6;color:#fff; font-weight:700;">ورود به بازی</button>
+      </div>
+
+      <div class="muted" style="direction:ltr; margin-top:2px;">matchId + tier برای تسویه مالی ارسال می‌شود.</div>
+      <div class="muted" id="socketStatus" style="margin-top:6px;"></div>
+      <div class="muted" id="joinStatus"></div>
+    </div>
+  </div>
+
+  <canvas id="board" width="600" height="600"></canvas>
+
+  <div class="panel">
+    <div id="dice" class="dice">🎲</div>
+    <button id="rollBtn">ریختن تاس</button>
+    <button id="resetBtn">شروع مجدد (فقط لوکال)</button>
+    <div class="info">
+      <div id="turnInfo"></div>
+      <div id="msg"></div>
+      <div id="serverMsg" class="muted"></div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+(function(){
+  const msgEl = document.getElementById('msg');
+  const serverMsgEl = document.getElementById('serverMsg');
+  const debugEl = document.getElementById('debug');
+
+  const socketStatusEl = document.getElementById('socketStatus');
+  const joinStatusEl = document.getElementById('joinStatus');
+
+  function setMsg(text){ if(msgEl) msgEl.textContent = text; }
+  function setDebug(obj){
+    try{
+      debugEl.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+    }catch{
+      debugEl.textContent = String(obj);
+    }
+  }
+
+  window.addEventListener('error', (e)=> setMsg('ERROR: ' + (e.message || e.error || e)));
+  window.addEventListener('unhandledrejection', (e)=> setMsg('PROMISE ERROR: ' + ((e.reason && e.reason.message) ? e.reason.message : e.reason)));
+
+  setMsg('صفحه لود شد ✅');
+
+  const SOCKET_URL = (window.SOCKET_URL_OVERRIDE || "").trim() || "http://127.0.0.1:3000";
+  const API_BASE = (window.API_BASE_OVERRIDE || "").trim() || "";
+  function api(path){ return API_BASE ? (API_BASE.replace(/\/$/,'') + path) : path; }
+
+  // --- Token helpers ---
+  function getToken(){ return localStorage.getItem("token") || ""; }
+  function setToken(t){ if(t) localStorage.setItem("token", t); }
+  function clearToken(){ localStorage.removeItem("token"); }
+
+  function getTokenPayload(){
+    try{
+      const token = getToken();
+      if(!token) return null;
+      const parts = token.split(".");
+      if(parts.length < 2) return null;
+      const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      const json = atob(base64);
+      return JSON.parse(json);
+    }catch{ return null; }
+  }
+  function getMyUserIdFromPayload(payload){
+    const candidate = payload?.userId ?? payload?.id ?? payload?.sub ?? payload?.uid ?? null;
+    if(candidate == null) return null;
+    const n = Number(candidate);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  // UI refs
+  const balanceValueEl = document.getElementById("balanceValue");
+  balanceValueEl.textContent = "0";
+
+  const usernameInput = document.getElementById("username");
+  const passwordInput = document.getElementById("password");
+  const authResult = document.getElementById("authResult");
+
+  const loginBtn = document.getElementById("loginBtn");
+  const registerBtn = document.getElementById("registerBtn");
+  const logoutBtn = document.getElementById("logoutBtn");
+
+  function setAuthResult(x){ authResult.textContent = typeof x === "string" ? x : JSON.stringify(x, null, 2); }
+
+  async function updateBalance() {
+    const token = getToken();
+    if (!token) return;
+    const url = api("/api/me/balance");
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { "Authorization": "Bearer " + token },
+      cache: "no-store"
+    });
+    const data = await res.json().catch(()=>null);
+    if (data && data.success && data.coins != null) balanceValueEl.textContent = String(data.coins);
+  }
+
+  let balanceIntervalId = null;
+  const BALANCE_REFRESH_MS = 5000;
+  function startBalanceAutoRefresh(){
+    if (balanceIntervalId) clearInterval(balanceIntervalId);
+    updateBalance().catch(()=>{});
+    balanceIntervalId = setInterval(() => updateBalance().catch(()=>{}), BALANCE_REFRESH_MS);
+  }
+  function stopBalanceAutoRefresh(){
+    if (balanceIntervalId) clearInterval(balanceIntervalId);
+    balanceIntervalId = null;
+  }
+
+  // --- LOGIN ---
+  loginBtn.addEventListener("click", async ()=>{
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value;
+    if(!username || !password){ setAuthResult("نام کاربری و رمز را وارد کن."); return; }
+
+    try{
+      const res = await fetch(api("/api/auth/login"), {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ username, password })
+      });
+
+      const text = await res.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+
+      setDebug({
+        auth: { loginResponse: { status: res.status, ok: res.ok, body: data } }
+      });
+
+      if(!res.ok){
+        setAuthResult(data?.message || `خطا: ${res.status}`);
+        return;
+      }
+      if(!data || (!data.success && !data.token)){
+        setAuthResult(data?.message || "خطا");
+        return;
+      }
+      if(!data.token){
+        setAuthResult(data.message || "توکن دریافت نشد.");
+        return;
+      }
+
+      setToken(data.token);
+      setAuthResult("✅ ورود انجام شد.");
+      serverMsgEl.textContent = "حالا match را وارد کن.";
+
+      startBalanceAutoRefresh();
+      await updateBalance();
+    }catch(e){
+      setAuthResult("خطا در ارتباط با سرور");
+      setDebug({ err: String(e?.message||e), stack: e?.stack });
+    }
+  });
+
+  // --- REGISTER ---
+  registerBtn.addEventListener("click", async ()=>{
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value;
+    if(!username || !password){ setAuthResult("نام کاربری و رمز را وارد کن."); return; }
+
+    try{
+      const res = await fetch(api("/api/auth/register"), {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ username, password })
+      });
+
+      const text = await res.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+
+      setDebug({
+        auth: { registerResponse: { status: res.status, ok: res.ok, body: data } }
+      });
+
+      if(!res.ok){
+        setAuthResult(data?.message || "خطا");
+        return;
+      }
+      setAuthResult("✅ ثبت‌نام انجام شد. حالا ورود بزن.");
+    }catch(e){
+      setAuthResult("خطا در ارتباط با سرور");
+      setDebug({ err: String(e?.message||e), stack: e?.stack });
+    }
+  });
+
+  // --- Game UI / Socket + Board ---
+  const canvas = document.getElementById("board");
+  const ctx = canvas.getContext("2d");
+  const rollBtn = document.getElementById("rollBtn");
+  const resetBtn = document.getElementById("resetBtn");
+  const diceEl = document.getElementById("dice");
+  const turnInfo = document.getElementById("turnInfo");
+
+  const COLORS = {
+    red: "#ff4d4d", green: "#2ecc71", yellow: "#f1c40f", blue: "#3498db",
+    white: "#ffffff", board: "#0a0a0a", grid: "#222222",
+    softRed: "#e74c3c", softGreen: "#27ae60", softYellow: "#f39c12", softBlue: "#2980b9"
+  };
+
+  const layout = {
+    cells: {
+      "P1":{c:7,r:2},"P2":{c:7,r:3},"P3":{c:7,r:4},"P4":{c:7,r:5},
+      "P5":{c:8,r:5},"P6":{c:9,r:5},"P7":{c:10,r:5},"P8":{c:11,r:5},
+      "P9":{c:11,r:6},"P10":{c:10,r:7},"P11":{c:9,r:7},"P12":{c:8,r:7},
+      "P13":{c:7,r:7},"P14":{c:7,r:8},"P15":{c:7,r:9},"P16":{c:7,r:10},
+      "P17":{c:7,r:11},"P18":{c:6,r:11},"P19":{c:5,r:10},"P20":{c:5,r:9},
+      "P21":{c:5,r:8},"P22":{c:5,r:7},"P23":{c:4,r:7},"P24":{c:3,r:7},
+      "P25":{c:2,r:7},"P26":{c:1,r:7},"P27":{c:1,r:6},"P28":{c:2,r:5},
+      "P29":{c:3,r:5},"P30":{c:4,r:5},"P31":{c:5,r:5},"P32":{c:5,r:4},
+      "P33":{c:5,r:3},"P34":{c:5,r:2},"P35":{c:5,r:1},"P36":{c:6,r:1},
+      "S_R":{c:1,r:5},"S_B":{c:7,r:1},"S_G":{c:11,r:7},"S_Y":{c:5,r:11},
+      "F_R1":{c:2,r:6},"F_R2":{c:3,r:6},"F_R3":{c:4,r:6},"F_R4":{c:5,r:6},
+      "F_B1":{c:6,r:2},"F_B2":{c:6,r:3},"F_B3":{c:6,r:4},"F_B4":{c:6,r:5},
+      "F_G1":{c:10,r:6},"F_G2":{c:9,r:6},"F_G3":{c:8,r:6},"F_G4":{c:7,r:6},
+      "F_Y1":{c:6,r:10},"F_Y2":{c:6,r:9},"F_Y3":{c:6,r:8},"F_Y4":{c:6,r:7}
+    },
+    mainPath:["P1","P2","P3","P4","P5","P6","P7","P8","P9","P10","P11","P12","P13","P14",
+              "P15","P16","P17","P18","P19","P20","P21","P22","P23","P24","P25","P26",
+              "P27","P28","P29","P30","P31","P32","P33","P34","P35","P36"],
+    startCells:{red:"S_R",blue:"S_B",green:"S_G",yellow:"S_Y"},
+    finishCells:{
+      red:["F_R1","F_R2","F_R3","F_R4"],
+      blue:["F_B1","F_B2","F_B3","F_B4"],
+      green:["F_G1","F_G2","F_G3","F_G4"],
+      yellow:["F_Y1","F_Y2","F_Y3","F_Y4"]
+    }
+  };
+
+  const YARD_PIECES_POS = {
+    red:    [[1,1], [1,2], [2,1], [2,2]],
+    blue:   [[10,1], [10,2], [11,1], [11,2]],
+    green:  [[10,10], [10,11], [11,10], [11,11]],
+    yellow: [[1,10], [1,11], [2,10], [2,11]]
+  };
+
+  const colorOrder = ["red", "green", "yellow", "blue"];
+  const colorLabel = {red:"قرمز", green:"سبز", yellow:"زرد", blue:"آبی"};
+
+  const SIZE = canvas.width;
+  const GRID_COUNT = 13;
+  const CELL = SIZE / GRID_COUNT;
+
+  let socket = null;
+  let myColor = null;
+  let gameState = null;
+  let currentMatchId = null;
+
+  function getPieceDrawPos(p){
+    if (p.state === "yard") {
+      const [c,r] = YARD_PIECES_POS[p.color][p.index];
+      return { x: c*CELL + CELL/2, y: r*CELL + CELL/2 };
+    }
+    if (p.state === "start") {
+      const T = layout.cells[layout.startCells[p.color]];
+      return { x: T.c*CELL + CELL/2, y: T.r*CELL + CELL/2 };
+    }
+    if (p.state === "path") {
+      const T = layout.cells[layout.mainPath[p.pathIndex]];
+      return { x: T.c*CELL + CELL/2, y: T.r*CELL + CELL/2 };
+    }
+    if (p.state === "home") {
+      const T = layout.cells[layout.finishCells[p.color][p.homeIndex]];
+      return { x: T.c*CELL + CELL/2, y: T.r*CELL + CELL/2 };
+    }
+    return null;
+  }
+
+  function drawYardBackgrounds(){
+    const BG = {
+      red:    { x:0, y:0, c:"#1e0c0c", slot:COLORS.softRed },
+      blue:   { x:9, y:0, c:"#0c181e", slot:COLORS.softBlue },
+      green:  { x:9, y:9, c:"#0c1e12", slot:COLORS.softGreen },
+      yellow: { x:0, y:9, c:"#1e1d0c", slot:COLORS.softYellow }
+    };
+    for (const k in BG){
+      ctx.fillStyle = BG[k].c;
+      ctx.fillRect(BG[k].x*CELL, BG[k].y*CELL, 4*CELL, 4*CELL);
+      ctx.strokeStyle = COLORS.grid;
+      ctx.strokeRect(BG[k].x*CELL, BG[k].y*CELL, 4*CELL, 4*CELL);
+    }
+    for (const color of colorOrder){
+      for (const [c,r] of YARD_PIECES_POS[color]){
+        ctx.fillStyle = BG[color].slot;
+        ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
+        ctx.strokeStyle = COLORS.grid;
+        ctx.strokeRect(c*CELL, r*CELL, CELL, CELL);
+      }
+    }
+  }
+
+  function drawCellByName(name, color, label=""){
+    const t = layout.cells[name];
+    if (!t) return;
+    ctx.fillStyle = color;
+    ctx.fillRect(t.c*CELL, t.r*CELL, CELL, CELL);
+    ctx.strokeStyle = COLORS.grid;
+    ctx.strokeRect(t.c*CELL, t.r*CELL, CELL, CELL);
+    if (label){
+      ctx.fillStyle = "#000";
+      ctx.font = "bold 14px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, t.c*CELL + CELL/2, t.r*CELL + CELL/2);
+    }
+  }
+
+  function drawPieces(){
+    if(!gameState || !gameState.pieces) return;
+    const stack = {};
+    for (const p of gameState.pieces){
+      const key = p.state + (p.state==="path" ? p.pathIndex : (p.state==="home" ? p.color+p.homeIndex : p.id));
+      (stack[key] ||= []).push(p);
+    }
+    for (const key in stack){
+      stack[key].forEach((piece,i)=>{
+        const pos = getPieceDrawPos(piece);
+        if (!pos) return;
+        const offset = i*4;
+
+        ctx.beginPath();
+        ctx.arc(pos.x+offset, pos.y+offset, CELL*0.28, 0, Math.PI*2);
+        ctx.fillStyle = COLORS[piece.color];
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        if (myColor && piece.color === myColor) {
+          ctx.beginPath();
+          ctx.arc(pos.x+offset, pos.y+offset, CELL*0.38, 0, Math.PI*2);
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+      });
+    }
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,SIZE,SIZE);
+    ctx.fillStyle = COLORS.board;
+    ctx.fillRect(0,0,SIZE,SIZE);
+
+    ctx.strokeStyle = COLORS.grid;
+    for (let i=0;i<GRID_COUNT;i++){
+      ctx.beginPath(); ctx.moveTo(i*CELL,0); ctx.lineTo(i*CELL,SIZE); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0,i*CELL); ctx.lineTo(SIZE,i*CELL); ctx.stroke();
+    }
+
+    drawYardBackgrounds();
+    drawCellByName("S_R", COLORS.softRed, "S");
+    drawCellByName("S_B", COLORS.softBlue, "S");
+    drawCellByName("S_G", COLORS.softGreen, "S");
+    drawCellByName("S_Y", COLORS.softYellow, "S");
+
+    for (let i=0;i<layout.mainPath.length;i++){
+      const cellName = layout.mainPath[i];
+      const cell = layout.cells[cellName];
+      ctx.fillStyle = COLORS.white;
+      ctx.fillRect(cell.c*CELL, cell.r*CELL, CELL, CELL);
+      ctx.strokeStyle = COLORS.grid;
+      ctx.strokeRect(cell.c*CELL, cell.r*CELL, CELL, CELL);
+    }
+
+    for (const c of colorOrder){
+      layout.finishCells[c].forEach((cellName,i)=>{
+        const cell = layout.cells[cellName];
+        ctx.fillStyle = COLORS[c];
+        ctx.fillRect(cell.c*CELL, cell.r*CELL, CELL, CELL);
+        ctx.strokeStyle = COLORS.grid;
+        ctx.strokeRect(cell.c*CELL, cell.r*CELL, CELL, CELL);
+
+        ctx.fillStyle="#000";
+        ctx.font="bold 14px sans-serif";
+        ctx.textAlign="center";
+        ctx.textBaseline="middle";
+        ctx.fillText((i+1).toString(), cell.c*CELL + CELL/2, cell.r*CELL + CELL/2);
+      });
+    }
+
+    drawPieces();
+  }
+
+  function updateUI(){
+    if(!gameState){
+      rollBtn.disabled = true;
+      turnInfo.textContent = "";
+      setMsg("بازی هنوز شروع نشده است.");
+      return;
+    }
+
+    if (gameState.winner){
+      rollBtn.disabled = true;
+      turnInfo.innerHTML = `برنده: <span class="tag ${gameState.winner}">${colorLabel[gameState.winner]}</span> 🎉`;
+      setMsg("بازی به پایان رسید.");
+      serverMsgEl.textContent = "";
+      return;
+    }
+
+    // اگر سرور/کلاینت سازگاری داشته باشد:
+    const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+    const turnUserIdFromServer = gameState.currentTurnPlayerId ?? null;
+
+    const payload = getTokenPayload();
+    const myUserId = getMyUserIdFromPayload(payload);
+
+    // fallback اگر currentTurnPlayerId نیامده:
+    let turnUserId = turnUserIdFromServer;
+    if (turnUserId == null && gameState.playerColors && turnColor) {
+      turnUserId = gameState.playerColors[turnColor] ?? null;
+    }
+
+    // تایمر
+    const turnDeadlineAtRaw = gameState.turnDeadlineAt;
+    const turnDeadlineAt = Number(turnDeadlineAtRaw || 0);
+    const hasDeadline = Number.isFinite(turnDeadlineAt) && turnDeadlineAt > 0;
+
+    let remainingText = "";
+    let remainingSeconds = null;
+
+    if (hasDeadline){
+      remainingSeconds = Math.max(0, Math.ceil((turnDeadlineAt - Date.now())/1000));
+      remainingText = ` · زمان: <span class="tag" style="background:#222;color:#fff;">${remainingSeconds}s</span>`;
+    } else {
+      remainingText = ` · زمان: نامشخص`;
+    }
+
+    const whoText = (turnUserId != null)
+      ? `کاربر نوبت: ${turnUserId}${(myUserId != null && String(myUserId) === String(turnUserId)) ? " (شما)" : ""}`
+      : `کاربر نوبت: نامشخص`;
+
+    turnInfo.innerHTML =
+      `نوبت: <span class="tag ${turnColor}">${colorLabel[turnColor]}</span> · ${whoText}${remainingText}`;
+
+    // پیام
+    if (!gameState.rolled){
+      setMsg(myColor === turnColor ? "تاس بیندازید." : "هنوز نوبت شما نیست.");
+    } else {
+      setMsg(myColor === turnColor ? "یک مهره را لمس کنید." : "هنوز نوبت شما نیست.");
+    }
+
+    // دکمه رول
+    const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.rolled && !gameState.winner;
+    rollBtn.disabled = !canRoll;
+
+    if (!hasDeadline) {
+      serverMsgEl.textContent =
+        "⚠️ turnDeadlineAt در state نیامده/صفر است. اگر تایمر کم نمی‌شود احتمال مشکل از سرور یا sync است.";
+    } else {
+      serverMsgEl.textContent = "";
+    }
+  }
+
+  // ✅ تایمر/متن را ثابت به صورت زنده آپدیت کن (مشکل ۳۰ ثانیه کار نمی‌کند را حل می‌کند)
+  setInterval(()=>{
+    if(gameState) {
+      try { updateUI(); } catch {}
+    }
+  }, 250);
+
+  function canRollLocal(){
+    if(!gameState || gameState.winner) return false;
+    const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+    return myColor && myColor === turnColor && !gameState.rolled;
+  }
+
+  function rollDice(){
+    if(!socket) return;
+    if(!canRollLocal()) return;
+
+    rollBtn.disabled = true;
+    diceEl.classList.add("rolling");
+
+    const anim = setInterval(()=>{
+      diceEl.textContent = Math.floor(Math.random()*6)+1;
+    }, 70);
+
+    socket.emit("game:roll", { matchId: currentMatchId }, (resp)=>{
+      clearInterval(anim);
+      diceEl.classList.remove("rolling");
+      if(resp && resp.success){
+        diceEl.textContent = resp.dice;
+        setMsg("تاس زده شد. حالا حرکت کن.");
+      } else {
+        rollBtn.disabled = false;
+        setMsg(resp?.message || "خطا در رول");
+      }
+    });
+  }
+
+  function onBoardClick(e){
+    if(!socket || !gameState || !gameState.rolled || gameState.winner) return;
+
+    const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+    if(myColor !== turnColor) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const scale = canvas.width / rect.width;
+    const x = (e.clientX - rect.left) * scale;
+    const y = (e.clientY - rect.top) * scale;
+
+    const movablePieces = gameState.pieces || [];
+    for (const p of movablePieces){
+      const pos = getPieceDrawPos(p);
+      if(!pos) continue;
+      if (Math.hypot(x-pos.x, y-pos.y) <= CELL*0.6){
+        socket.emit("game:move", { matchId: currentMatchId, pieceId: p.id }, (resp)=>{
+          if(resp && !resp.success) setMsg(resp.message || "حرکت نامعتبر");
+        });
+        return;
+      }
+    }
+  }
+
+  rollBtn.addEventListener("click", rollDice);
+  resetBtn.addEventListener("click", ()=>{
+    diceEl.textContent = "🎲";
+    setMsg("ریست لوکال (کنترل اصلی با سرور است).");
+  });
+  canvas.addEventListener("click", onBoardClick);
+
+  function waitForSocketConnected(sock, timeoutMs=15000){
+    if(!sock) return Promise.reject(new Error("socket is null"));
+    if(sock.connected) return Promise.resolve();
+
+    return new Promise((resolve, reject)=>{
+      const t = setTimeout(()=>{
+        cleanup();
+        reject(new Error("timeout waiting for socket connect"));
+      }, timeoutMs);
+
+      function cleanup(){
+        clearTimeout(t);
+        sock.off("connect", onConnect);
+        sock.off("connect_error", onErr);
+      }
+
+      function onConnect(){ cleanup(); resolve(); }
+      function onErr(err){
+        cleanup();
+        reject(err instanceof Error ? err : new Error(String(err?.message || err)));
+      }
+
+      sock.once("connect", onConnect);
+      sock.once("connect_error", onErr);
+    });
+  }
+
+  function connectSocketOnce(){
+    const token = getToken();
+    if(!token){
+      setMsg("ابتدا ورود کن (توکن ندارد).");
+      socketStatusEl.textContent = "توکن ندارد.";
+      return null;
+    }
+    if(socket && socket.connected) return socket;
+
+    if(socket){
+      try { socket.disconnect(); } catch {}
+      socket = null;
+    }
+
+    socket = io(SOCKET_URL, {
+      transports: ["polling","websocket"],
+      timeout: 10000,
+      auth: { token },
+      reconnection: true,
+      reconnectionAttempts: 10
+    });
+
+    socket.on("connect", async ()=>{
+      socketStatusEl.textContent = "✅ سوکت متصل شد (" + socket.id + ")";
+      serverMsgEl.textContent = "✅ سوکت متصل شد.";
+      await updateBalance().catch(()=>{});
+    });
+
+    socket.on("connect_error", (err)=>{
+      socketStatusEl.textContent = "❌ connect_error: " + (err?.message || err);
+      setDebug({ socketConnectError: err?.message || String(err) });
+    });
+
+    socket.on("disconnect", (reason)=>{
+      socketStatusEl.textContent = "⚠️ disconnect: " + (reason || "");
+    });
+
+    socket.on("balanceChanged", (data) => {
+      const v = data?.newCoins;
+      if (v != null) balanceValueEl.textContent = String(v);
+    });
+
+    socket.on("game:state", async (state)=>{
+      gameState = state;
+
+      const payload = getTokenPayload();
+      const myUserId = getMyUserIdFromPayload(payload);
+
+      // تعیین رنگ خودت
+      if (state && state.playerColors && myUserId != null) {
+        myColor = colorOrder.find(c => state.playerColors[c] === myUserId) || null;
+      } else {
+        myColor = null;
+      }
+
+      console.log("GAME_STATE_RECEIVED", {
+        currentTurn: state?.currentTurn,
+        currentTurnColor: state?.currentTurnColor,
+        currentTurnPlayerId: state?.currentTurnPlayerId,
+        turnDeadlineAt: state?.turnDeadlineAt,
+        rolled: state?.rolled,
+        rolling: state?.rolling,
+        winner: state?.winner || null,
+        playerColors: state?.playerColors,
+        myUserId,
+        myColor
+      });
+
+      setDebug({
+        gameState: {
+          currentTurn: state?.currentTurn,
+          currentTurnColor: state?.currentTurnColor,
+          currentTurnPlayerId: state?.currentTurnPlayerId,
+          turnDeadlineAt: state?.turnDeadlineAt,
+          rolled: state?.rolled,
+          rolling: state?.rolling,
+          winner: state?.winner || null,
+          playerColors: state?.playerColors,
+          my: { myUserId, myColor }
+        }
+      });
+
+      if (state?.winner) {
+        setMsg("بازی تمام شد.");
+} else if (!myColor) {
+        setMsg("رنگ شما مشخص نشد (userId با playerColors همخوانی ندارد).");
+      } else {
+        setMsg("");
+      }
+
+      updateUI();
+      draw();
+    });
+
+    return socket;
+  }
+
+  // Logout
+  logoutBtn.addEventListener("click", ()=>{
+    stopBalanceAutoRefresh();
+    clearToken();
+    balanceValueEl.textContent = "0";
+    setAuthResult("خروج شد. دوباره ورود کن.");
+    serverMsgEl.textContent = "";
+    setMsg("ابتدا ورود کن.");
+
+    gameState = null;
+    myColor = null;
+    currentMatchId = null;
+
+    if (socket) {
+      try { socket.disconnect(); } catch {}
+      socket = null;
+    }
+
+    diceEl.textContent = "🎲";
+    rollBtn.disabled = true;
+    if (turnInfo) turnInfo.textContent = "";
+    if (socketStatusEl) socketStatusEl.textContent = "";
+    if (joinStatusEl) joinStatusEl.textContent = "";
+    draw();
+  });
+
+  // Join
+  const matchIdInput = document.getElementById("matchIdInput");
+  const tierInput = document.getElementById("tierInput");
+  const joinBtn = document.getElementById("joinBtn");
+
+  joinBtn.addEventListener("click", async ()=>{
+    const token = getToken();
+    const matchIdNum = Number(matchIdInput.value);
+    const tier = Number(tierInput.value);
+
+    if(!token){ setAuthResult("ابتدا ورود کن."); return; }
+    if(!Number.isFinite(matchIdNum) || matchIdNum < 1){ setAuthResult("matchId نامعتبر است."); return; }
+    if(!Number.isFinite(tier) || ![20,50,100].includes(tier)){ setAuthResult("tier نامعتبر است."); return; }
+
+    currentMatchId = String(matchIdNum);
+
+    const payload = getTokenPayload();
+    const myUserId = getMyUserIdFromPayload(payload);
+
+    console.log("JOIN_CLICK", {
+      matchId: currentMatchId,
+      tier,
+      myUserId,
+      tokenPrefix:(token||"").slice(0,18),
+      payload
+    });
+
+    setDebug({
+      preJoin: { matchId: currentMatchId, tier, myUserId }
+    });
+
+    const s = connectSocketOnce();
+    if(!s) return;
+
+    joinBtn.disabled = true;
+    setMsg("در حال اتصال به سوکت...");
+    socketStatusEl.textContent = "در حال اتصال...";
+    joinStatusEl.textContent = "منتظر connect...";
+
+    try{
+      await waitForSocketConnected(s, 15000);
+      joinStatusEl.textContent = "✅ connect شد. ارسال room:join ...";
+    }catch(err){
+      joinBtn.disabled = false;
+      socketStatusEl.textContent = "❌ سوکت وصل نشد.";
+      joinStatusEl.textContent = "❌ connect wait failed: " + (err?.message || String(err));
+      setDebug({ connectWaitError: err?.message || String(err) });
+      return;
+    }
+
+    setMsg("در حال ورود به بازی...");
+    serverMsgEl.textContent = "در حال ورود...";
+
+    // ---- ROOM JOIN ----
+    const joinPayload = { roomId: currentMatchId, tier };
+
+    s.emit("room:join", joinPayload, (resp)=>{
+      console.log("JOIN_RESP", { joinPayload, resp });
+
+      setDebug((prev)=>{
+        const base = (prev && typeof prev === "object") ? prev : {};
+        return {
+          ...base,
+          join: { payload: joinPayload, resp }
+        };
+      });
+
+      joinBtn.disabled = false;
+
+      if(resp && resp.success){
+        serverMsgEl.textContent = "✅ وارد اتاق شد: " + currentMatchId + " | tier=" + tier;
+        joinStatusEl.textContent = "✅ join success";
+        setMsg("منتظر state بازی بمانید...");
+      } else {
+        const message = resp?.message || "خطا در join";
+        serverMsgEl.textContent = "❌ ورود به اتاق: " + message;
+        joinStatusEl.textContent = "❌ join failed";
+        setMsg("ورود ناموفق بود.");
+      }
+    });
+  });
+
+  draw();
+  rollBtn.disabled = true;
+
+})();
+</script>
+</body>
+</html>
