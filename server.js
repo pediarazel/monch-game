@@ -88,7 +88,7 @@ app.use(
 | Static
 |--------------------------------------------------------------------------
 */
-const publicDirectory = path.join(__dirname, "public");
+const publicDirectory = path.join(__dirname, "anna");
 app.use(express.static(publicDirectory));
 
 /*
@@ -169,20 +169,11 @@ function authenticateAdminSecret(req, res, next) {
 |--------------------------------------------------------------------------
 */
 app.get("/", (req, res) => {
-  return res.status(200).json({
-    success: true,
-    message: "سرور بازی منچ با موفقیت در حال اجرا است.",
-    server: "online",
-    name: "Iran Ludo Server",
-    version: "4.2.0",
-    endpoints: {
-      health: "/health",
-      authCheck: "/api/auth/check",
-      treasuryReport: "/admin/treasury-report?range=day|week|month",
-      adminCharge: "/admin/charge-coins",
-      userBalance: "/api/me/balance",
-    },
-  });
+  return res.sendFile(path.join(publicDirectory, "index.html"));
+});
+
+app.get("/admin", (req, res) => {
+  return res.sendFile(path.join(publicDirectory, "admin.html"));
 });
 
 app.get("/health", async (req, res) => {
