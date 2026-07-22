@@ -876,19 +876,40 @@ io = new Server(httpServer, {
 
 io.use((socket, next) => {
   try {
+    console.log("[SOCKET USE] entered");
+
     let token = socket.handshake.auth?.token;
 
+    // اگر auth.token نبود، از header Bearer هم امتحان کن
     if (!token) {
       const authorization = socket.handshake.headers?.authorization;
       if (authorization?.startsWith("Bearer ")) token = authorization.slice(7);
     }
 
+    console.log("[SOCKET HANDSHAKE]", {
+      authTokenPresent: !!socket.handshake?.auth?.token,
+      authTokenLen: socket.handshake?.auth?.token?.length,
+      authorizationHeader: socket.handshake?.headers?.authorization,
+    });
+
     if (!token) return next(new Error("توکن Socket.io ارسال نشده است."));
 
     const decoded = verifyToken(token);
     socket.user = decoded;
+
+    console.log("[SOCKET USER SET] ok", {
+      userId: decoded?.userId ?? decoded?.id ?? decoded?.sub,
+      decodedType: typeof decoded,
+      hasUserId:
+        decoded?.userId != null || decoded?.id != null || decoded?.sub != null,
+    });
+
     return next();
   } catch (error) {
+    console.error("[SOCKET AUTH FAIL]", {
+      message: error?.message,
+      name: error?.name,
+    });
     return next(
       new Error(
         error.name === "TokenExpiredError"
@@ -913,7 +934,15 @@ socket.on("room:join", async (payload, callback) => {
     if (!Number.isFinite(tier)) return callback?.({ success: false, message: "tier لازم است." });
     assertValidTier(tier);
 
-    const userId = Number(socket.user.userId);
+if (!socket.user?.userId) {
+  console.log("[JOIN] socket.user missing. handshake:", {
+    auth: socket.handshake?.auth,
+    authorization: socket.handshake?.headers?.authorization,
+  });
+  return callback?.({ success: false, message: "احراز هویت Socket.io انجام نشد (socket.user ندارد)." });
+}
+
+const userId = Number(socket.user.userId);
     if (!Number.isFinite(userId)) return callback?.({ success: false, message: "userId نامعتبر است." });
 
     connectedUsers.set(String(userId), socket.id);
