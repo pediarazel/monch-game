@@ -548,18 +548,37 @@ function broadcastState(match) {
 }
 
 function nextTurn(match) {
-  if (!match.game) return;
-  if (match.game.dice !== 6) match.game.currentTurn = (match.game.currentTurn + 1) % 4;
+  // اگر بازی وجود ندارد یا برنده مشخص شده، نوبت ادامه پیدا نکند.
+  if (!match.game || match.game.winner) {
+    return;
+  }
 
+  // اگر تاس ۶ نباشد، نوبت به بازیکن بعدی می‌رسد.
+  // با تاس ۶، نوبت همان بازیکن باقی می‌ماند.
+  if (match.game.dice !== 6) {
+    match.game.currentTurn =
+      (match.game.currentTurn + 1) % colorOrder.length;
+  }
+
+  // پاک‌سازی اطلاعات حرکت قبلی
   match.game.dice = 0;
   match.game.rolled = false;
   match.game.turnMoved = false;
-  match.game.turnDeadlineAt = Date.now() + TURN_MS;
 
+  // تعیین زمان پایان نوبت جدید
+  match.game.turnDeadlineAt = Date.now() + TURN_MS;
   match.turnDeadlineAt = match.game.turnDeadlineAt;
+
+  // ساخت شناسه جدید برای نوبت
   match.turnId++;
+
+  // ارسال وضعیت جدید برای بازیکنان
   broadcastState(match);
+
+  // فعال‌کردن تایمر برای نوبت جدید
+  startTurnTimeout(match);
 }
+
 
 function startTurnTimeout(match) {
   if (match.pendingTurnTimer) clearTimeout(match.pendingTurnTimer);
@@ -627,34 +646,68 @@ app.post("/admin/update-balance-by-username", authenticateAdminSecret, async (re
   }
 });
 
-app.get("/admin/user-balance/:username", async (req, res) => {
-  try {
-    // 🔒 جلوگیری از 304 و کش
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-    res.setHeader("Pragma", "no-cache");
-    res.setHeader("Expires", "0");
-    res.setHeader("Surrogate-Control", "no-store");
+app.get(
+  "/admin/user-balance/:username",
+  authenticateAdminSecret,
+  async (req, res) => {
+    try {
+      res.setHeader(
+        "Cache-Control",
+        "no-store, no-cache, must-revalidate, proxy-revalidate"
+      );
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      res.setHeader("Surrogate-Control", "no-store");
 
-    // اگر ETag تولید می‌کنی، اینجا بهتره خاموش کنی
-    // (اگر express compression/etag پیش‌فرض داره، این کمک می‌کنه)
-    res.setHeader("ETag", "");
+      const username = String(
+        req.params?.username || ""
+      ).trim();
 
-    const { username } = req.params;
-    const adminSecret = req.query.adminSecret;
+      if (!username) {
+        return safeJsonError(
+          res,
+          400,
+          "نام کاربری وارد نشده است."
+        );
+      }
 
-    // ... بقیه منطق احراز/دریافت موجودی خودت ...
+      const user = await prisma.user.findUnique({
+        where: { username },
+        select: {
+          id: true,
+          username: true,
+          coins: true,
+          role: true,
+        },
+      });
 
-    // مثال:
-    // const user = await db.findUserByUsername(username)
-    // res.json({ success:true, username, userId:user.id, coins:user.coins });
+      if (!user) {
+        return safeJsonError(
+          res,
+          404,
+          "کاربر پیدا نشد."
+        );
+      }
 
-    // نتیجه واقعی پروژه‌ات را مثل قبل برگردان
-    // res.json(...);
+      return res.status(200).json({
+        success: true,
+        userId: user.id,
+        username: user.username,
+        coins: user.coins,
+        role: user.role,
+      });
+    } catch (error) {
+      console.error("[ADMIN BALANCE ERROR]", error);
 
-  } catch (err) {
-    res.status(500).json({ success: false, message: "server error" });
+      return safeJsonError(
+        res,
+        500,
+        error?.message || "خطای داخلی سرور"
+      );
+    }
   }
-});
+);
+
 
 /*
 |--------------------------------------------------------------------------
@@ -868,64 +921,228 @@ app.get("/admin/treasury-report", authenticateAdminSecret, async (req, res) => {
 | Socket.IO
 |--------------------------------------------------------------------------
 */
+/*
+|--------------------------------------------------------------------------
+| Socket.IO
+|--------------------------------------------------------------------------
+*/
+
+// لاگ درخواست‌های Engine.IO/Socket.IO
+// این listener باید بیرون از تنظیمات new Server باشد.
+httpServer.on("request", (req) => {
+  if (String(req.url || "").includes("/socket.io/")) {
+    console.log("[HTTP SOCKET.IO REQUEST]", {
+      method: req.method,
+      url: req.url,
+      origin: req.headers?.origin || null,
+      hasAuthorizationHeader: Boolean(req.headers?.authorization),
+    });
+  }
+});
+
 io = new Server(httpServer, {
   cors: {
     origin: allowedOrigins === "*" ? "*" : allowedOrigins,
     methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     credentials: allowedOrigins !== "*",
   },
-  transports: ["websocket", "polling"],
+
+  // ابتدا polling و سپس ارتقا به websocket نیز پشتیبانی می‌شود.
+  transports: ["polling", "websocket"],
+
+  allowEIO3: false,
+  pingTimeout: 20000,
+  pingInterval: 25000,
 });
+
+/**
+ * پاک‌سازی توکن قبل از jwt.verify
+ * پشتیبانی از:
+ * - JWT خالص
+ * - Bearer JWT
+ * - توکن ذخیره‌شده با کوتیشن اضافی
+ */
+function normalizeSocketToken(value) {
+  if (value === undefined || value === null) return "";
+
+  let token = String(value).trim();
+
+  if (
+    (token.startsWith('"') && token.endsWith('"')) ||
+    (token.startsWith("'") && token.endsWith("'"))
+  ) {
+    try {
+      token = JSON.parse(token);
+    } catch {
+      token = token.slice(1, -1);
+    }
+  }
+
+  token = String(token || "").trim();
+  token = token.replace(/^Bearer\s+/i, "").trim();
+
+  return token;
+}
 
 io.use((socket, next) => {
   try {
-    console.log("[SOCKET USE] entered");
+    console.log("[SOCKET AUTH] middleware entered", {
+      socketId: socket.id,
+      transport: socket.conn?.transport?.name || null,
+      origin: socket.handshake?.headers?.origin || null,
+    });
 
-    let token = socket.handshake.auth?.token;
+    // روش اصلی: handshake.auth.token
+    let token = normalizeSocketToken(
+      socket.handshake?.auth?.token
+    );
 
-    // اگر auth.token نبود، از header Bearer هم امتحان کن
+    // روش جایگزین: Authorization: Bearer ...
     if (!token) {
-      const authorization = socket.handshake.headers?.authorization;
-      if (authorization?.startsWith("Bearer ")) token = authorization.slice(7);
+      token = normalizeSocketToken(
+        socket.handshake?.headers?.authorization
+      );
     }
 
-    console.log("[SOCKET HANDSHAKE]", {
-      authTokenPresent: !!socket.handshake?.auth?.token,
-      authTokenLen: socket.handshake?.auth?.token?.length,
-      authorizationHeader: socket.handshake?.headers?.authorization,
+    // فقط برای سازگاری موقت با کلاینت‌های قدیمی
+    if (!token) {
+      token = normalizeSocketToken(
+        socket.handshake?.query?.token
+      );
+    }
+
+    const tokenParts = token ? token.split(".") : [];
+
+    console.log("[SOCKET AUTH] token received", {
+      authTokenPresent: Boolean(socket.handshake?.auth?.token),
+      headerTokenPresent: Boolean(
+        socket.handshake?.headers?.authorization
+      ),
+      queryTokenPresent: Boolean(
+        socket.handshake?.query?.token
+      ),
+      normalizedTokenLength: token.length,
+      tokenPartsCount: tokenParts.length,
+      jwtSecretLength: JWT_SECRET.length,
     });
-    console.log("JWT_SECRET len in socket verify:", (process.env.JWT_SECRET||"").length);
 
-    if (!token) return next(new Error("توکن Socket.io ارسال نشده است."));
+    if (!token) {
+      const error = new Error(
+        "توکن Socket.io ارسال نشده است."
+      );
 
-    const decoded = verifyToken(token);
-    socket.user = decoded;
+      error.data = {
+        code: "SOCKET_TOKEN_MISSING",
+      };
 
-    console.log("[SOCKET USER SET] ok", {
-      userId: decoded?.userId ?? decoded?.id ?? decoded?.sub,
-      decodedType: typeof decoded,
-      hasUserId:
-        decoded?.userId != null || decoded?.id != null || decoded?.sub != null,
+      return next(error);
+    }
+
+    if (tokenParts.length !== 3) {
+      console.error("[SOCKET AUTH] invalid token format", {
+        tokenLength: token.length,
+        tokenPartsCount: tokenParts.length,
+      });
+
+      const error = new Error(
+        "فرمت توکن Socket.io صحیح نیست."
+      );
+
+      error.data = {
+        code: "SOCKET_TOKEN_FORMAT_INVALID",
+      };
+
+      return next(error);
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    const userId = Number(
+      decoded?.userId ?? decoded?.id ?? decoded?.sub
+    );
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      console.error("[SOCKET AUTH] userId missing", {
+        decodedKeys:
+          decoded && typeof decoded === "object"
+            ? Object.keys(decoded)
+            : [],
+      });
+
+      const error = new Error(
+        "شناسه کاربر داخل توکن معتبر نیست."
+      );
+
+      error.data = {
+        code: "SOCKET_USER_ID_INVALID",
+      };
+
+      return next(error);
+    }
+
+    socket.user = {
+      ...decoded,
+      userId,
+    };
+
+    console.log("[SOCKET AUTH] success", {
+      socketId: socket.id,
+      userId,
+      username: decoded?.username || null,
     });
 
     return next();
   } catch (error) {
-    console.error("[SOCKET AUTH FAIL]", {
-      message: error?.message,
-      name: error?.name,
+    console.error("[SOCKET AUTH] verification failed", {
+      socketId: socket.id,
+      name: error?.name || null,
+      message: error?.message || String(error),
+      jwtSecretLength: JWT_SECRET.length,
     });
-    return next(
-      new Error(
-        error.name === "TokenExpiredError"
-          ? "توکن Socket.io منقضی شده است."
-          : "توکن Socket.io نامعتبر است."
-      )
-    );
+
+    let publicMessage = "توکن Socket.io نامعتبر است.";
+    let code = "SOCKET_TOKEN_INVALID";
+
+    if (error?.name === "TokenExpiredError") {
+      publicMessage = "توکن Socket.io منقضی شده است.";
+      code = "SOCKET_TOKEN_EXPIRED";
+    } else if (error?.name === "NotBeforeError") {
+      publicMessage = "توکن Socket.io هنوز فعال نشده است.";
+      code = "SOCKET_TOKEN_NOT_ACTIVE";
+    }
+
+    const socketError = new Error(publicMessage);
+
+    socketError.data = {
+      code,
+      jwtErrorName: error?.name || null,
+    };
+
+    return next(socketError);
   }
 });
 
+
 io.on("connection", (socket) => {
-socket.on("room:join", async (payload, callback) => {
+  const userId = Number(socket.user?.userId);
+
+  console.log("[SOCKET CONNECTION]", {
+    socketId: socket.id,
+    userId,
+    username: socket.user?.username || null,
+    transport: socket.conn?.transport?.name || null,
+    authTokenPresent: Boolean(
+      socket.handshake?.auth?.token
+    ),
+  });
+
+  // کاربر از همان لحظه اتصال ثبت شود؛
+  // نه فقط بعد از room:join
+  connectedUsers.set(String(userId), socket.id);
+
+  socket.on("room:join", async (payload, callback) => {
+
   try {
     const matchId =
       typeof payload?.roomId === "string" && payload.roomId.trim()
@@ -949,32 +1166,54 @@ if (!socket.user?.userId) {
 const userId = Number(socket.user.userId);
     if (!Number.isFinite(userId)) return callback?.({ success: false, message: "userId نامعتبر است." });
 
-    connectedUsers.set(String(userId), socket.id);
+connectedUsers.set(String(userId), socket.id);
 
-    if (!matches.has(matchId)) matches.set(matchId, createMatch(matchId));
-    const match = matches.get(matchId);
+if (!matches.has(matchId)) {
+  matches.set(matchId, createMatch(matchId));
+}
 
-    socket.join(`match:${matchId}`);
+const match = matches.get(matchId);
 
-    // assign color if not assigned yet
-    const alreadyAssigned = Object.values(match.playerColors).includes(userId);
-    if (!alreadyAssigned) {
-      for (const c of colorOrder) {
-        if (!match.playerColors[c]) {
-          match.playerColors[c] = userId;
-          break;
-        }
-      }
-    }
+// اول tier بررسی شود؛ سپس کاربر وارد Room شود.
+if (match.tier === null) {
+  match.tier = tier;
+} else if (match.tier !== tier) {
+  return callback?.({
+    success: false,
+    message:
+      `این بازی با ورودی ${match.tier} سکه ساخته شده است.`,
+  });
+}
 
-    match.players.set(userId, socket.id);
+// اگر بازی قبلاً شروع شده، بازیکن جدید پذیرفته نشود.
+const alreadyAssigned =
+  Object.values(match.playerColors).includes(userId);
 
-    // set tier once
-    if (match.tier === null) {
-      match.tier = tier;
-    } else if (match.tier !== tier) {
-      return callback?.({ success: false, message: `این match با tier=${match.tier} ست شده است.` });
-    }
+if (match.status !== "waiting" && !alreadyAssigned) {
+  return callback?.({
+    success: false,
+    message: "این بازی قبلاً شروع شده است.",
+  });
+}
+
+if (!alreadyAssigned) {
+  const emptyColor = colorOrder.find(
+    (color) => match.playerColors[color] === null
+  );
+
+  if (!emptyColor) {
+    return callback?.({
+      success: false,
+      message: "ظرفیت بازی کامل شده است.",
+    });
+  }
+
+  match.playerColors[emptyColor] = userId;
+}
+
+await socket.join(`match:${matchId}`);
+match.players.set(userId, socket.id);
+
 
     const filledColors = colorOrder.filter((c) => match.playerColors[c] !== null).length;
 
@@ -1092,83 +1331,171 @@ socket.on("game:roll", async (payload, callback) => {
     }
   });
 
-  socket.on("game:move", async (payload, callback) => {
-    try {
-      const matchId = payload?.matchId ?? payload?.roomId;
-      const pieceId = payload?.pieceId;
+socket.on("game:move", async (payload, callback) => {
+  try {
+    const matchId = payload?.matchId ?? payload?.roomId;
+    const pieceId = payload?.pieceId;
 
-      if (!matchId || !matches.has(String(matchId))) {
-        return callback?.({ success: false, message: "match پیدا نشد." });
-      }
-      if (pieceId === undefined || pieceId === null) {
-        return callback?.({ success: false, message: "pieceId لازم است." });
-      }
+    if (!matchId || !matches.has(String(matchId))) {
+      return callback?.({
+        success: false,
+        message: "match پیدا نشد.",
+      });
+    }
 
-      const match = matches.get(String(matchId));
+    if (pieceId === undefined || pieceId === null) {
+      return callback?.({
+        success: false,
+        message: "pieceId لازم است.",
+      });
+    }
 
-      if (!match.game || match.status !== "playing") {
-        return callback?.({ success: false, message: "بازی هنوز شروع نشده است." });
-      }
+    const match = matches.get(String(matchId));
 
-      if (match.game.winner) {
-        return callback?.({ success: false, message: "بازی تمام شده است." });
-      }
+    if (!match.game || match.status !== "playing") {
+      return callback?.({
+        success: false,
+        message: "بازی هنوز شروع نشده است.",
+      });
+    }
 
-      if (!match.game.rolled) {
-        return callback?.({ success: false, message: "اول رول کنید." });
-      }
+    if (match.game.winner) {
+      return callback?.({
+        success: false,
+        message: "بازی تمام شده است.",
+      });
+    }
 
-      if (Date.now() > match.game.turnDeadlineAt) {
-        return callback?.({ success: false, message: "زمان نوبت گذشته." });
-      }
+    if (!match.game.rolled) {
+      return callback?.({
+        success: false,
+        message: "اول رول کنید.",
+      });
+    }
 
-      const userId = Number(socket.user.userId);
-      const turnColor = getCurrentColor(match);
+    if (Date.now() > match.game.turnDeadlineAt) {
+      return callback?.({
+        success: false,
+        message: "زمان نوبت گذشته.",
+      });
+    }
 
-      if (match.playerColors[turnColor] !== userId) {
-        return callback?.({ success: false, message: "نوبت شما نیست." });
-      }
+    const userId = Number(socket.user.userId);
+    const turnColor = getCurrentColor(match);
 
-      if (match.game.turnMoved) {
-        return callback?.({ success: false, message: "در این نوبت فقط یک حرکت مجاز است." });
-      }
+    if (match.playerColors[turnColor] !== userId) {
+      return callback?.({
+        success: false,
+        message: "نوبت شما نیست.",
+      });
+    }
 
-      const piece = match.game.pieces.find((p) => p.id === pieceId);
-      if (!piece) return callback?.({ success: false, message: "مهره پیدا نشد." });
+    if (match.game.turnMoved) {
+      return callback?.({
+        success: false,
+        message: "در این نوبت فقط یک حرکت مجاز است.",
+      });
+    }
 
-      const movable = canPieceMove(match.game, piece);
-      if (!movable) return callback?.({ success: false, message: "حرکت مجاز نیست." });
+    const piece = match.game.pieces.find(
+      (currentPiece) => currentPiece.id === pieceId
+    );
 
-      const ok = movePiece(match.game, piece);
-      if (!ok) return callback?.({ success: false, message: "حرکت انجام نشد." });
+    if (!piece) {
+      return callback?.({
+        success: false,
+        message: "مهره پیدا نشد.",
+      });
+    }
 
-      match.game.turnMoved = true;
+    const movable = canPieceMove(match.game, piece);
 
-      const winnerColor = checkWinner(match.game);
-      if (winnerColor) {
-        match.game.winner = winnerColor;
-        match.status = "finished";
-        match.turnDeadlineAt = Date.now();
+    if (!movable) {
+      return callback?.({
+        success: false,
+        message: "حرکت مجاز نیست.",
+      });
+    }
 
-        broadcastState(match);
+    const moved = movePiece(match.game, piece);
 
-        try {
-          await settleCoinsForMatch(match);
-        } catch (e) {
-          console.error("settleCoinsForMatch failed:", e);
-        }
+    if (!moved) {
+      return callback?.({
+        success: false,
+        message: "حرکت انجام نشد.",
+      });
+    }
 
-        return callback?.({ success: true, winnerColor });
+    match.game.turnMoved = true;
+
+    /*
+    |--------------------------------------------------------------------------
+    | بررسی برنده
+    |--------------------------------------------------------------------------
+    */
+    const winnerColor = checkWinner(match.game);
+
+    if (winnerColor) {
+      match.game.winner = winnerColor;
+      match.status = "finished";
+      match.turnDeadlineAt = Date.now();
+      match.game.turnDeadlineAt = Date.now();
+
+      // تایمر باقی‌مانده بازی پاک شود.
+      if (match.pendingTurnTimer) {
+        clearTimeout(match.pendingTurnTimer);
+        match.pendingTurnTimer = null;
       }
 
       broadcastState(match);
-      startTurnTimeout(match);
 
-      return callback?.({ success: true, moved: true });
-    } catch (e) {
-      return callback?.({ success: false, message: e.message || "خطای move" });
+      try {
+        await settleCoinsForMatch(match);
+      } catch (error) {
+        console.error(
+          "settleCoinsForMatch failed:",
+          error
+        );
+      }
+
+      return callback?.({
+        success: true,
+        moved: true,
+        winnerColor,
+      });
     }
-  });
+
+    /*
+    |--------------------------------------------------------------------------
+    | پایان حرکت عادی
+    |--------------------------------------------------------------------------
+    */
+
+    // مقدار تاس قبل از nextTurn ذخیره می‌شود؛
+    // زیرا nextTurn مقدار تاس را صفر می‌کند.
+    const rolledDice = match.game.dice;
+
+    callback?.({
+      success: true,
+      moved: true,
+      dice: rolledDice,
+    });
+
+    // اگر تاس ۶ باشد نوبت همان بازیکن باقی می‌ماند؛
+    // در غیر این صورت نوبت به بازیکن بعدی می‌رسد.
+    // این تابع خودش broadcastState و startTurnTimeout را اجرا می‌کند.
+    nextTurn(match);
+    return;
+  } catch (error) {
+    console.error("[GAME MOVE ERROR]", error);
+
+    return callback?.({
+      success: false,
+      message: error?.message || "خطای move",
+    });
+  }
+});
+
 
   socket.on("disconnect", () => {
     try {
