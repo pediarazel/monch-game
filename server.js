@@ -1277,13 +1277,27 @@ if (filledColors === 4 && match.status !== "playing") {
       }
     }
 
-    return callback?.({
+    callback?.({
       success: true,
-      message: filledColors === 0 ? "منتظر بازیکنان" : "به صف اضافه شد.",
+      message:
+        match.status === "playing"
+          ? "دوباره به بازی متصل شدید."
+          : "به صف اضافه شد.",
       matchId,
       tier: match.tier,
       filledColors,
+      status: match.status,
+      playerColors: match.playerColors,
     });
+
+    // اگر بازی قبلاً شروع شده باشد، بازیکن متصل‌شده ممکن است
+    // Broadcast قبلی را دریافت نکرده باشد؛ پس State فعلی ارسال می‌شود.
+    if (match.status === "playing" && match.game) {
+      broadcastState(match);
+    }
+
+    return;
+
   } catch (e) {
     console.error("JOIN ERROR:", e);
     return callback?.({ success: false, message: e.message || "خطای join" });
