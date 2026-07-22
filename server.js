@@ -1,6 +1,9 @@
 "use strict";
 
-require("dotenv").config();
+require("dotenv").config({ path: require("path").join(__dirname, ".env") });
+
+console.log("JWT_SECRET len:", (process.env.JWT_SECRET||"").length);
+console.log("ADMIN_SECRET present:", !!process.env.ADMIN_SECRET);
 
 const http = require("http");
 const path = require("path");
@@ -891,6 +894,7 @@ io.use((socket, next) => {
       authTokenLen: socket.handshake?.auth?.token?.length,
       authorizationHeader: socket.handshake?.headers?.authorization,
     });
+    console.log("JWT_SECRET len in socket verify:", (process.env.JWT_SECRET||"").length);
 
     if (!token) return next(new Error("توکن Socket.io ارسال نشده است."));
 

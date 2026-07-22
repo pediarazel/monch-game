@@ -180,39 +180,136 @@
   const joinStatusEl = document.getElementById('joinStatus');
 
   function setMsg(text){ if(msgEl) msgEl.textContent = text; }
-  function setDebug(obj){
-    try{
-      debugEl.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
-    }catch{
-      debugEl.textContent = String(obj);
+let lastDebugData = {};
+
+function setDebug(value) {
+  try {
+    let nextValue = value;
+
+    if (typeof value === "function") {
+      nextValue = value(lastDebugData);
     }
+
+    if (
+      nextValue &&
+      typeof nextValue === "object" &&
+      !Array.isArray(nextValue)
+    ) {
+      lastDebugData = nextValue;
+    } else {
+      lastDebugData = nextValue;
+    }
+
+    debugEl.textContent =
+      typeof nextValue === "string"
+        ? nextValue
+        : JSON.stringify(nextValue, null, 2);
+  } catch (error) {
+    debugEl.textContent = String(
+      error?.message || value || "Debug error"
+    );
   }
+}
+
 
   window.addEventListener('error', (e)=> setMsg('ERROR: ' + (e.message || e.error || e)));
   window.addEventListener('unhandledrejection', (e)=> setMsg('PROMISE ERROR: ' + ((e.reason && e.reason.message) ? e.reason.message : e.reason)));
 
   setMsg('صفحه لود شد ✅');
 
-  const SOCKET_URL = (window.SOCKET_URL_OVERRIDE || "").trim() || "http://127.0.0.1:3000";
+const SOCKET_URL = window.location.origin;
   const API_BASE = (window.API_BASE_OVERRIDE || "").trim() || "";
   function api(path){ return API_BASE ? (API_BASE.replace(/\/$/,'') + path) : path; }
 
-  // --- Token helpers ---
-  function getToken(){ return localStorage.getItem("token") || ""; }
-  function setToken(t){ if(t) localStorage.setItem("token", t); }
-  function clearToken(){ localStorage.removeItem("token"); }
+// --- Token helpers ---
+const TOKEN_STORAGE_KEY = "token";
 
-  function getTokenPayload(){
-    try{
-      const token = getToken();
-      if(!token) return null;
-      const parts = token.split(".");
-      if(parts.length < 2) return null;
-      const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-      const json = atob(base64);
-      return JSON.parse(json);
-    }catch{ return null; }
+function normalizeToken(value) {
+  if (value == null) return "";
+
+  let token = String(value).trim();
+
+  // اگر توکن قبلاً با JSON.stringify ذخیره شده باشد
+  if (
+    (token.startsWith('"') && token.endsWith('"')) ||
+    (token.startsWith("'") && token.endsWith("'"))
+  ) {
+    try {
+      token = JSON.parse(token);
+    } catch {
+      token = token.slice(1, -1);
+    }
   }
+
+  token = String(token || "").trim();
+
+  // در LocalStorage فقط خود JWT ذخیره شود
+  token = token.replace(/^Bearer\s+/i, "").trim();
+
+  return token;
+}
+
+function getToken() {
+  const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+  const token = normalizeToken(storedToken);
+
+  // اصلاح خودکار توکن‌های قدیمی دارای کوتیشن یا Bearer
+  if (token && token !== storedToken) {
+    localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  }
+
+  return token;
+}
+
+function setToken(value) {
+  const token = normalizeToken(value);
+
+  if (!token) {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    return "";
+  }
+
+  localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  return token;
+}
+
+function clearToken() {
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
+
+function getTokenPayload() {
+  try {
+    const token = getToken();
+    if (!token) return null;
+
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+
+    let base64 = parts[1]
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
+
+    while (base64.length % 4 !== 0) {
+      base64 += "=";
+    }
+
+    const binary = atob(base64);
+
+    const bytes = Uint8Array.from(binary, char => {
+      return char.charCodeAt(0);
+    });
+
+    const json = new TextDecoder("utf-8").decode(bytes);
+
+    return JSON.parse(json);
+  } catch (error) {
+    console.error("JWT payload decode error:", error);
+    return null;
+  }
+}
+
+
   function getMyUserIdFromPayload(payload){
     const candidate = payload?.userId ?? payload?.id ?? payload?.sub ?? payload?.uid ?? null;
     if(candidate == null) return null;
@@ -276,9 +373,7 @@
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
 
-      setDebug({
-        auth: { loginResponse: { status: res.status, ok: res.ok, body: data } }
-      });
+      setDebug({ auth: { loginResponse: { status: res.status, ok: res.ok, body: data } } });
 
       if(!res.ok){
         setAuthResult(data?.message || `خطا: ${res.status}`);
@@ -293,12 +388,32 @@
         return;
       }
 
-      setToken(data.token);
-      setAuthResult("✅ ورود انجام شد.");
-      serverMsgEl.textContent = "حالا match را وارد کن.";
+const savedToken = setToken(data.token);
 
-      startBalanceAutoRefresh();
-      await updateBalance();
+if (!savedToken) {
+  setAuthResult("توکن دریافتی از سرور نامعتبر یا خالی است.");
+  return;
+}
+
+// هر اتصال قدیمی باید حذف شود تا توکن جدید استفاده شود
+if (socket) {
+  try {
+    socket.removeAllListeners();
+    socket.disconnect();
+  } catch (error) {
+    console.warn("Old socket disconnect error:", error);
+  }
+
+  socket = null;
+}
+
+setAuthResult("✅ ورود انجام شد.");
+serverMsgEl.textContent = "حالا شناسه بازی را وارد کن.";
+socketStatusEl.textContent = "آماده اتصال با توکن جدید.";
+
+startBalanceAutoRefresh();
+await updateBalance();
+
     }catch(e){
       setAuthResult("خطا در ارتباط با سرور");
       setDebug({ err: String(e?.message||e), stack: e?.stack });
@@ -322,9 +437,7 @@
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
 
-      setDebug({
-        auth: { registerResponse: { status: res.status, ok: res.ok, body: data } }
-      });
+      setDebug({ auth: { registerResponse: { status: res.status, ok: res.ok, body: data } } });
 
       if(!res.ok){
         setAuthResult(data?.message || "خطا");
@@ -368,9 +481,11 @@
       "F_G1":{c:10,r:6},"F_G2":{c:9,r:6},"F_G3":{c:8,r:6},"F_G4":{c:7,r:6},
       "F_Y1":{c:6,r:10},"F_Y2":{c:6,r:9},"F_Y3":{c:6,r:8},"F_Y4":{c:6,r:7}
     },
-    mainPath:["P1","P2","P3","P4","P5","P6","P7","P8","P9","P10","P11","P12","P13","P14",
-              "P15","P16","P17","P18","P19","P20","P21","P22","P23","P24","P25","P26",
-              "P27","P28","P29","P30","P31","P32","P33","P34","P35","P36"],
+    mainPath:[
+      "P1","P2","P3","P4","P5","P6","P7","P8","P9","P10","P11","P12","P13","P14",
+      "P15","P16","P17","P18","P19","P20","P21","P22","P23","P24","P25","P26",
+      "P27","P28","P29","P30","P31","P32","P33","P34","P35","P36"
+    ],
     startCells:{red:"S_R",blue:"S_B",green:"S_G",yellow:"S_Y"},
     finishCells:{
       red:["F_R1","F_R2","F_R3","F_R4"],
@@ -551,29 +666,24 @@
       return;
     }
 
-    // اگر سرور/کلاینت سازگاری داشته باشد:
     const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
     const turnUserIdFromServer = gameState.currentTurnPlayerId ?? null;
 
     const payload = getTokenPayload();
     const myUserId = getMyUserIdFromPayload(payload);
 
-    // fallback اگر currentTurnPlayerId نیامده:
     let turnUserId = turnUserIdFromServer;
     if (turnUserId == null && gameState.playerColors && turnColor) {
       turnUserId = gameState.playerColors[turnColor] ?? null;
     }
 
-    // تایمر
     const turnDeadlineAtRaw = gameState.turnDeadlineAt;
     const turnDeadlineAt = Number(turnDeadlineAtRaw || 0);
     const hasDeadline = Number.isFinite(turnDeadlineAt) && turnDeadlineAt > 0;
 
     let remainingText = "";
-    let remainingSeconds = null;
-
     if (hasDeadline){
-      remainingSeconds = Math.max(0, Math.ceil((turnDeadlineAt - Date.now())/1000));
+      const remainingSeconds = Math.max(0, Math.ceil((turnDeadlineAt - Date.now())/1000));
       remainingText = ` · زمان: <span class="tag" style="background:#222;color:#fff;">${remainingSeconds}s</span>`;
     } else {
       remainingText = ` · زمان: نامشخص`;
@@ -586,26 +696,19 @@
     turnInfo.innerHTML =
       `نوبت: <span class="tag ${turnColor}">${colorLabel[turnColor]}</span> · ${whoText}${remainingText}`;
 
-    // پیام
     if (!gameState.rolled){
       setMsg(myColor === turnColor ? "تاس بیندازید." : "هنوز نوبت شما نیست.");
     } else {
       setMsg(myColor === turnColor ? "یک مهره را لمس کنید." : "هنوز نوبت شما نیست.");
     }
 
-    // دکمه رول
     const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.rolled && !gameState.winner;
     rollBtn.disabled = !canRoll;
 
-    if (!hasDeadline) {
-      serverMsgEl.textContent =
-        "⚠️ turnDeadlineAt در state نیامده/صفر است. اگر تایمر کم نمی‌شود احتمال مشکل از سرور یا sync است.";
-    } else {
-      serverMsgEl.textContent = "";
-    }
+    serverMsgEl.textContent = hasDeadline ? "" : "⚠️ turnDeadlineAt در state نیامده/صفر است.";
   }
 
-  // ✅ تایمر/متن را ثابت به صورت زنده آپدیت کن (مشکل ۳۰ ثانیه کار نمی‌کند را حل می‌کند)
+  // ✅ آپدیت دوره‌ای UI
   setInterval(()=>{
     if(gameState) {
       try { updateUI(); } catch {}
@@ -678,7 +781,11 @@
     if(sock.connected) return Promise.resolve();
 
     return new Promise((resolve, reject)=>{
+      let settled = false;
+
       const t = setTimeout(()=>{
+        if(settled) return;
+        settled = true;
         cleanup();
         reject(new Error("timeout waiting for socket connect"));
       }, timeoutMs);
@@ -689,8 +796,16 @@
         sock.off("connect_error", onErr);
       }
 
-      function onConnect(){ cleanup(); resolve(); }
+      function onConnect(){
+        if(settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      }
+
       function onErr(err){
+        if(settled) return;
+        settled = true;
         cleanup();
         reject(err instanceof Error ? err : new Error(String(err?.message || err)));
       }
@@ -700,62 +815,169 @@
     });
   }
 
-  function connectSocketOnce(){
-    const token = getToken();
-    if(!token){
-      setMsg("ابتدا ورود کن (توکن ندارد).");
-      socketStatusEl.textContent = "توکن ندارد.";
-      return null;
-    }
-    if(socket && socket.connected) return socket;
+  // ✅ این تابع را یکپارچه و با براکت‌های سالم می‌دهم تا SyntaxError نیاید
+function connectSocketOnce() {
+  const token = getToken();
 
-    if(socket){
-      try { socket.disconnect(); } catch {}
-      socket = null;
-    }
+  if (!token) {
+    setMsg("ابتدا وارد حساب کاربری شو.");
+    socketStatusEl.textContent = "❌ توکن ورود وجود ندارد.";
+    return null;
+  }
 
-    socket = io(SOCKET_URL, {
-      transports: ["polling","websocket"],
-      timeout: 10000,
-      auth: { token },
-      reconnection: true,
-      reconnectionAttempts: 10
-    });
+  const tokenParts = token.split(".");
 
-    socket.on("connect", async ()=>{
-      socketStatusEl.textContent = "✅ سوکت متصل شد (" + socket.id + ")";
-      serverMsgEl.textContent = "✅ سوکت متصل شد.";
-      await updateBalance().catch(()=>{});
-    });
-
-    socket.on("connect_error", (err)=>{
-      socketStatusEl.textContent = "❌ connect_error: " + (err?.message || err);
-      setDebug({ socketConnectError: err?.message || String(err) });
-    });
-
-    socket.on("disconnect", (reason)=>{
-      socketStatusEl.textContent = "⚠️ disconnect: " + (reason || "");
-    });
-
-    socket.on("balanceChanged", (data) => {
-      const v = data?.newCoins;
-      if (v != null) balanceValueEl.textContent = String(v);
-    });
-
-    socket.on("game:state", async (state)=>{
-      gameState = state;
-
-      const payload = getTokenPayload();
-      const myUserId = getMyUserIdFromPayload(payload);
-
-      // تعیین رنگ خودت
-      if (state && state.playerColors && myUserId != null) {
-        myColor = colorOrder.find(c => state.playerColors[c] === myUserId) || null;
-      } else {
-        myColor = null;
+  if (tokenParts.length !== 3) {
+    setMsg("فرمت توکن ذخیره‌شده صحیح نیست.");
+    socketStatusEl.textContent = "❌ فرمت JWT نامعتبر است.";
+    setDebug({
+      socketTokenError: {
+        message: "JWT باید سه بخش داشته باشد.",
+        partsCount: tokenParts.length,
+        tokenLength: token.length
       }
+    });
+    return null;
+  }
 
-      console.log("GAME_STATE_RECEIVED", {
+  console.log("[SOCKET] preparing connection", {
+    tokenLength: token.length,
+    tokenPrefix: token.slice(0, 12),
+    payload: getTokenPayload()
+  });
+
+  // اگر همین حالا متصل است، از همان اتصال استفاده شود
+  if (socket && socket.connected) {
+    return socket;
+  }
+
+  // سوکت قبلی و listenerهای قبلی کاملاً حذف شوند
+  if (socket) {
+    try {
+      socket.removeAllListeners();
+      socket.disconnect();
+    } catch (error) {
+      console.warn("Socket cleanup error:", error);
+    }
+
+    socket = null;
+  }
+
+  socket = io(SOCKET_URL, {
+    autoConnect: false,
+
+    // ابتدا polling و سپس ارتقا به websocket
+    transports: ["polling", "websocket"],
+
+    timeout: 15000,
+
+    // هنگام هر بار اتصال، جدیدترین توکن خوانده می‌شود
+    auth: (callback) => {
+      const freshToken = getToken();
+
+      console.log("[SOCKET] sending auth", {
+        tokenLength: freshToken.length,
+        tokenPrefix: freshToken.slice(0, 12)
+      });
+
+      callback({
+        token: freshToken
+      });
+    },
+
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000
+  });
+
+  socket.on("connect", async () => {
+    socketStatusEl.textContent =
+      "✅ سوکت متصل شد (" + socket.id + ")";
+
+    serverMsgEl.textContent = "✅ اتصال آنلاین برقرار شد.";
+
+    console.log("[SOCKET] connected", {
+      socketId: socket.id,
+      transport: socket.io.engine.transport.name
+    });
+
+    await updateBalance().catch(error => {
+      console.warn("Balance refresh error:", error);
+    });
+  });
+
+  socket.on("connect_error", error => {
+    const message =
+      error && error.message
+        ? error.message
+        : String(error || "خطای نامشخص");
+
+    socketStatusEl.textContent =
+      "❌ خطای اتصال سوکت: " + message;
+
+    console.error("[SOCKET] connect_error:", error);
+
+    setDebug({
+      socketConnectError: {
+        message,
+        name: error?.name || null,
+        code: error?.code || null,
+        description: error?.description || null,
+        context: error?.context || null,
+        tokenLength: getToken().length,
+        tokenPrefix: getToken().slice(0, 12)
+      }
+    });
+  });
+
+  socket.on("disconnect", reason => {
+    socketStatusEl.textContent =
+      "⚠️ اتصال سوکت قطع شد: " + (reason || "نامشخص");
+
+    console.warn("[SOCKET] disconnected:", reason);
+  });
+
+  socket.io.on("reconnect_attempt", attemptNumber => {
+    socketStatusEl.textContent =
+      `در حال تلاش مجدد برای اتصال (${attemptNumber})...`;
+  });
+
+  socket.io.on("reconnect", attemptNumber => {
+    socketStatusEl.textContent =
+      `✅ اتصال مجدد برقرار شد (${attemptNumber})`;
+  });
+
+  socket.io.on("reconnect_failed", () => {
+    socketStatusEl.textContent =
+      "❌ تلاش‌های اتصال مجدد ناموفق بود.";
+  });
+
+  socket.on("balanceChanged", data => {
+    const newBalance = data?.newCoins ?? data?.coins;
+
+    if (newBalance != null) {
+      balanceValueEl.textContent = String(newBalance);
+    }
+  });
+
+  socket.on("game:state", state => {
+    gameState = state;
+
+    const payload = getTokenPayload();
+    const myUserId = getMyUserIdFromPayload(payload);
+
+    if (state && state.playerColors && myUserId != null) {
+      myColor =
+        colorOrder.find(color => {
+          return String(state.playerColors[color]) === String(myUserId);
+        }) || null;
+    } else {
+      myColor = null;
+    }
+
+    setDebug({
+      gameState: {
         currentTurn: state?.currentTurn,
         currentTurnColor: state?.currentTurnColor,
         currentTurnPlayerId: state?.currentTurnPlayerId,
@@ -764,38 +986,33 @@
         rolling: state?.rolling,
         winner: state?.winner || null,
         playerColors: state?.playerColors,
-        myUserId,
-        myColor
-      });
-
-      setDebug({
-        gameState: {
-          currentTurn: state?.currentTurn,
-          currentTurnColor: state?.currentTurnColor,
-          currentTurnPlayerId: state?.currentTurnPlayerId,
-          turnDeadlineAt: state?.turnDeadlineAt,
-          rolled: state?.rolled,
-          rolling: state?.rolling,
-          winner: state?.winner || null,
-          playerColors: state?.playerColors,
-          my: { myUserId, myColor }
+        my: {
+          myUserId,
+          myColor
         }
-      });
-
-      if (state?.winner) {
-        setMsg("بازی تمام شد.");
-} else if (!myColor) {
-        setMsg("رنگ شما مشخص نشد (userId با playerColors همخوانی ندارد).");
-      } else {
-        setMsg("");
       }
-
-      updateUI();
-      draw();
     });
 
-    return socket;
-  }
+    if (state?.winner) {
+      setMsg("بازی تمام شد.");
+    } else if (!myColor) {
+      setMsg(
+        "رنگ شما مشخص نشد؛ userId با playerColors همخوانی ندارد."
+      );
+    } else {
+      setMsg("");
+    }
+
+    updateUI();
+    draw();
+  });
+
+  // چون autoConnect خاموش است، بعد از نصب listenerها متصل می‌شویم
+  socket.connect();
+
+  return socket;
+}
+
 
   // Logout
   logoutBtn.addEventListener("click", ()=>{
@@ -810,16 +1027,23 @@
     myColor = null;
     currentMatchId = null;
 
-    if (socket) {
-      try { socket.disconnect(); } catch {}
-      socket = null;
-    }
+if (socket) {
+  try {
+    socket.removeAllListeners();
+    socket.disconnect();
+  } catch (error) {
+    console.warn("Logout socket cleanup error:", error);
+  }
+
+  socket = null;
+}
+
 
     diceEl.textContent = "🎲";
     rollBtn.disabled = true;
     if (turnInfo) turnInfo.textContent = "";
     if (socketStatusEl) socketStatusEl.textContent = "";
-    if (joinStatusEl) joinStatusEl.textContent = "";
+if (joinStatusEl) joinStatusEl.textContent = "";
     draw();
   });
 
@@ -842,16 +1066,8 @@
     const payload = getTokenPayload();
     const myUserId = getMyUserIdFromPayload(payload);
 
-    console.log("JOIN_CLICK", {
-      matchId: currentMatchId,
-      tier,
-      myUserId,
-      tokenPrefix:(token||"").slice(0,18),
-      payload
-    });
-
     setDebug({
-      preJoin: { matchId: currentMatchId, tier, myUserId }
+      preJoin: { matchId: currentMatchId, tier, myUserId, tokenPrefix: (token||"").slice(0,18) }
     });
 
     const s = connectSocketOnce();
@@ -876,12 +1092,22 @@
     setMsg("در حال ورود به بازی...");
     serverMsgEl.textContent = "در حال ورود...";
 
-    // ---- ROOM JOIN ----
     const joinPayload = { roomId: currentMatchId, tier };
 
+    console.log("[CLIENT] about to emit room:join", {
+  matchId: currentMatchId,
+  tier,
+  tokenLen: token.length,
+  tokenPrefix: token.slice(0, 20)
+});
+    console.log("[CLIENT JOIN EMIT]", {
+  connected: s?.connected,
+  sId: s?.id,
+  tokenLen: token.length,
+  tokenPrefix: token.slice(0, 12),
+  joinPayload
+});
     s.emit("room:join", joinPayload, (resp)=>{
-      console.log("JOIN_RESP", { joinPayload, resp });
-
       setDebug((prev)=>{
         const base = (prev && typeof prev === "object") ? prev : {};
         return {
@@ -905,6 +1131,7 @@
     });
   });
 
+  // initial draw state
   draw();
   rollBtn.disabled = true;
 
