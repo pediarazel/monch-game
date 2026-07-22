@@ -218,7 +218,7 @@ app.post("/api/auth/register", async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 12);
 
     await prisma.user.create({
-      data: { username, password: passwordHash, coins: START_COINS, role: "USER" },
+      data: { username, password: passwordHash, coins: 0, role: "USER" },
     });
 
     return res.status(201).json({ success: true, message: "ثبت‌نام با موفقیت انجام شد." });

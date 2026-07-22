@@ -10,7 +10,7 @@ model User {
   id           Int           @id @default(autoincrement())
   username     String        @unique
   password     String
-  coins        Int           @default(100)
+  coins        Int           @default(0)
   createdAt    DateTime      @default(now())
   role         String        @default("USER")
   transactions Transaction[]
