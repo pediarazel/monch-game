@@ -1078,8 +1078,7 @@ app.get("/admin/treasury-report", authenticateAdminSecret, async (req, res) => {
     const bounds = getRangeBounds(range);
     if (!bounds) return safeJsonError(res, 400, "range فقط day/week/month باشد.");
 
-    const treasuryUser = await prisma.user.findUnique({ where: { username: "treasury" } });
-    if (!treasuryUser) return safeJsonError(res, 404, "treasury پیدا نشد.");
+const treasuryUser = await ensureTreasuryUser();
 
     const items = await prisma.transaction.findMany({
       where: {
