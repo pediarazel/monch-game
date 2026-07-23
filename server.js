@@ -88,12 +88,13 @@ app.use(
 
 /*
 |--------------------------------------------------------------------------
-| Static
+| Static Files
 |--------------------------------------------------------------------------
 */
-    const staticFilesDirectory = path.join(__dirname, "public", "project", "anna");
-
+    // چون server.js در پوشه public/project است، برای دسترسی به anna کافیست فقط 'anna' را اضافه کنیم
+    const staticFilesDirectory = path.join(__dirname, "anna"); // <-- این خط را جایگزین کنید
     app.use(express.static(staticFilesDirectory));
+
 
 
 /*
@@ -174,15 +175,15 @@ function authenticateAdminSecret(req, res, next) {
 |--------------------------------------------------------------------------
 */
     app.get("/", (req, res) => {
-      // index.html را از پوشه جدید پیدا میکند
+      // index.html را از پوشه anna پیدا میکند
       return res.sendFile(path.join(staticFilesDirectory, "index.html"));
     });
 
     app.get("/admin", (req, res) => {
-      // admin.html را از پوشه جدید پیدا میکند
-      // اگر admin.html در پوشه دیگری است، مسیرش را اینجا درست کن
+      // admin.html را از پوشه anna پیدا میکند
       return res.sendFile(path.join(staticFilesDirectory, "admin.html"));
     });
+
 
 
 app.get("/health", async (req, res) => {
