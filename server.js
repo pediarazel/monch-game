@@ -95,8 +95,42 @@ app.use(
         const staticFilesDirectory = path.join(__dirname, "anna");
         app.use(express.static(staticFilesDirectory));
 
-        // روت '/' و '/admin' باید توسط express.static مدیریت شوند.
-        // بنابراین، روت‌های app.get("/", ...) و app.get("/admin", ...) که بعداً در کد آمده‌اند را حذف می‌کنیم.
+// --- کد لاگین اصلاح شده با لاگ‌های تشخیصی ---
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body;
+  console.log(`Attempting login for username: ${username}`); // لاگ ورودی
+  try {
+    // پیدا کردن کاربر در دیتابیس
+    const user = await prisma.user.findUnique({
+      where: { username: username },
+    });
+
+    if (user) {
+      console.log(`User found: ${user.username}`); // لاگ یافتن کاربر
+      // مقایسه رمز عبور با رمز عبور هش شده در دیتابیس
+      const isMatch = await bcryptjs.compare(password, user.password);
+      console.log(`Password comparison result: ${isMatch}`); // لاگ نتیجه مقایسه رمز
+
+      if (isMatch) {
+        // ایجاد توکن JWT در صورت تطابق رمز عبور
+        const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        console.log('Login successful, token generated.'); // لاگ موفقیت آمیز بودن ورود
+        return res.json({ token });
+      } else {
+        console.log('Login failed: Invalid password'); // لاگ شکست ورود به دلیل رمز اشتباه
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+    } else {
+      console.log('Login failed: User not found'); // لاگ شکست ورود به دلیل عدم یافتن کاربر
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+  } catch (error) {
+    console.error('Error during login:', error); // لاگ خطا در صورت بروز مشکل در دیتابیس یا ...
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+// --- پایان کد لاگین اصلاح شده ---
+
 
 
         /*
