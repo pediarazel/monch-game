@@ -12,7 +12,7 @@ const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
-const bcrypt = require("bcryptjs");
+const bcrypt = require("bcrypt");
 const { Server } = require("socket.io");
 
 const { PrismaClient } = require("@prisma/client");
@@ -108,7 +108,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (user) {
       console.log(`User found: ${user.username}`); // لاگ یافتن کاربر
       // مقایسه رمز عبور با رمز عبور هش شده در دیتابیس
-      const isMatch = await bcryptjs.compare(password, user.password);
+      const isMatch = await bcrypt.compare(password, user.password);
       console.log(`Password comparison result: ${isMatch}`); // لاگ نتیجه مقایسه رمز
 
       if (isMatch) {
