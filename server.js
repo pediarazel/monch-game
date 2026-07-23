@@ -39,6 +39,12 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET;
 const START_COINS = Number(process.env.START_COINS) || 1000;
 const TURN_MS = 30000;
 
+// مدت انتظار برای شروع خودکار بازی ۳ نفره
+const THREE_PLAYER_WAIT_MS = 60_000;
+
+// matchId -> Timeout
+const matchTimers = new Map();
+
 const connectedUsers = new Map(); // userId -> socketId
 
 /*
@@ -261,42 +267,6 @@ app.post("/api/auth/register", async (req, res) => {
     return safeJsonError(res, 500, e.message || "خطای داخلی");
   }
 });
-
-    // --- کد لاگین اصلاح شده با لاگ‌های تشخیصی ---
-    app.post('/api/auth/login', async (req, res) => {
-      const { username, password } = req.body;
-      console.log(`Attempting login for username: ${username}`); // لاگ ورودی
-      try {
-        // پیدا کردن کاربر در دیتابیس
-        const user = await prisma.user.findUnique({
-          where: { username: username.trim() }, // مطمئن شویم username هم trim شده باشد
-        });
-
-        if (user) {
-          console.log(`User found: ${user.username}`); // لاگ یافتن کاربر
-          // مقایسه رمز عبور با رمز عبور هش شده در دیتابیس
-          const isMatch = await bcrypt.compare(password, user.password); // استفاده از bcrypt که import شده
-          console.log(`Password comparison result: ${isMatch}`); // لاگ نتیجه مقایسه رمز
-
-          if (isMatch) {
-            // ایجاد توکن JWT در صورت تطابق رمز عبور
-            const token = jwt.sign({ userId: user.id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '1h' }); // username را هم اضافه کردم
-            console.log('Login successful, token generated.'); // لاگ موفقیت آمیز بودن ورود
-            return res.json({ success: true, token }); // response format را با register یکی کردم
-          } else {
-            console.log('Login failed: Invalid password'); // لاگ شکست ورود به دلیل رمز اشتباه
-            return res.status(401).json({ message: 'Invalid credentials' }); // response format را با register یکی کردم
-          }
-        } else {
-          console.log('Login failed: User not found'); // لاگ شکست ورود به دلیل عدم یافتن کاربر
-          return res.status(401).json({ message: 'Invalid credentials' }); // response format را با register یکی کردم
-        }
-      } catch (error) {
-        console.error('Error during login:', error); // لاگ خطا در صورت بروز مشکل در دیتابیس یا ...
-        return res.status(500).json({ message: 'Internal server error' }); // response format را با register یکی کردم
-      }
-    });
-    // --- پایان کد لاگین اصلاح شده ---
 
 
 app.get("/api/auth/check", authenticateHttp, (req, res) => {
@@ -563,8 +533,17 @@ function createMatch(matchId) {
 }
 
 function resetMatchGame(match) {
+    const firstActiveTurn = colorOrder.findIndex(
+    (color) => match.playerColors[color] != null
+  );
+
+  if (firstActiveTurn === -1) {
+    throw new Error("هیچ بازیکنی برای شروع نوبت پیدا نشد.");
+  }
+
   match.game = {
-    currentTurn: 0,
+currentTurn: firstActiveTurn,
+
 
     // قدیمی (دیگه استفاده نمی‌شود)
     dice: 0,
@@ -597,28 +576,66 @@ function getCurrentColor(match) {
 let io; // assigned after Server creation
 
 function broadcastState(match) {
+  if (!match?.game) {
+    return;
+  }
+
   const snapshot = cloneGameForClient(match.game);
+
   snapshot.matchId = match.matchId;
+  snapshot.status = match.status;
+  snapshot.tier = match.tier;
 
   console.log("[BROADCAST STATE]", {
     matchId: match.matchId,
-    snapshotKeys: Object.keys(snapshot),
-    status: snapshot.status ?? match.status,
-    currentTurnColor: snapshot.currentTurnColor ?? snapshot.currentTurn,
-    currentTurnPlayerId: snapshot.currentTurnPlayerId ?? snapshot.currentTurnPlayerId,
+    status: snapshot.status,
+    currentTurnColor: snapshot.currentTurnColor,
+    currentTurnPlayerId: snapshot.currentTurnPlayerId,
+    playerColors: snapshot.playerColors,
   });
 
-  io.to(`match:${match.matchId}`).emit("game:state", snapshot);
+  io.to(`match:${match.matchId}`).emit(
+    "game:state",
+    snapshot
+  );
 }
+
 
 function nextTurn(match) {
   if (!match.game || match.game.winner) {
     return;
   }
 
-  match.game.currentTurn = (match.game.currentTurn + 1) % colorOrder.length;
+  /*
+   * در بازی ۳ نفره ممکن است یکی از رنگ‌ها بازیکن نداشته باشد.
+   * بنابراین آن‌قدر جلو می‌رویم تا به یک رنگ دارای بازیکن برسیم.
+   */
+  let attempts = 0;
 
-  // پاک‌سازی
+  do {
+    match.game.currentTurn =
+      (match.game.currentTurn + 1) % colorOrder.length;
+
+    attempts++;
+  } while (
+    attempts < colorOrder.length &&
+    match.playerColors[colorOrder[match.game.currentTurn]] == null
+  );
+
+  const nextColor = colorOrder[match.game.currentTurn];
+  const nextPlayerId = match.playerColors[nextColor];
+
+  if (nextPlayerId == null) {
+    console.error("[NEXT TURN FAILED]", {
+      matchId: match.matchId,
+      currentTurn: match.game.currentTurn,
+      playerColors: match.playerColors,
+    });
+
+    return;
+  }
+
+  // پاک‌کردن اطلاعات تاس‌های نوبت قبلی
   match.game.dice = 0;
   match.game.dice1 = 0;
   match.game.dice2 = 0;
@@ -631,9 +648,17 @@ function nextTurn(match) {
 
   match.turnId++;
 
+  console.log("[NEXT TURN]", {
+    matchId: match.matchId,
+    nextColor,
+    nextPlayerId,
+    turnId: match.turnId,
+  });
+
   broadcastState(match);
   startTurnTimeout(match);
 }
+
 
 function startTurnTimeout(match) {
   if (match.pendingTurnTimer) clearTimeout(match.pendingTurnTimer);
@@ -666,6 +691,93 @@ function startTurnTimeout(match) {
 function getNextDiceValueFromMatch() {
   return Math.floor(Math.random() * 6) + 1;
 }
+/**
+ * شروع یکپارچه مسابقه با ۳ یا ۴ بازیکن
+ */
+async function startMatch(match) {
+  if (!match) {
+    throw new Error("مسابقه پیدا نشد.");
+  }
+
+  if (match.status !== "waiting") {
+    console.log("[START MATCH IGNORED]", {
+      matchId: match.matchId,
+      status: match.status,
+    });
+
+    return false;
+  }
+
+  const activePlayersCount = colorOrder.filter(
+    (color) => match.playerColors[color] != null
+  ).length;
+
+  if (activePlayersCount < 3 || activePlayersCount > 4) {
+    throw new Error(
+      "برای شروع بازی باید ۳ یا ۴ بازیکن حضور داشته باشند."
+    );
+  }
+
+  /*
+   * وضعیت starting مانع می‌شود دو درخواست هم‌زمان،
+   * بازی را دو بار شروع یا ورودی را دو بار کسر کنند.
+   */
+  match.status = "starting";
+
+  try {
+    console.log("[START MATCH]", {
+      matchId: match.matchId,
+      activePlayersCount,
+      tier: match.tier,
+      playerColors: match.playerColors,
+    });
+
+    await chargeTierFromPlayers(match);
+
+    resetMatchGame(match);
+    match.status = "playing";
+
+    broadcastState(match);
+    startTurnTimeout(match);
+
+    io.to(`match:${match.matchId}`).emit("game:started", {
+      success: true,
+      message:
+        activePlayersCount === 3
+          ? "بازی با ۳ بازیکن شروع شد."
+          : "بازی با ۴ بازیکن شروع شد.",
+      matchId: match.matchId,
+      tier: match.tier,
+      filledColors: activePlayersCount,
+      status: match.status,
+      playerColors: match.playerColors,
+    });
+
+    console.log("[MATCH STARTED]", {
+      matchId: match.matchId,
+      activePlayersCount,
+      tier: match.tier,
+    });
+
+    return true;
+  } catch (error) {
+    /*
+     * chargedEntry را false نمی‌کنیم.
+     * اگر کسر ورودی انجام شده باشد، false کردن آن ممکن است
+     * در تلاش بعدی باعث کسر دوباره سکه شود.
+     */
+    match.status = "waiting";
+
+    console.error("[START MATCH FAILED]", {
+      matchId: match.matchId,
+      chargedEntry: match.chargedEntry,
+      error: error?.message || String(error),
+    });
+
+    throw error;
+  }
+}
+
 /*
 |--------------------------------------------------------------------------
 | Admin: update by username
@@ -805,8 +917,20 @@ async function chargeTierFromPlayers(match) {
   if (!match.tier) throw new Error("tier نامعتبر است یا ست نشده است.");
   assertValidTier(match.tier);
 
-  const userIds = colorOrder.map((c) => match.playerColors[c]).filter(Boolean);
-  if (userIds.length !== 4) throw new Error("برای شروع باید دقیقاً ۴ نفر باشند.");
+  const userIds = colorOrder
+    .map((color) => match.playerColors[color])
+    .filter((userId) => userId != null);
+
+  if (userIds.length < 3 || userIds.length > 4) {
+    throw new Error(
+      "برای شروع بازی باید ۳ یا ۴ بازیکن حضور داشته باشند."
+    );
+  }
+
+  if (new Set(userIds).size !== userIds.length) {
+    throw new Error("شناسه بازیکنان مسابقه تکراری است.");
+  }
+
 
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
@@ -857,7 +981,18 @@ async function settleCoinsForMatch(match) {
   const winnerUserId = match.playerColors[winnerColor];
   if (!winnerUserId) throw new Error("winnerUserId پیدا نشد.");
 
-  const totalPot = 4 * match.tier;
+  const activePlayersCount = colorOrder.filter(
+    (color) => match.playerColors[color] != null
+  ).length;
+
+  if (activePlayersCount < 3 || activePlayersCount > 4) {
+    throw new Error(
+      "تعداد بازیکنان برای تسویه مالی معتبر نیست."
+    );
+  }
+
+  const totalPot = activePlayersCount * match.tier;
+
   const winnerAmount = Math.floor(0.9 * totalPot);
   const treasuryAmount = totalPot - winnerAmount;
 
@@ -1271,66 +1406,165 @@ io.on("connection", (socket) => {
         matchTier: match.tier,
       });
 
-      if (filledColors === 4 && match.status !== "playing") {
+      /*
+      |--------------------------------------------------------------------------
+      | شروع فوری با ۴ نفر
+      |--------------------------------------------------------------------------
+      */
+      if (filledColors === 4 && match.status === "waiting") {
+        /*
+         * چون نفر چهارم وارد شده، دیگر نیازی به تایمر
+         * شروع سه‌نفره نیست.
+         */
+        const existingTimer = matchTimers.get(matchId);
+
+        if (existingTimer) {
+          clearTimeout(existingTimer);
+          matchTimers.delete(matchId);
+
+          console.log("[MATCH TIMER CLEARED]", {
+            matchId,
+            reason: "fourth_player_joined",
+          });
+        }
+
         try {
-          match.status = "playing";
-
-          console.log("[START CHECK]", {
-            matchId,
-            filledColors,
-            status: match.status,
-            tier: match.tier,
-            playerColors: match.playerColors,
-          });
-
-          await chargeTierFromPlayers(match);
-
-          console.log("[CHARGED OK]", {
-            matchId,
-            tier: match.tier,
-            playerColors: match.playerColors,
-          });
-
-          resetMatchGame(match);
-          broadcastState(match);
-          startTurnTimeout(match);
+          const started = await startMatch(match);
 
           return callback?.({
-            success: true,
-            message: "بازی شروع شد.",
+            success: started,
+            message: started
+              ? "بازی با ۴ بازیکن شروع شد."
+              : "مسابقه قبلاً در حال شروع یا اجرا است.",
             matchId,
             tier: match.tier,
-          });
-        } catch (e) {
-          console.error("[CHARGE FAILED]", {
-            matchId,
-            tier: match.tier,
+            filledColors: 4,
+            status: match.status,
             playerColors: match.playerColors,
-            error: e?.message || String(e),
           });
-
-          match.status = "waiting";
-          match.chargedEntry = false;
-
+        } catch (error) {
           return callback?.({
             success: false,
-            message: "شروع بازی ممکن نشد (خطای تسویه). دوباره تلاش کنید.",
+            message:
+              error?.message ||
+              "شروع بازی با ۴ بازیکن ممکن نشد.",
             matchId,
+            status: match.status,
           });
         }
       }
+
+      /*
+      |--------------------------------------------------------------------------
+      | ساخت تایمر برای بازی ۳ نفره
+      |--------------------------------------------------------------------------
+      */
+      if (
+        filledColors === 3 &&
+        match.status === "waiting" &&
+        !matchTimers.has(matchId)
+      ) {
+        console.log("[THREE PLAYER TIMER STARTED]", {
+          matchId,
+          waitMilliseconds: THREE_PLAYER_WAIT_MS,
+          playerColors: match.playerColors,
+        });
+
+        const timer = setTimeout(async () => {
+          /*
+           * تایمر اجرا شده است؛ بنابراین باید از Map حذف شود.
+           */
+          matchTimers.delete(matchId);
+
+          try {
+            const currentMatch = matches.get(matchId);
+
+            if (!currentMatch) {
+              console.log("[THREE PLAYER TIMER ABORTED]", {
+                matchId,
+                reason: "match_not_found",
+              });
+
+              return;
+            }
+
+            if (currentMatch.status !== "waiting") {
+              console.log("[THREE PLAYER TIMER ABORTED]", {
+                matchId,
+                reason: "match_not_waiting",
+                status: currentMatch.status,
+              });
+
+              return;
+            }
+
+            const currentFilledColors = colorOrder.filter(
+              (color) =>
+                currentMatch.playerColors[color] != null
+            ).length;
+
+            /*
+             * بعد از پایان یک دقیقه، بازی فقط وقتی
+             * سه بازیکن دارد به‌صورت سه‌نفره شروع می‌شود.
+             *
+             * حالت چهار نفر معمولاً در همان room:join
+             * فوراً شروع خواهد شد.
+             */
+            if (currentFilledColors !== 3) {
+              console.log("[THREE PLAYER TIMER ABORTED]", {
+                matchId,
+                reason: "player_count_changed",
+                currentFilledColors,
+              });
+
+              return;
+            }
+
+            await startMatch(currentMatch);
+          } catch (error) {
+            console.error("[THREE PLAYER START FAILED]", {
+              matchId,
+              error: error?.message || String(error),
+            });
+
+            io.to(`match:${matchId}`).emit(
+              "game:start-error",
+              {
+                success: false,
+                matchId,
+                message:
+                  error?.message ||
+                  "شروع بازی ۳ نفره ممکن نشد.",
+              }
+            );
+          }
+        }, THREE_PLAYER_WAIT_MS);
+
+        matchTimers.set(matchId, timer);
+      }
+
 
       callback?.({
         success: true,
         message:
           match.status === "playing"
             ? "دوباره به بازی متصل شدید."
-            : "به صف اضافه شد.",
+            : filledColors === 3
+              ? "سه بازیکن حاضرند؛ بازی پس از ۶۰ ثانیه شروع می‌شود."
+              : "به صف انتظار اضافه شدید.",
         matchId,
         tier: match.tier,
         filledColors,
         status: match.status,
         playerColors: match.playerColors,
+        waitingForThreePlayerStart:
+          filledColors === 3 &&
+          match.status === "waiting",
+        startAfterMs:
+          filledColors === 3 &&
+          match.status === "waiting"
+            ? THREE_PLAYER_WAIT_MS
+            : null,
       });
 
       if (match.status === "playing" && match.game) {
@@ -1338,6 +1572,7 @@ io.on("connection", (socket) => {
       }
 
       return;
+
     } catch (e) {
       console.error("JOIN ERROR:", e);
       return callback?.({ success: false, message: e.message || "خطای join" });
@@ -1524,14 +1759,132 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("disconnect", () => {
+  socket.on("disconnect", (reason) => {
     try {
       const uid = Number(socket.user?.userId);
-      if (!Number.isFinite(uid)) return;
+
+      if (!Number.isInteger(uid) || uid <= 0) {
+        return;
+      }
+
       const key = String(uid);
-      if (connectedUsers.get(key) === socket.id) connectedUsers.delete(key);
-    } catch {}
+
+      /*
+       * اگر همین کاربر با اتصال جدیدی وصل شده باشد،
+       * اتصال قدیمی نباید اطلاعات اتصال جدید را حذف کند.
+       */
+      if (connectedUsers.get(key) === socket.id) {
+        connectedUsers.delete(key);
+      }
+
+      console.log("[SOCKET DISCONNECTED]", {
+        socketId: socket.id,
+        userId: uid,
+        reason,
+      });
+
+      /*
+       * کاربر فقط از مسابقه‌ای حذف می‌شود که هنوز
+       * در وضعیت انتظار باشد.
+       *
+       * بازیکن مسابقه شروع‌شده حذف نمی‌شود تا بتواند
+       * دوباره به همان بازی متصل شود.
+       */
+      for (const [matchId, match] of matches.entries()) {
+        if (match.status !== "waiting") {
+          continue;
+        }
+
+        const disconnectedColor = colorOrder.find(
+          (color) => match.playerColors[color] === uid
+        );
+
+        if (!disconnectedColor) {
+          continue;
+        }
+
+        /*
+         * اگر همان کاربر با یک Socket جدید دوباره وصل شده،
+         * قطع‌شدن Socket قبلی نباید او را از صف حذف کند.
+         */
+        const registeredSocketId = match.players.get(uid);
+
+        if (
+          registeredSocketId &&
+          registeredSocketId !== socket.id
+        ) {
+          console.log("[OLD SOCKET DISCONNECT IGNORED]", {
+            matchId,
+            userId: uid,
+            oldSocketId: socket.id,
+            newSocketId: registeredSocketId,
+          });
+
+          continue;
+        }
+
+        match.playerColors[disconnectedColor] = null;
+        match.players.delete(uid);
+
+        const filledColors = colorOrder.filter(
+          (color) => match.playerColors[color] != null
+        ).length;
+
+        console.log("[WAITING PLAYER REMOVED]", {
+          matchId,
+          userId: uid,
+          disconnectedColor,
+          filledColors,
+          playerColors: match.playerColors,
+        });
+
+        /*
+         * اگر تعداد بازیکنان از سه کمتر شد،
+         * تایمر بازی سه‌نفره باید لغو شود.
+         */
+        if (
+          filledColors < 3 &&
+          matchTimers.has(matchId)
+        ) {
+          clearTimeout(matchTimers.get(matchId));
+          matchTimers.delete(matchId);
+
+          console.log("[MATCH TIMER CANCELLED]", {
+            matchId,
+            reason: "players_below_three",
+            filledColors,
+          });
+        }
+
+        /*
+         * مسابقه کاملاً خالی را از حافظه حذف می‌کنیم.
+         */
+        if (filledColors === 0) {
+          if (matchTimers.has(matchId)) {
+            clearTimeout(matchTimers.get(matchId));
+            matchTimers.delete(matchId);
+          }
+
+          if (match.pendingTurnTimer) {
+            clearTimeout(match.pendingTurnTimer);
+            match.pendingTurnTimer = null;
+          }
+
+          matches.delete(matchId);
+
+          console.log("[EMPTY MATCH DELETED]", {
+            matchId,
+          });
+        }
+      }
+    } catch (error) {
+      console.error("[DISCONNECT ERROR]", {
+        socketId: socket.id,
+        error: error?.message || String(error),
+      });
+    }
   });
+
 }); // end io.on("connection")
 
 httpServer.listen(PORT, () => {
