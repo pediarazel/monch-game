@@ -177,15 +177,6 @@ function authenticateAdminSecret(req, res, next) {
 | Routes
 |--------------------------------------------------------------------------
 */
-    app.get("/", (req, res) => {
-      // index.html را از پوشه anna پیدا میکند
-      return res.sendFile(path.join(staticFilesDirectory, "index.html"));
-    });
-
-    app.get("/admin", (req, res) => {
-      // admin.html را از پوشه anna پیدا میکند
-      return res.sendFile(path.join(staticFilesDirectory, "admin.html"));
-    });
 
 
 
