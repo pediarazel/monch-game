@@ -12,7 +12,7 @@ const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 const { Server } = require("socket.io");
 
 const { PrismaClient } = require("@prisma/client");
