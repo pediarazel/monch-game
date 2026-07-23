@@ -91,8 +91,10 @@ app.use(
 | Static
 |--------------------------------------------------------------------------
 */
-const publicDirectory = path.join(__dirname, "anna");
-app.use(express.static(publicDirectory));
+    const staticFilesDirectory = path.join(__dirname, "public", "project", "anna");
+
+    app.use(express.static(staticFilesDirectory));
+
 
 /*
 |--------------------------------------------------------------------------
@@ -171,13 +173,17 @@ function authenticateAdminSecret(req, res, next) {
 | Routes
 |--------------------------------------------------------------------------
 */
-app.get("/", (req, res) => {
-  return res.sendFile(path.join(publicDirectory, "index.html"));
-});
+    app.get("/", (req, res) => {
+      // index.html را از پوشه جدید پیدا میکند
+      return res.sendFile(path.join(staticFilesDirectory, "index.html"));
+    });
 
-app.get("/admin", (req, res) => {
-  return res.sendFile(path.join(publicDirectory, "admin.html"));
-});
+    app.get("/admin", (req, res) => {
+      // admin.html را از پوشه جدید پیدا میکند
+      // اگر admin.html در پوشه دیگری است، مسیرش را اینجا درست کن
+      return res.sendFile(path.join(staticFilesDirectory, "admin.html"));
+    });
+
 
 app.get("/health", async (req, res) => {
   try {
