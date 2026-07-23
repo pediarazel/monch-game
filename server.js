@@ -2,7 +2,7 @@
 
 require("dotenv").config({ path: require("path").join(__dirname, ".env") });
 
-console.log("JWT_SECRET len:", (process.env.JWT_SECRET||"").length);
+console.log("JWT_SECRET len:", (process.env.JWT_SECRET || "").length);
 console.log("ADMIN_SECRET present:", !!process.env.ADMIN_SECRET);
 
 const http = require("http");
@@ -328,7 +328,15 @@ function cloneGameForClient(game) {
     currentTurn: game.currentTurn,
     currentTurnColor: colorOrder[game.currentTurn],
     currentTurnPlayerId: game.playerColors[colorOrder[game.currentTurn]],
+
+    // قدیمی (برای سازگاری UI)
     dice: game.dice,
+
+    // جدید
+    dice1: game.dice1,
+    dice2: game.dice2,
+    pendingDice: Array.isArray(game.pendingDice) ? game.pendingDice.slice() : [],
+
     rolled: game.rolled,
     rolling: false,
     winner: game.winner,
@@ -350,19 +358,18 @@ function isOccupiedBySameColorAtPathIndex(game, myColor, pieceId, destPathIndex)
   );
 }
 
-function canPieceMove(game, piece) {
+// ✅ can حرکت با dieValue
+function canPieceMove(game, piece, dieValue) {
   if (!game.rolled) return false;
   if (piece.color !== colorOrder[game.currentTurn]) return false;
   if (game.winner) return false;
   if (Date.now() > game.turnDeadlineAt) return false;
 
-  const dice = game.dice;
-
-  if (piece.state === "yard") return dice === 6;
+  if (piece.state === "yard") return dieValue === 6;
 
   if (piece.state === "start") {
     const entryIndex = layout.entryPathIndexes[piece.color];
-    const destPathIndex = (entryIndex + dice - 1) % 36;
+    const destPathIndex = (entryIndex + dieValue - 1) % 36;
     return !isOccupiedBySameColorAtPathIndex(game, piece.color, piece.id, destPathIndex);
   }
 
@@ -372,11 +379,11 @@ function canPieceMove(game, piece) {
     const walkedSteps = (currentPathIndex - entryIndex + 36) % 36;
     const remainingStepsToHomeEntry = 35 - walkedSteps;
 
-    if (dice <= remainingStepsToHomeEntry) {
-      const destPathIndex = (currentPathIndex + dice) % 36;
+    if (dieValue <= remainingStepsToHomeEntry) {
+      const destPathIndex = (currentPathIndex + dieValue) % 36;
       return !isOccupiedBySameColorAtPathIndex(game, piece.color, piece.id, destPathIndex);
     } else {
-      const stepsIntoHome = dice - remainingStepsToHomeEntry - 1;
+      const stepsIntoHome = dieValue - remainingStepsToHomeEntry - 1;
       return (
         stepsIntoHome < 4 &&
         !game.pieces.some(
@@ -391,7 +398,7 @@ function canPieceMove(game, piece) {
   }
 
   if (piece.state === "home") {
-    const destHomeIndex = piece.homeIndex + dice;
+    const destHomeIndex = piece.homeIndex + dieValue;
     return (
       destHomeIndex < 4 &&
       !game.pieces.some(
@@ -424,11 +431,9 @@ function capture(game, cellName, myColor) {
   }
 }
 
-function movePiece(game, piece) {
-  const dice = game.dice;
-
+function movePiece(game, piece, dieValue) {
   if (piece.state === "yard") {
-    if (dice !== 6) return false;
+    if (dieValue !== 6) return false;
     piece.state = "start";
     piece.pathIndex = -1;
     piece.homeIndex = -1;
@@ -437,7 +442,7 @@ function movePiece(game, piece) {
 
   if (piece.state === "start") {
     const entryIndex = layout.entryPathIndexes[piece.color];
-    const destPathIndex = (entryIndex + dice - 1) % 36;
+    const destPathIndex = (entryIndex + dieValue - 1) % 36;
     piece.state = "path";
     piece.pathIndex = destPathIndex;
     piece.homeIndex = -1;
@@ -450,19 +455,19 @@ function movePiece(game, piece) {
     const walkedSteps = (piece.pathIndex - entryIndex + 36) % 36;
     const remainingStepsToHomeEntry = 35 - walkedSteps;
 
-    if (dice <= remainingStepsToHomeEntry) {
-      piece.pathIndex = (piece.pathIndex + dice) % 36;
+    if (dieValue <= remainingStepsToHomeEntry) {
+      piece.pathIndex = (piece.pathIndex + dieValue) % 36;
       capture(game, layout.mainPath[piece.pathIndex], piece.color);
     } else {
       piece.state = "home";
-      piece.homeIndex = dice - remainingStepsToHomeEntry - 1;
+      piece.homeIndex = dieValue - remainingStepsToHomeEntry - 1;
       piece.pathIndex = -1;
     }
     return true;
   }
 
   if (piece.state === "home") {
-    piece.homeIndex += dice;
+    piece.homeIndex += dieValue;
     return true;
   }
 
@@ -487,7 +492,6 @@ function checkWinner(game) {
 |--------------------------------------------------------------------------
 */
 const matches = new Map(); // matchId -> match
-
 function createMatch(matchId) {
   return {
     matchId,
@@ -509,7 +513,15 @@ function createMatch(matchId) {
 function resetMatchGame(match) {
   match.game = {
     currentTurn: 0,
+
+    // قدیمی (دیگه استفاده نمی‌شود)
     dice: 0,
+
+    // جدید
+    dice1: 0,
+    dice2: 0,
+    pendingDice: [],
+
     rolled: false,
     winner: null,
     pieces: buildPieces(),
@@ -548,37 +560,28 @@ function broadcastState(match) {
 }
 
 function nextTurn(match) {
-  // اگر بازی وجود ندارد یا برنده مشخص شده، نوبت ادامه پیدا نکند.
   if (!match.game || match.game.winner) {
     return;
   }
 
-  // اگر تاس ۶ نباشد، نوبت به بازیکن بعدی می‌رسد.
-  // با تاس ۶، نوبت همان بازیکن باقی می‌ماند.
-  if (match.game.dice !== 6) {
-    match.game.currentTurn =
-      (match.game.currentTurn + 1) % colorOrder.length;
-  }
+  match.game.currentTurn = (match.game.currentTurn + 1) % colorOrder.length;
 
-  // پاک‌سازی اطلاعات حرکت قبلی
+  // پاک‌سازی
   match.game.dice = 0;
+  match.game.dice1 = 0;
+  match.game.dice2 = 0;
+  match.game.pendingDice = [];
   match.game.rolled = false;
   match.game.turnMoved = false;
 
-  // تعیین زمان پایان نوبت جدید
   match.game.turnDeadlineAt = Date.now() + TURN_MS;
   match.turnDeadlineAt = match.game.turnDeadlineAt;
 
-  // ساخت شناسه جدید برای نوبت
   match.turnId++;
 
-  // ارسال وضعیت جدید برای بازیکنان
   broadcastState(match);
-
-  // فعال‌کردن تایمر برای نوبت جدید
   startTurnTimeout(match);
 }
-
 
 function startTurnTimeout(match) {
   if (match.pendingTurnTimer) clearTimeout(match.pendingTurnTimer);
@@ -596,16 +599,21 @@ function startTurnTimeout(match) {
       nextTurn(m);
       return;
     }
-    if (!m.game.turnMoved) {
+
+    const pending = Array.isArray(m.game.pendingDice) ? m.game.pendingDice : [];
+    if (pending.length > 0) {
+      // زمان تمام شد، تاس‌های این نوبت رو رها می‌کنیم و نوبت بعد
       nextTurn(m);
+      return;
     }
+
+    nextTurn(m);
   }, Math.max(1, deadlineAt - Date.now() + 5));
 }
 
 function getNextDiceValueFromMatch() {
   return Math.floor(Math.random() * 6) + 1;
 }
-
 /*
 |--------------------------------------------------------------------------
 | Admin: update by username
@@ -708,7 +716,6 @@ app.get(
   }
 );
 
-
 /*
 |--------------------------------------------------------------------------
 | Treasury / financial functions + realtime balance
@@ -764,7 +771,6 @@ async function chargeTierFromPlayers(match) {
 
   const amount = match.tier;
 
-  // ✅ فقط ۲ کوئری داخل ترنزکشن: آپدیت کاربران + ثبت رکوردهای مالی
   await prisma.$transaction(async (tx) => {
     await tx.user.updateMany({
       where: { id: { in: userIds } },
@@ -788,7 +794,6 @@ async function chargeTierFromPlayers(match) {
 
   match.chargedEntry = true;
 }
-
 
 async function settleCoinsForMatch(match) {
   if (match.financialSettled) return;
@@ -844,7 +849,6 @@ async function settleCoinsForMatch(match) {
     tier: match.tier,
   });
 }
-
 /*
 |--------------------------------------------------------------------------
 | Admin: treasury report
@@ -928,7 +932,6 @@ app.get("/admin/treasury-report", authenticateAdminSecret, async (req, res) => {
 */
 
 // لاگ درخواست‌های Engine.IO/Socket.IO
-// این listener باید بیرون از تنظیمات new Server باشد.
 httpServer.on("request", (req) => {
   if (String(req.url || "").includes("/socket.io/")) {
     console.log("[HTTP SOCKET.IO REQUEST]", {
@@ -948,7 +951,6 @@ io = new Server(httpServer, {
     credentials: allowedOrigins !== "*",
   },
 
-  // ابتدا polling و سپس ارتقا به websocket نیز پشتیبانی می‌شود.
   transports: ["polling", "websocket"],
 
   allowEIO3: false,
@@ -958,10 +960,6 @@ io = new Server(httpServer, {
 
 /**
  * پاک‌سازی توکن قبل از jwt.verify
- * پشتیبانی از:
- * - JWT خالص
- * - Bearer JWT
- * - توکن ذخیره‌شده با کوتیشن اضافی
  */
 function normalizeSocketToken(value) {
   if (value === undefined || value === null) return "";
@@ -1122,8 +1120,6 @@ io.use((socket, next) => {
     return next(socketError);
   }
 });
-
-
 io.on("connection", (socket) => {
   const userId = Number(socket.user?.userId);
 
@@ -1137,174 +1133,166 @@ io.on("connection", (socket) => {
     ),
   });
 
-  // کاربر از همان لحظه اتصال ثبت شود؛
-  // نه فقط بعد از room:join
   connectedUsers.set(String(userId), socket.id);
 
   socket.on("room:join", async (payload, callback) => {
+    try {
+      const matchId =
+        typeof payload?.roomId === "string" && payload.roomId.trim()
+          ? payload.roomId.trim()
+          : null;
 
-  try {
-    const matchId =
-      typeof payload?.roomId === "string" && payload.roomId.trim()
-        ? payload.roomId.trim()
-        : null;
+      if (!matchId)
+        return callback?.({ success: false, message: "شناسه اتاق معتبر نیست." });
 
-    if (!matchId) return callback?.({ success: false, message: "شناسه اتاق معتبر نیست." });
+      const tier = Number(payload?.tier);
+      if (!Number.isFinite(tier))
+        return callback?.({ success: false, message: "tier لازم است." });
+      assertValidTier(tier);
 
-    const tier = Number(payload?.tier);
-    if (!Number.isFinite(tier)) return callback?.({ success: false, message: "tier لازم است." });
-    assertValidTier(tier);
-
-if (!socket.user?.userId) {
-  console.log("[JOIN] socket.user missing. handshake:", {
-    auth: socket.handshake?.auth,
-    authorization: socket.handshake?.headers?.authorization,
-  });
-  return callback?.({ success: false, message: "احراز هویت Socket.io انجام نشد (socket.user ندارد)." });
-}
-
-const userId = Number(socket.user.userId);
-    if (!Number.isFinite(userId)) return callback?.({ success: false, message: "userId نامعتبر است." });
-
-connectedUsers.set(String(userId), socket.id);
-
-if (!matches.has(matchId)) {
-  matches.set(matchId, createMatch(matchId));
-}
-
-const match = matches.get(matchId);
-
-// اول tier بررسی شود؛ سپس کاربر وارد Room شود.
-if (match.tier === null) {
-  match.tier = tier;
-} else if (match.tier !== tier) {
-  return callback?.({
-    success: false,
-    message:
-      `این بازی با ورودی ${match.tier} سکه ساخته شده است.`,
-  });
-}
-
-// اگر بازی قبلاً شروع شده، بازیکن جدید پذیرفته نشود.
-const alreadyAssigned =
-  Object.values(match.playerColors).includes(userId);
-
-if (match.status !== "waiting" && !alreadyAssigned) {
-  return callback?.({
-    success: false,
-    message: "این بازی قبلاً شروع شده است.",
-  });
-}
-
-if (!alreadyAssigned) {
-  const emptyColor = colorOrder.find(
-    (color) => match.playerColors[color] === null
-  );
-
-  if (!emptyColor) {
-    return callback?.({
-      success: false,
-      message: "ظرفیت بازی کامل شده است.",
-    });
-  }
-
-  match.playerColors[emptyColor] = userId;
-}
-
-await socket.join(`match:${matchId}`);
-match.players.set(userId, socket.id);
-
-
-    const filledColors = colorOrder.filter((c) => match.playerColors[c] !== null).length;
-
-    console.log("[JOIN]", {
-      matchId,
-      userId,
-      tier,
-      filledColors,
-      status: match.status,
-      playerColors: match.playerColors,
-      matchTier: match.tier,
-    });
-
-if (filledColors === 4 && match.status !== "playing") {
-      try {
-        match.status = "playing";
-
-        console.log("[START CHECK]", {
-          matchId,
-          filledColors,
-          status: match.status,
-          tier: match.tier,
-          playerColors: match.playerColors,
+      if (!socket.user?.userId) {
+        console.log("[JOIN] socket.user missing. handshake:", {
+          auth: socket.handshake?.auth,
+          authorization: socket.handshake?.headers?.authorization,
         });
+        return callback?.({ success: false, message: "احراز هویت Socket.io انجام نشد (socket.user ندارد)." });
+      }
 
-        await chargeTierFromPlayers(match);
+      const userId = Number(socket.user.userId);
+      if (!Number.isFinite(userId))
+        return callback?.({ success: false, message: "userId نامعتبر است." });
 
-        console.log("[CHARGED OK]", {
-          matchId,
-          tier: match.tier,
-          playerColors: match.playerColors,
-        });
+      connectedUsers.set(String(userId), socket.id);
 
-        resetMatchGame(match);
-        broadcastState(match);
-        startTurnTimeout(match);
+      if (!matches.has(matchId)) {
+        matches.set(matchId, createMatch(matchId));
+      }
 
-        return callback?.({
-          success: true,
-          message: "بازی شروع شد.",
-          matchId,
-          tier: match.tier,
-        });
-      } catch (e) {
-        console.error("[CHARGE FAILED]", {
-          matchId,
-          tier: match.tier,
-          playerColors: match.playerColors,
-          error: e?.message || String(e),
-        });
+      const match = matches.get(matchId);
 
-        // ✅ مهم: برگرداندن وضعیت تا نیمه‌کاره نماند
-        match.status = "waiting";
-        match.chargedEntry = false;
-
+      if (match.tier === null) {
+        match.tier = tier;
+      } else if (match.tier !== tier) {
         return callback?.({
           success: false,
-          message: "شروع بازی ممکن نشد (خطای تسویه). دوباره تلاش کنید.",
-          matchId,
+          message: `این بازی با ورودی ${match.tier} سکه ساخته شده است.`,
         });
       }
+
+      const alreadyAssigned =
+        Object.values(match.playerColors).includes(userId);
+
+      if (match.status !== "waiting" && !alreadyAssigned) {
+        return callback?.({
+          success: false,
+          message: "این بازی قبلاً شروع شده است.",
+        });
+      }
+
+      if (!alreadyAssigned) {
+        const emptyColor = colorOrder.find(
+          (color) => match.playerColors[color] === null
+        );
+
+        if (!emptyColor) {
+          return callback?.({
+            success: false,
+            message: "ظرفیت بازی کامل شده است.",
+          });
+        }
+
+        match.playerColors[emptyColor] = userId;
+      }
+
+      await socket.join(`match:${matchId}`);
+      match.players.set(userId, socket.id);
+
+      const filledColors = colorOrder.filter((c) => match.playerColors[c] !== null).length;
+
+      console.log("[JOIN]", {
+        matchId,
+        userId,
+        tier,
+        filledColors,
+        status: match.status,
+        playerColors: match.playerColors,
+        matchTier: match.tier,
+      });
+
+      if (filledColors === 4 && match.status !== "playing") {
+        try {
+          match.status = "playing";
+
+          console.log("[START CHECK]", {
+            matchId,
+            filledColors,
+            status: match.status,
+            tier: match.tier,
+            playerColors: match.playerColors,
+          });
+
+          await chargeTierFromPlayers(match);
+
+          console.log("[CHARGED OK]", {
+            matchId,
+            tier: match.tier,
+            playerColors: match.playerColors,
+          });
+
+          resetMatchGame(match);
+          broadcastState(match);
+          startTurnTimeout(match);
+
+          return callback?.({
+            success: true,
+            message: "بازی شروع شد.",
+            matchId,
+            tier: match.tier,
+          });
+        } catch (e) {
+          console.error("[CHARGE FAILED]", {
+            matchId,
+            tier: match.tier,
+            playerColors: match.playerColors,
+            error: e?.message || String(e),
+          });
+
+          match.status = "waiting";
+          match.chargedEntry = false;
+
+          return callback?.({
+            success: false,
+            message: "شروع بازی ممکن نشد (خطای تسویه). دوباره تلاش کنید.",
+            matchId,
+          });
+        }
+      }
+
+      callback?.({
+        success: true,
+        message:
+          match.status === "playing"
+            ? "دوباره به بازی متصل شدید."
+            : "به صف اضافه شد.",
+        matchId,
+        tier: match.tier,
+        filledColors,
+        status: match.status,
+        playerColors: match.playerColors,
+      });
+
+      if (match.status === "playing" && match.game) {
+        broadcastState(match);
+      }
+
+      return;
+    } catch (e) {
+      console.error("JOIN ERROR:", e);
+      return callback?.({ success: false, message: e.message || "خطای join" });
     }
+  });
 
-    callback?.({
-      success: true,
-      message:
-        match.status === "playing"
-          ? "دوباره به بازی متصل شدید."
-          : "به صف اضافه شد.",
-      matchId,
-      tier: match.tier,
-      filledColors,
-      status: match.status,
-      playerColors: match.playerColors,
-    });
-
-    // اگر بازی قبلاً شروع شده باشد، بازیکن متصل‌شده ممکن است
-    // Broadcast قبلی را دریافت نکرده باشد؛ پس State فعلی ارسال می‌شود.
-    if (match.status === "playing" && match.game) {
-      broadcastState(match);
-    }
-
-    return;
-
-  } catch (e) {
-    console.error("JOIN ERROR:", e);
-    return callback?.({ success: false, message: e.message || "خطای join" });
-  }
-});
-
-socket.on("game:roll", async (payload, callback) => {
+  socket.on("game:roll", async (payload, callback) => {
     try {
       const matchId = payload?.matchId ?? payload?.roomId;
       if (!matchId || !matches.has(String(matchId))) {
@@ -1319,10 +1307,10 @@ socket.on("game:roll", async (payload, callback) => {
 
       if (match.game.winner) return callback?.({ success: false, message: "بازی تمام شده است." });
 
-      const userId = Number(socket.user.userId);
+      const uid = Number(socket.user.userId);
       const turnColor = getCurrentColor(match);
 
-      if (match.playerColors[turnColor] !== userId) {
+      if (match.playerColors[turnColor] !== uid) {
         return callback?.({ success: false, message: "نوبت شما نیست." });
       }
 
@@ -1331,197 +1319,169 @@ socket.on("game:roll", async (payload, callback) => {
         return callback?.({ success: false, message: "زمان نوبت گذشته." });
       }
 
-      const dice = getNextDiceValueFromMatch();
-      match.game.dice = dice;
+      const dice1 = getNextDiceValueFromMatch();
+      const dice2 = getNextDiceValueFromMatch();
+
+      match.game.dice = 0; // سازگاری
+      match.game.dice1 = dice1;
+      match.game.dice2 = dice2;
+      match.game.pendingDice = [dice1, dice2];
+
       match.game.rolled = true;
       match.game.turnMoved = false;
 
       broadcastState(match);
       startTurnTimeout(match);
 
-      return callback?.({ success: true, dice });
+      return callback?.({ success: true, dice1, dice2, pendingDice: match.game.pendingDice });
     } catch (e) {
       return callback?.({ success: false, message: e.message || "خطای roll" });
     }
   });
 
-socket.on("game:move", async (payload, callback) => {
-  try {
-    const matchId = payload?.matchId ?? payload?.roomId;
-    const pieceId = payload?.pieceId;
+  socket.on("game:move", async (payload, callback) => {
+    try {
+      const matchId = payload?.matchId ?? payload?.roomId;
+      const pieceId = payload?.pieceId;
+      const dieValue = Number(payload?.dieValue);
 
-    if (!matchId || !matches.has(String(matchId))) {
-      return callback?.({
-        success: false,
-        message: "match پیدا نشد.",
-      });
-    }
-
-    if (pieceId === undefined || pieceId === null) {
-      return callback?.({
-        success: false,
-        message: "pieceId لازم است.",
-      });
-    }
-
-    const match = matches.get(String(matchId));
-
-    if (!match.game || match.status !== "playing") {
-      return callback?.({
-        success: false,
-        message: "بازی هنوز شروع نشده است.",
-      });
-    }
-
-    if (match.game.winner) {
-      return callback?.({
-        success: false,
-        message: "بازی تمام شده است.",
-      });
-    }
-
-    if (!match.game.rolled) {
-      return callback?.({
-        success: false,
-        message: "اول رول کنید.",
-      });
-    }
-
-    if (Date.now() > match.game.turnDeadlineAt) {
-      return callback?.({
-        success: false,
-        message: "زمان نوبت گذشته.",
-      });
-    }
-
-    const userId = Number(socket.user.userId);
-    const turnColor = getCurrentColor(match);
-
-    if (match.playerColors[turnColor] !== userId) {
-      return callback?.({
-        success: false,
-        message: "نوبت شما نیست.",
-      });
-    }
-
-    if (match.game.turnMoved) {
-      return callback?.({
-        success: false,
-        message: "در این نوبت فقط یک حرکت مجاز است.",
-      });
-    }
-
-    const piece = match.game.pieces.find(
-      (currentPiece) => currentPiece.id === pieceId
-    );
-
-    if (!piece) {
-      return callback?.({
-        success: false,
-        message: "مهره پیدا نشد.",
-      });
-    }
-
-    const movable = canPieceMove(match.game, piece);
-
-    if (!movable) {
-      return callback?.({
-        success: false,
-        message: "حرکت مجاز نیست.",
-      });
-    }
-
-    const moved = movePiece(match.game, piece);
-
-    if (!moved) {
-      return callback?.({
-        success: false,
-        message: "حرکت انجام نشد.",
-      });
-    }
-
-    match.game.turnMoved = true;
-
-    /*
-    |--------------------------------------------------------------------------
-    | بررسی برنده
-    |--------------------------------------------------------------------------
-    */
-    const winnerColor = checkWinner(match.game);
-
-    if (winnerColor) {
-      match.game.winner = winnerColor;
-      match.status = "finished";
-      match.turnDeadlineAt = Date.now();
-      match.game.turnDeadlineAt = Date.now();
-
-      // تایمر باقی‌مانده بازی پاک شود.
-      if (match.pendingTurnTimer) {
-        clearTimeout(match.pendingTurnTimer);
-        match.pendingTurnTimer = null;
+      if (!matchId || !matches.has(String(matchId))) {
+        return callback?.({ success: false, message: "match پیدا نشد." });
+      }
+      if (pieceId === undefined || pieceId === null) {
+        return callback?.({ success: false, message: "pieceId لازم است." });
+      }
+      if (!Number.isFinite(dieValue) || dieValue < 1 || dieValue > 6) {
+        return callback?.({ success: false, message: "dieValue باید 1 تا 6 باشد." });
       }
 
-      broadcastState(match);
+      const match = matches.get(String(matchId));
 
-      try {
-        await settleCoinsForMatch(match);
-      } catch (error) {
-        console.error(
-          "settleCoinsForMatch failed:",
-          error
-        );
+      if (!match.game || match.status !== "playing") {
+        return callback?.({ success: false, message: "بازی هنوز شروع نشده است." });
+      }
+      if (match.game.winner) {
+        return callback?.({ success: false, message: "بازی تمام شده است." });
+      }
+      if (!match.game.rolled) {
+        return callback?.({ success: false, message: "اول رول کنید." });
+      }
+      if (Date.now() > match.game.turnDeadlineAt) {
+        return callback?.({ success: false, message: "زمان نوبت گذشته." });
       }
 
+      const uid = Number(socket.user.userId);
+      const turnColor = getCurrentColor(match);
+
+      if (match.playerColors[turnColor] !== uid) {
+        return callback?.({ success: false, message: "نوبت شما نیست." });
+      }
+
+      const pending = Array.isArray(match.game.pendingDice) ? match.game.pendingDice : [];
+      const idx = pending.findIndex((d) => d === dieValue);
+      if (idx === -1) {
+        return callback?.({ success: false, message: "این تاس برای این نوبت شما باقی نمانده است." });
+      }
+
+      const piece = match.game.pieces.find((currentPiece) => currentPiece.id === pieceId);
+      if (!piece) {
+        return callback?.({ success: false, message: "مهره پیدا نشد." });
+      }
+
+      const movable = canPieceMove(match.game, piece, dieValue);
+      if (!movable) {
+        return callback?.({ success: false, message: "حرکت مجاز نیست." });
+      }
+
+      const moved = movePiece(match.game, piece, dieValue);
+      if (!moved) {
+        return callback?.({ success: false, message: "حرکت انجام نشد." });
+      }
+
+      match.game.pendingDice.splice(idx, 1);
+
+      const winnerColor = checkWinner(match.game);
+      if (winnerColor) {
+        match.game.winner = winnerColor;
+        match.status = "finished";
+        match.turnDeadlineAt = Date.now();
+        match.game.turnDeadlineAt = Date.now();
+
+        if (match.pendingTurnTimer) {
+          clearTimeout(match.pendingTurnTimer);
+          match.pendingTurnTimer = null;
+        }
+
+        broadcastState(match);
+
+        try {
+          await settleCoinsForMatch(match);
+        } catch (error) {
+          console.error("settleCoinsForMatch failed:", error);
+        }
+
+        return callback?.({ success: true, moved: true, winnerColor });
+      }
+
+      if (match.game.pendingDice.length > 0) {
+        match.game.turnMoved = true;
+        broadcastState(match);
+        return callback?.({
+          success: true,
+          moved: true,
+          consumedDie: dieValue,
+          pendingDice: match.game.pendingDice,
+          moreMovesAllowed: true,
+        });
+      }
+
+      const isDoubleSix = match.game.dice1 === 6 && match.game.dice2 === 6;
+      if (isDoubleSix) {
+        match.game.dice = 0;
+        match.game.dice1 = 0;
+        match.game.dice2 = 0;
+        match.game.pendingDice = [];
+        match.game.rolled = false;
+        match.game.turnMoved = false;
+
+        match.game.turnDeadlineAt = Date.now() + TURN_MS;
+        match.turnDeadlineAt = match.game.turnDeadlineAt;
+        match.turnId++;
+
+        broadcastState(match);
+        startTurnTimeout(match);
+
+        return callback?.({
+          success: true,
+          moved: true,
+          consumedDie: dieValue,
+          bonusRoll: true,
+        });
+      }
+
+      nextTurn(match);
       return callback?.({
         success: true,
         moved: true,
-        winnerColor,
+        consumedDie: dieValue,
+        bonusRoll: false,
       });
+    } catch (error) {
+      console.error("[GAME MOVE ERROR]", error);
+      return callback?.({ success: false, message: error?.message || "خطای move" });
     }
-
-    /*
-    |--------------------------------------------------------------------------
-    | پایان حرکت عادی
-    |--------------------------------------------------------------------------
-    */
-
-    // مقدار تاس قبل از nextTurn ذخیره می‌شود؛
-    // زیرا nextTurn مقدار تاس را صفر می‌کند.
-    const rolledDice = match.game.dice;
-
-    callback?.({
-      success: true,
-      moved: true,
-      dice: rolledDice,
-    });
-
-    // اگر تاس ۶ باشد نوبت همان بازیکن باقی می‌ماند؛
-    // در غیر این صورت نوبت به بازیکن بعدی می‌رسد.
-    // این تابع خودش broadcastState و startTurnTimeout را اجرا می‌کند.
-    nextTurn(match);
-    return;
-  } catch (error) {
-    console.error("[GAME MOVE ERROR]", error);
-
-    return callback?.({
-      success: false,
-      message: error?.message || "خطای move",
-    });
-  }
-});
-
+  });
 
   socket.on("disconnect", () => {
     try {
-      const userId = Number(socket.user?.userId);
-      if (!Number.isFinite(userId)) return;
-      const key = String(userId);
+      const uid = Number(socket.user?.userId);
+      if (!Number.isFinite(uid)) return;
+      const key = String(uid);
       if (connectedUsers.get(key) === socket.id) connectedUsers.delete(key);
     } catch {}
   });
 }); // end io.on("connection")
 
-// Start server
 httpServer.listen(PORT, () => {
   console.log(`✅ Server listening on http://localhost:${PORT}`);
 });

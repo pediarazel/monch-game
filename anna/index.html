@@ -40,6 +40,17 @@
     .dice.rolling{ animation:shake 0.08s linear infinite; }
     @keyframes shake{ 0%{ transform:rotate(-3deg);} 50%{ transform:rotate(3deg);} 100%{ transform:rotate(-3deg);} }
 
+    .dicePick{
+      cursor:pointer;
+      transition:transform .08s, border-color .15s, filter .15s;
+      filter:saturate(1);
+    }
+    .dicePick:hover{ transform:scale(1.03); border-color:#8bffdd; }
+    .dicePick.selected{
+      border-color:#22c55e;
+      box-shadow:0 0 0 3px rgba(34,197,94,.25);
+    }
+
     button{
       border:none;background:#fff;color:#000;border-radius:12px;
       padding:12px 18px;font-size:15px;font-weight:bold;cursor:pointer;
@@ -157,9 +168,23 @@
   <canvas id="board" width="600" height="600"></canvas>
 
   <div class="panel">
-    <div id="dice" class="dice">🎲</div>
-    <button id="rollBtn">ریختن تاس</button>
-    <button id="resetBtn">شروع مجدد (فقط لوکال)</button>
+    <div style="display:flex; align-items:center; justify-content:center; gap:10px; width:100%; flex-wrap:wrap;">
+      <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+        <div id="dice1" class="dice dicePick">🎲</div>
+        <div class="muted" style="font-size:12px;">تاس 1</div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+        <div id="dice2" class="dice dicePick">🎲</div>
+        <div class="muted" style="font-size:12px;">تاس 2</div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:8px; align-items:center; min-width:260px;">
+        <button id="rollBtn">ریختن تاس</button>
+        <button id="resetBtn">شروع مجدد (فقط لوکال)</button>
+      </div>
+    </div>
+
     <div class="info">
       <div id="turnInfo"></div>
       <div id="msg"></div>
@@ -180,135 +205,126 @@
   const joinStatusEl = document.getElementById('joinStatus');
 
   function setMsg(text){ if(msgEl) msgEl.textContent = text; }
-let lastDebugData = {};
+  let lastDebugData = {};
 
-function setDebug(value) {
-  try {
-    let nextValue = value;
+  function setDebug(value) {
+    try {
+      let nextValue = value;
 
-    if (typeof value === "function") {
-      nextValue = value(lastDebugData);
+      if (typeof value === "function") {
+        nextValue = value(lastDebugData);
+      }
+
+      if (
+        nextValue &&
+        typeof nextValue === "object" &&
+        !Array.isArray(nextValue)
+      ) {
+        lastDebugData = nextValue;
+      } else {
+        lastDebugData = nextValue;
+      }
+
+      debugEl.textContent =
+        typeof nextValue === "string"
+          ? nextValue
+          : JSON.stringify(nextValue, null, 2);
+    } catch (error) {
+      debugEl.textContent = String(
+        error?.message || value || "Debug error"
+      );
     }
-
-    if (
-      nextValue &&
-      typeof nextValue === "object" &&
-      !Array.isArray(nextValue)
-    ) {
-      lastDebugData = nextValue;
-    } else {
-      lastDebugData = nextValue;
-    }
-
-    debugEl.textContent =
-      typeof nextValue === "string"
-        ? nextValue
-        : JSON.stringify(nextValue, null, 2);
-  } catch (error) {
-    debugEl.textContent = String(
-      error?.message || value || "Debug error"
-    );
   }
-}
-
 
   window.addEventListener('error', (e)=> setMsg('ERROR: ' + (e.message || e.error || e)));
   window.addEventListener('unhandledrejection', (e)=> setMsg('PROMISE ERROR: ' + ((e.reason && e.reason.message) ? e.reason.message : e.reason)));
 
   setMsg('صفحه لود شد ✅');
 
-const SOCKET_URL = window.location.origin;
+  const SOCKET_URL = window.location.origin;
   const API_BASE = (window.API_BASE_OVERRIDE || "").trim() || "";
   function api(path){ return API_BASE ? (API_BASE.replace(/\/$/,'') + path) : path; }
 
-// --- Token helpers ---
-const TOKEN_STORAGE_KEY = "token";
+  // --- Token helpers ---
+  const TOKEN_STORAGE_KEY = "token";
 
-function normalizeToken(value) {
-  if (value == null) return "";
+  function normalizeToken(value) {
+    if (value == null) return "";
 
-  let token = String(value).trim();
+    let token = String(value).trim();
 
-  // اگر توکن قبلاً با JSON.stringify ذخیره شده باشد
-  if (
-    (token.startsWith('"') && token.endsWith('"')) ||
-    (token.startsWith("'") && token.endsWith("'"))
-  ) {
-    try {
-      token = JSON.parse(token);
-    } catch {
-      token = token.slice(1, -1);
+    // اگر توکن قبلاً با JSON.stringify ذخیره شده باشد
+    if (
+      (token.startsWith('"') && token.endsWith('"')) ||
+      (token.startsWith("'") && token.endsWith("'"))
+    ) {
+      try {
+        token = JSON.parse(token);
+      } catch {
+        token = token.slice(1, -1);
+      }
     }
+
+    token = String(token || "").trim();
+
+    // در LocalStorage فقط خود JWT ذخیره شود
+    token = token.replace(/^Bearer\s+/i, "").trim();
+
+    return token;
   }
 
-  token = String(token || "").trim();
+  function getToken() {
+    const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+    const token = normalizeToken(storedToken);
 
-  // در LocalStorage فقط خود JWT ذخیره شود
-  token = token.replace(/^Bearer\s+/i, "").trim();
+    if (token && token !== storedToken) {
+      localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    }
+    return token;
+  }
 
-  return token;
-}
+  function setToken(value) {
+    const token = normalizeToken(value);
 
-function getToken() {
-  const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
-  const token = normalizeToken(storedToken);
+    if (!token) {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      return "";
+    }
 
-  // اصلاح خودکار توکن‌های قدیمی دارای کوتیشن یا Bearer
-  if (token && token !== storedToken) {
     localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    return token;
   }
 
-  return token;
-}
-
-function setToken(value) {
-  const token = normalizeToken(value);
-
-  if (!token) {
+  function clearToken() {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
-    return "";
   }
 
-  localStorage.setItem(TOKEN_STORAGE_KEY, token);
-  return token;
-}
+  function getTokenPayload() {
+    try {
+      const token = getToken();
+      if (!token) return null;
 
-function clearToken() {
-  localStorage.removeItem(TOKEN_STORAGE_KEY);
-}
+      const parts = token.split(".");
+      if (parts.length !== 3) return null;
 
+      let base64 = parts[1]
+        .replace(/-/g, "+")
+        .replace(/_/g, "/");
 
-function getTokenPayload() {
-  try {
-    const token = getToken();
-    if (!token) return null;
+      while (base64.length % 4 !== 0) {
+        base64 += "=";
+      }
 
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
+      const binary = atob(base64);
+      const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+      const json = new TextDecoder("utf-8").decode(bytes);
 
-    let base64 = parts[1]
-      .replace(/-/g, "+")
-      .replace(/_/g, "/");
-
-    while (base64.length % 4 !== 0) {
-      base64 += "=";
+      return JSON.parse(json);
+    } catch (error) {
+      console.error("JWT payload decode error:", error);
+      return null;
     }
-
-    const binary = atob(base64);
-
-    const bytes = Uint8Array.from(binary, char => {
-      return char.charCodeAt(0);
-    });
-
-    const json = new TextDecoder("utf-8").decode(bytes);
-
-    return JSON.parse(json);
-  } catch (error) {
-    console.error("JWT payload decode error:", error);
-    return null;
   }
-}
-
 
   function getMyUserIdFromPayload(payload){
     const candidate = payload?.userId ?? payload?.id ?? payload?.sub ?? payload?.uid ?? null;
@@ -388,31 +404,19 @@ function getTokenPayload() {
         return;
       }
 
-const savedToken = setToken(data.token);
+      setToken(data.token);
 
-if (!savedToken) {
-  setAuthResult("توکن دریافتی از سرور نامعتبر یا خالی است.");
-  return;
-}
+      if (socket) {
+        try { socket.removeAllListeners(); socket.disconnect(); } catch {}
+        socket = null;
+      }
 
-// هر اتصال قدیمی باید حذف شود تا توکن جدید استفاده شود
-if (socket) {
-  try {
-    socket.removeAllListeners();
-    socket.disconnect();
-  } catch (error) {
-    console.warn("Old socket disconnect error:", error);
-  }
+      setAuthResult("✅ ورود انجام شد.");
+      serverMsgEl.textContent = "حالا شناسه بازی را وارد کن.";
+      socketStatusEl.textContent = "آماده اتصال با توکن جدید.";
 
-  socket = null;
-}
-
-setAuthResult("✅ ورود انجام شد.");
-serverMsgEl.textContent = "حالا شناسه بازی را وارد کن.";
-socketStatusEl.textContent = "آماده اتصال با توکن جدید.";
-
-startBalanceAutoRefresh();
-await updateBalance();
+      startBalanceAutoRefresh();
+      await updateBalance();
 
     }catch(e){
       setAuthResult("خطا در ارتباط با سرور");
@@ -453,9 +457,12 @@ await updateBalance();
   // --- Game UI / Socket + Board ---
   const canvas = document.getElementById("board");
   const ctx = canvas.getContext("2d");
+
   const rollBtn = document.getElementById("rollBtn");
   const resetBtn = document.getElementById("resetBtn");
-  const diceEl = document.getElementById("dice");
+
+  const dice1El = document.getElementById("dice1");
+  const dice2El = document.getElementById("dice2");
   const turnInfo = document.getElementById("turnInfo");
 
   const COLORS = {
@@ -513,6 +520,24 @@ await updateBalance();
   let myColor = null;
   let gameState = null;
   let currentMatchId = null;
+
+  // ✅ انتخاب تاس برای هر حرکت
+  let pickedDieValue = null; // 1..6
+
+  function clearDiePickUI(){
+    dice1El.classList.remove("selected");
+    dice2El.classList.remove("selected");
+  }
+
+  function syncDiePickUI(){
+    clearDiePickUI();
+    const d = pickedDieValue;
+    if (!gameState || !gameState.pendingDice || d == null) return;
+
+    // اگر دو تاس برابر باشند، هر دو را ممکن است یکی انتخاب کند؛ ما اولی را علامت می‌زنیم
+    if (gameState.pendingDice[0] === d) dice1El.classList.add("selected");
+    else if (gameState.pendingDice[1] === d) dice2El.classList.add("selected");
+  }
 
   function getPieceDrawPos(p){
     if (p.state === "yard") {
@@ -655,14 +680,23 @@ await updateBalance();
       rollBtn.disabled = true;
       turnInfo.textContent = "";
       setMsg("بازی هنوز شروع نشده است.");
+      dice1El.textContent = "🎲";
+      dice2El.textContent = "🎲";
+      pickedDieValue = null;
+      clearDiePickUI();
       return;
     }
 
+    // winner
     if (gameState.winner){
       rollBtn.disabled = true;
       turnInfo.innerHTML = `برنده: <span class="tag ${gameState.winner}">${colorLabel[gameState.winner]}</span> 🎉`;
       setMsg("بازی به پایان رسید.");
       serverMsgEl.textContent = "";
+      dice1El.textContent = "🎉";
+      dice2El.textContent = "🎉";
+      pickedDieValue = null;
+      clearDiePickUI();
       return;
     }
 
@@ -681,6 +715,10 @@ await updateBalance();
     const turnDeadlineAt = Number(turnDeadlineAtRaw || 0);
     const hasDeadline = Number.isFinite(turnDeadlineAt) && turnDeadlineAt > 0;
 
+    const whoText = (turnUserId != null)
+      ? `کاربر نوبت: ${turnUserId}${(myUserId != null && String(myUserId) === String(turnUserId)) ? " (شما)" : ""}`
+      : `کاربر نوبت: نامشخص`;
+
     let remainingText = "";
     if (hasDeadline){
       const remainingSeconds = Math.max(0, Math.ceil((turnDeadlineAt - Date.now())/1000));
@@ -689,26 +727,61 @@ await updateBalance();
       remainingText = ` · زمان: نامشخص`;
     }
 
-    const whoText = (turnUserId != null)
-      ? `کاربر نوبت: ${turnUserId}${(myUserId != null && String(myUserId) === String(turnUserId)) ? " (شما)" : ""}`
-      : `کاربر نوبت: نامشخص`;
-
     turnInfo.innerHTML =
       `نوبت: <span class="tag ${turnColor}">${colorLabel[turnColor]}</span> · ${whoText}${remainingText}`;
 
-    if (!gameState.rolled){
-      setMsg(myColor === turnColor ? "تاس بیندازید." : "هنوز نوبت شما نیست.");
-    } else {
-      setMsg(myColor === turnColor ? "یک مهره را لمس کنید." : "هنوز نوبت شما نیست.");
-    }
-
+    // roll / pick / move UI
     const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.rolled && !gameState.winner;
     rollBtn.disabled = !canRoll;
+
+    const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
+
+    // وقتی rolled است، تاس‌ها را از pendingDice نمایش بده
+    if (gameState.rolled && pendingDice.length > 0){
+      dice1El.textContent = (pendingDice[0] ?? "🎲");
+      dice2El.textContent = (pendingDice[1] ?? "—");
+
+      const canPick = (myColor === turnColor) && gameState.rolled && !gameState.winner && pendingDice.length > 0;
+
+      dice1El.style.pointerEvents = canPick ? "auto" : "none";
+      dice2El.style.pointerEvents = canPick ? "auto" : "none";
+
+      // اگر تاسی که انتخاب شده دیگر تو pending نیست، پاکش کن
+      if (pickedDieValue != null && !pendingDice.includes(pickedDieValue)){
+        pickedDieValue = null;
+        clearDiePickUI();
+      }
+
+      syncDiePickUI();
+
+      if (myColor === turnColor){
+        if (pendingDice.length > 0 && pickedDieValue == null){
+          setMsg("تاس خودت را انتخاب کن، بعد یک مهره را بزن.");
+        } else {
+          setMsg("حالا یک مهره را بزن.");
+        }
+      } else {
+        setMsg("هنوز نوبت شما نیست.");
+      }
+    } else {
+      // اگر rolled نیست یا pending نداریم
+      dice1El.textContent = "🎲";
+      dice2El.textContent = "🎲";
+      dice1El.style.pointerEvents = "none";
+      dice2El.style.pointerEvents = "none";
+      pickedDieValue = null;
+      clearDiePickUI();
+
+      if (myColor === turnColor){
+        setMsg("تاس بیندازید.");
+      } else {
+        setMsg("هنوز نوبت شما نیست.");
+      }
+    }
 
     serverMsgEl.textContent = hasDeadline ? "" : "⚠️ turnDeadlineAt در state نیامده/صفر است.";
   }
 
-  // ✅ آپدیت دوره‌ای UI
   setInterval(()=>{
     if(gameState) {
       try { updateUI(); } catch {}
@@ -726,18 +799,40 @@ await updateBalance();
     if(!canRollLocal()) return;
 
     rollBtn.disabled = true;
-    diceEl.classList.add("rolling");
+
+    let i = 0;
+    dice1El.classList.add("rolling");
+    dice2El.classList.add("rolling");
 
     const anim = setInterval(()=>{
-      diceEl.textContent = Math.floor(Math.random()*6)+1;
+      dice1El.textContent = Math.floor(Math.random()*6)+1;
+      dice2El.textContent = Math.floor(Math.random()*6)+1;
+      i++;
+      if(i>12){
+        clearInterval(anim);
+      }
     }, 70);
 
     socket.emit("game:roll", { matchId: currentMatchId }, (resp)=>{
       clearInterval(anim);
-      diceEl.classList.remove("rolling");
+      dice1El.classList.remove("rolling");
+      dice2El.classList.remove("rolling");
+
       if(resp && resp.success){
-        diceEl.textContent = resp.dice;
-        setMsg("تاس زده شد. حالا حرکت کن.");
+        // UI از gameState خواهد آمد، ولی برای سرعت اینجا هم نمایش می‌دهیم
+        const d1 = resp.dice1 ?? resp.dice ?? "🎲";
+        const d2 = resp.dice2 ?? "🎲";
+        dice1El.textContent = d1;
+        dice2El.textContent = d2;
+
+        // انتخاب را پاک کن تا بازیکن دوباره انتخاب کند
+        pickedDieValue = null;
+        clearDiePickUI();
+setMsg("تاس‌ها زده شد. حالا یک تاس و یک مهره انتخاب کن.");
+      } else {
+        rollBtn.disabled = false;
+        setMsg(resp?.message ||```html
+        setMsg("تاس‌ها زده شد. حالا یکی از تاس‌ها را انتخاب کن، سپس یک مهره را بزن.");
       } else {
         rollBtn.disabled = false;
         setMsg(resp?.message || "خطا در رول");
@@ -751,6 +846,14 @@ await updateBalance();
     const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
     if(myColor !== turnColor) return;
 
+    const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
+    if(pendingDice.length === 0) return;
+
+    if (pickedDieValue == null) {
+      setMsg("اول یکی از تاس‌ها را انتخاب کن.");
+      return;
+    }
+
     const rect = canvas.getBoundingClientRect();
     const scale = canvas.width / rect.width;
     const x = (e.clientX - rect.left) * scale;
@@ -761,7 +864,11 @@ await updateBalance();
       const pos = getPieceDrawPos(p);
       if(!pos) continue;
       if (Math.hypot(x-pos.x, y-pos.y) <= CELL*0.6){
-        socket.emit("game:move", { matchId: currentMatchId, pieceId: p.id }, (resp)=>{
+        socket.emit("game:move", {
+          matchId: currentMatchId,
+          pieceId: p.id,
+          dieValue: pickedDieValue
+        }, (resp)=>{
           if(resp && !resp.success) setMsg(resp.message || "حرکت نامعتبر");
         });
         return;
@@ -769,11 +876,41 @@ await updateBalance();
     }
   }
 
+  function chooseDieValue(dv){
+    const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
+    if(pendingDice.length === 0) return;
+    if(!pendingDice.includes(dv)) return;
+    pickedDieValue = dv;
+    syncDiePickUI();
+    setMsg("تاس انتخاب شد. حالا یک مهره را بزن.");
+  }
+
+  dice1El.addEventListener("click", ()=>{
+    if(!gameState || !gameState.rolled || gameState.winner) return;
+    const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
+    if(pendingDice.length === 0) return;
+    const dv = pendingDice[0];
+    chooseDieValue(dv);
+  });
+
+  dice2El.addEventListener("click", ()=>{
+    if(!gameState || !gameState.rolled || gameState.winner) return;
+    const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
+    if(pendingDice.length === 0) return;
+    const dv = pendingDice[1];
+    chooseDieValue(dv);
+  });
+
   rollBtn.addEventListener("click", rollDice);
+
   resetBtn.addEventListener("click", ()=>{
-    diceEl.textContent = "🎲";
+    dice1El.textContent = "🎲";
+    dice2El.textContent = "🎲";
+    pickedDieValue = null;
+    clearDiePickUI();
     setMsg("ریست لوکال (کنترل اصلی با سرور است).");
   });
+
   canvas.addEventListener("click", onBoardClick);
 
   function waitForSocketConnected(sock, timeoutMs=15000){
@@ -815,206 +952,111 @@ await updateBalance();
     });
   }
 
-  // ✅ این تابع را یکپارچه و با براکت‌های سالم می‌دهم تا SyntaxError نیاید
-function connectSocketOnce() {
-  const token = getToken();
+  function connectSocketOnce() {
+    const token = getToken();
 
-  if (!token) {
-    setMsg("ابتدا وارد حساب کاربری شو.");
-    socketStatusEl.textContent = "❌ توکن ورود وجود ندارد.";
-    return null;
-  }
+    if (!token) {
+      setMsg("ابتدا وارد حساب کاربری شو.");
+      socketStatusEl.textContent = "❌ توکن ورود وجود ندارد.";
+      return null;
+    }
 
-  const tokenParts = token.split(".");
+    const tokenParts = token.split(".");
+    if (tokenParts.length !== 3) {
+      setMsg("فرمت توکن ذخیره‌شده صحیح نیست.");
+      socketStatusEl.textContent = "❌ فرمت JWT نامعتبر است.";
+      setDebug({
+        socketTokenError: {
+          message: "JWT باید سه بخش داشته باشد.",
+          partsCount: tokenParts.length,
+          tokenLength: token.length
+        }
+      });
+      return null;
+    }
 
-  if (tokenParts.length !== 3) {
-    setMsg("فرمت توکن ذخیره‌شده صحیح نیست.");
-    socketStatusEl.textContent = "❌ فرمت JWT نامعتبر است.";
-    setDebug({
-      socketTokenError: {
-        message: "JWT باید سه بخش داشته باشد.",
-        partsCount: tokenParts.length,
-        tokenLength: token.length
-      }
+    if (socket && socket.connected) {
+      return socket;
+    }
+
+    if (socket) {
+      try { socket.removeAllListeners(); socket.disconnect(); } catch (error) {}
+      socket = null;
+    }
+
+    socket = io(SOCKET_URL, {
+      autoConnect: false,
+      transports: ["polling", "websocket"],
+      timeout: 15000,
+      auth: (callback) => {
+        const freshToken = getToken();
+        callback({ token: freshToken });
+      },
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000
     });
-    return null;
-  }
 
-  console.log("[SOCKET] preparing connection", {
-    tokenLength: token.length,
-    tokenPrefix: token.slice(0, 12),
-    payload: getTokenPayload()
-  });
+    socket.on("connect", async () => {
+      socketStatusEl.textContent = "✅ سوکت متصل شد (" + socket.id + ")";
+      serverMsgEl.textContent = "✅ اتصال آنلاین برقرار شد.";
+      await updateBalance().catch(()=>{});
+    });
 
-  // اگر همین حالا متصل است، از همان اتصال استفاده شود
-  if (socket && socket.connected) {
+    socket.on("connect_error", error => {
+      const message =
+        error && error.message ? error.message : String(error || "خطای نامشخص");
+      socketStatusEl.textContent = "❌ خطای اتصال سوکت: " + message;
+      setDebug({
+        socketConnectError: {
+          message,
+          name: error?.name || null
+        }
+      });
+    });
+
+    socket.on("disconnect", reason => {
+      socketStatusEl.textContent = "⚠️ اتصال سوکت قطع شد: " + (reason || "نامشخص");
+    });
+
+    socket.io.on("reconnect_attempt", attemptNumber => {
+      socketStatusEl.textContent = `در حال تلاش مجدد برای اتصال (${attemptNumber})...`;
+    });
+
+    socket.io.on("reconnect", attemptNumber => {
+      socketStatusEl.textContent = `✅ اتصال مجدد برقرار شد (${attemptNumber})`;
+    });
+
+    socket.io.on("reconnect_failed", () => {
+      socketStatusEl.textContent = "❌ تلاش‌های اتصال مجدد ناموفق بود.";
+    });
+
+    socket.on("balanceChanged", data => {
+      const newBalance = data?.newCoins ?? data?.coins;
+      if (newBalance != null) balanceValueEl.textContent = String(newBalance);
+    });
+
+    socket.on("game:state", state => {
+      gameState = state;
+
+      const payload = getTokenPayload();
+      const myUserId = getMyUserIdFromPayload(payload);
+
+      if (state?.playerColors && myUserId != null) {
+        myColor = colorOrder.find(color => String(state.playerColors[color]) === String(myUserId)) || null;
+      } else {
+        myColor = null;
+      }
+
+      updateUI();
+      draw();
+    });
+
+    socket.connect();
     return socket;
   }
 
-  // سوکت قبلی و listenerهای قبلی کاملاً حذف شوند
-  if (socket) {
-    try {
-      socket.removeAllListeners();
-      socket.disconnect();
-    } catch (error) {
-      console.warn("Socket cleanup error:", error);
-    }
-
-    socket = null;
-  }
-
-  socket = io(SOCKET_URL, {
-    autoConnect: false,
-
-    // ابتدا polling و سپس ارتقا به websocket
-    transports: ["polling", "websocket"],
-
-    timeout: 15000,
-
-    // هنگام هر بار اتصال، جدیدترین توکن خوانده می‌شود
-    auth: (callback) => {
-      const freshToken = getToken();
-
-      console.log("[SOCKET] sending auth", {
-        tokenLength: freshToken.length,
-        tokenPrefix: freshToken.slice(0, 12)
-      });
-
-      callback({
-        token: freshToken
-      });
-    },
-
-    reconnection: true,
-    reconnectionAttempts: 10,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 5000
-  });
-
-  socket.on("connect", async () => {
-    socketStatusEl.textContent =
-      "✅ سوکت متصل شد (" + socket.id + ")";
-
-    serverMsgEl.textContent = "✅ اتصال آنلاین برقرار شد.";
-
-    console.log("[SOCKET] connected", {
-      socketId: socket.id,
-      transport: socket.io.engine.transport.name
-    });
-
-    await updateBalance().catch(error => {
-      console.warn("Balance refresh error:", error);
-    });
-  });
-
-  socket.on("connect_error", error => {
-    const message =
-      error && error.message
-        ? error.message
-        : String(error || "خطای نامشخص");
-
-    socketStatusEl.textContent =
-      "❌ خطای اتصال سوکت: " + message;
-
-    console.error("[SOCKET] connect_error:", error);
-
-    setDebug({
-      socketConnectError: {
-        message,
-        name: error?.name || null,
-        code: error?.code || null,
-        description: error?.description || null,
-        context: error?.context || null,
-        tokenLength: getToken().length,
-        tokenPrefix: getToken().slice(0, 12)
-      }
-    });
-  });
-
-  socket.on("disconnect", reason => {
-    socketStatusEl.textContent =
-      "⚠️ اتصال سوکت قطع شد: " + (reason || "نامشخص");
-
-    console.warn("[SOCKET] disconnected:", reason);
-  });
-
-  socket.io.on("reconnect_attempt", attemptNumber => {
-    socketStatusEl.textContent =
-      `در حال تلاش مجدد برای اتصال (${attemptNumber})...`;
-  });
-
-  socket.io.on("reconnect", attemptNumber => {
-    socketStatusEl.textContent =
-      `✅ اتصال مجدد برقرار شد (${attemptNumber})`;
-  });
-
-  socket.io.on("reconnect_failed", () => {
-    socketStatusEl.textContent =
-      "❌ تلاش‌های اتصال مجدد ناموفق بود.";
-  });
-
-  socket.on("balanceChanged", data => {
-    const newBalance = data?.newCoins ?? data?.coins;
-
-    if (newBalance != null) {
-      balanceValueEl.textContent = String(newBalance);
-    }
-  });
-
-  socket.on("game:state", state => {
-    gameState = state;
-
-    const payload = getTokenPayload();
-    const myUserId = getMyUserIdFromPayload(payload);
-
-    if (state && state.playerColors && myUserId != null) {
-      myColor =
-        colorOrder.find(color => {
-          return String(state.playerColors[color]) === String(myUserId);
-        }) || null;
-    } else {
-      myColor = null;
-    }
-
-    setDebug({
-      gameState: {
-        currentTurn: state?.currentTurn,
-        currentTurnColor: state?.currentTurnColor,
-        currentTurnPlayerId: state?.currentTurnPlayerId,
-        turnDeadlineAt: state?.turnDeadlineAt,
-        rolled: state?.rolled,
-        rolling: state?.rolling,
-        winner: state?.winner || null,
-        playerColors: state?.playerColors,
-        my: {
-          myUserId,
-          myColor
-        }
-      }
-    });
-
-    if (state?.winner) {
-      setMsg("بازی تمام شد.");
-    } else if (!myColor) {
-      setMsg(
-        "رنگ شما مشخص نشد؛ userId با playerColors همخوانی ندارد."
-      );
-    } else {
-      setMsg("");
-    }
-
-    updateUI();
-    draw();
-  });
-
-  // چون autoConnect خاموش است، بعد از نصب listenerها متصل می‌شویم
-  socket.connect();
-
-  return socket;
-}
-
-
-  // Logout
   logoutBtn.addEventListener("click", ()=>{
     stopBalanceAutoRefresh();
     clearToken();
@@ -1026,28 +1068,15 @@ function connectSocketOnce() {
     gameState = null;
     myColor = null;
     currentMatchId = null;
+    pickedDieValue = null;
+    clearDiePickUI();
 
-if (socket) {
-  try {
-    socket.removeAllListeners();
-    socket.disconnect();
-  } catch (error) {
-    console.warn("Logout socket cleanup error:", error);
-  }
-
-  socket = null;
-}
-
-
-    diceEl.textContent = "🎲";
-    rollBtn.disabled = true;
-    if (turnInfo) turnInfo.textContent = "";
-    if (socketStatusEl) socketStatusEl.textContent = "";
-if (joinStatusEl) joinStatusEl.textContent = "";
-    draw();
+    if (socket) {
+      try { socket.removeAllListeners(); socket.disconnect(); } catch (error) {}
+      socket = null;
+    }
   });
 
-  // Join
   const matchIdInput = document.getElementById("matchIdInput");
   const tierInput = document.getElementById("tierInput");
   const joinBtn = document.getElementById("joinBtn");
@@ -1062,13 +1091,6 @@ if (joinStatusEl) joinStatusEl.textContent = "";
     if(!Number.isFinite(tier) || ![20,50,100].includes(tier)){ setAuthResult("tier نامعتبر است."); return; }
 
     currentMatchId = String(matchIdNum);
-
-    const payload = getTokenPayload();
-    const myUserId = getMyUserIdFromPayload(payload);
-
-    setDebug({
-      preJoin: { matchId: currentMatchId, tier, myUserId, tokenPrefix: (token||"").slice(0,18) }
-    });
 
     const s = connectSocketOnce();
     if(!s) return;
@@ -1094,30 +1116,7 @@ if (joinStatusEl) joinStatusEl.textContent = "";
 
     const joinPayload = { roomId: currentMatchId, tier };
 
-    console.log("[CLIENT] about to emit room:join", {
-  matchId: currentMatchId,
-  tier,
-  tokenLen: token.length,
-  tokenPrefix: token.slice(0, 20)
-});
-    console.log("[CLIENT JOIN EMIT]", {
-  connected: s?.connected,
-  sId: s?.id,
-  tokenLen: token.length,
-  tokenPrefix: token.slice(0, 12),
-  joinPayload
-});
     s.emit("room:join", joinPayload, (resp)=>{
-      setDebug((prev)=>{
-        const base = (prev && typeof prev === "object") ? prev : {};
-        return {
-          ...base,
-          join: { payload: joinPayload, resp }
-        };
-      });
-
-      joinBtn.disabled = false;
-
       if(resp && resp.success){
         serverMsgEl.textContent = "✅ وارد اتاق شد: " + currentMatchId + " | tier=" + tier;
         joinStatusEl.textContent = "✅ join success";
@@ -1127,14 +1126,13 @@ if (joinStatusEl) joinStatusEl.textContent = "";
         serverMsgEl.textContent = "❌ ورود به اتاق: " + message;
         joinStatusEl.textContent = "❌ join failed";
         setMsg("ورود ناموفق بود.");
+        joinBtn.disabled = false;
       }
     });
   });
 
-  // initial draw state
   draw();
   rollBtn.disabled = true;
-
 })();
 </script>
 </body>
