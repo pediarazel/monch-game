@@ -262,25 +262,42 @@ app.post("/api/auth/register", async (req, res) => {
   }
 });
 
-app.post("/api/auth/login", async (req, res) => {
-  try {
-    const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
-    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    // --- کد لاگین اصلاح شده با لاگ‌های تشخیصی ---
+    app.post('/api/auth/login', async (req, res) => {
+      const { username, password } = req.body;
+      console.log(`Attempting login for username: ${username}`); // لاگ ورودی
+      try {
+        // پیدا کردن کاربر در دیتابیس
+        const user = await prisma.user.findUnique({
+          where: { username: username.trim() }, // مطمئن شویم username هم trim شده باشد
+        });
 
-    if (!username || !password) return safeJsonError(res, 400, "نام کاربری و رمز عبور را وارد کنید.");
+        if (user) {
+          console.log(`User found: ${user.username}`); // لاگ یافتن کاربر
+          // مقایسه رمز عبور با رمز عبور هش شده در دیتابیس
+          const isMatch = await bcrypt.compare(password, user.password); // استفاده از bcrypt که import شده
+          console.log(`Password comparison result: ${isMatch}`); // لاگ نتیجه مقایسه رمز
 
-    const user = await prisma.user.findUnique({ where: { username: username.trim() } });
-    if (!user) return safeJsonError(res, 401, "نام کاربری یا رمز عبور اشتباه است.");
+          if (isMatch) {
+            // ایجاد توکن JWT در صورت تطابق رمز عبور
+            const token = jwt.sign({ userId: user.id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '1h' }); // username را هم اضافه کردم
+            console.log('Login successful, token generated.'); // لاگ موفقیت آمیز بودن ورود
+            return res.json({ success: true, token }); // response format را با register یکی کردم
+          } else {
+            console.log('Login failed: Invalid password'); // لاگ شکست ورود به دلیل رمز اشتباه
+            return res.status(401).json({ message: 'Invalid credentials' }); // response format را با register یکی کردم
+          }
+        } else {
+          console.log('Login failed: User not found'); // لاگ شکست ورود به دلیل عدم یافتن کاربر
+          return res.status(401).json({ message: 'Invalid credentials' }); // response format را با register یکی کردم
+        }
+      } catch (error) {
+        console.error('Error during login:', error); // لاگ خطا در صورت بروز مشکل در دیتابیس یا ...
+        return res.status(500).json({ message: 'Internal server error' }); // response format را با register یکی کردم
+      }
+    });
+    // --- پایان کد لاگین اصلاح شده ---
 
-    const ok = await bcrypt.compare(password, user.password);
-    if (!ok) return safeJsonError(res, 401, "نام کاربری یا رمز عبور اشتباه است.");
-
-    const token = createToken({ userId: user.id, username: user.username });
-    return res.status(200).json({ success: true, token });
-  } catch (e) {
-    return safeJsonError(res, 500, e.message || "خطای داخلی");
-  }
-});
 
 app.get("/api/auth/check", authenticateHttp, (req, res) => {
   return res.status(200).json({ success: true, user: req.user });
