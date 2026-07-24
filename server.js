@@ -436,6 +436,31 @@ function canPieceMove(game, piece, dieValue) {
   return false;
 }
 
+function hasLegalMoveForDie(game, dieValue) {
+  if (!game || !Array.isArray(game.pieces)) {
+    return false;
+  }
+
+  const currentColor = colorOrder[game.currentTurn];
+
+  return game.pieces.some(
+    (piece) =>
+      piece.color === currentColor &&
+      canPieceMove(game, piece, dieValue)
+  );
+}
+
+function hasAnyLegalPendingMove(game) {
+  const pendingDice = Array.isArray(game?.pendingDice)
+    ? game.pendingDice
+    : [];
+
+  return pendingDice.some((dieValue) =>
+    hasLegalMoveForDie(game, dieValue)
+  );
+}
+
+
 function capture(game, cellName, myColor) {
   for (const p of game.pieces) {
     if (p.color === myColor) continue;
@@ -497,16 +522,32 @@ function movePiece(game, piece, dieValue) {
 }
 
 function checkWinner(game) {
-  const byColor = {};
-  for (const p of game.pieces) {
-    byColor[p.color] ??= 0;
-    if (p.state === "home" && p.homeIndex === 3) byColor[p.color]++;
+  if (!game || !Array.isArray(game.pieces)) {
+    return null;
   }
+
   for (const color of colorOrder) {
-    if ((byColor[color] || 0) === 4) return color;
+    const homePieces = game.pieces.filter(
+      (piece) =>
+        piece.color === color &&
+        piece.state === "home" &&
+        Number.isInteger(piece.homeIndex) &&
+        piece.homeIndex >= 0 &&
+        piece.homeIndex < 4
+    );
+
+    const occupiedHomeIndexes = new Set(
+      homePieces.map((piece) => piece.homeIndex)
+    );
+
+    if (homePieces.length === 4 && occupiedHomeIndexes.size === 4) {
+      return color;
+    }
   }
+
   return null;
 }
+
 
 /*
 |--------------------------------------------------------------------------
@@ -1613,13 +1654,34 @@ io.on("connection", (socket) => {
       match.game.dice2 = dice2;
       match.game.pendingDice = [dice1, dice2];
 
-      match.game.rolled = true;
-      match.game.turnMoved = false;
+match.game.rolled = true;
+match.game.turnMoved = false;
 
-      broadcastState(match);
-      startTurnTimeout(match);
+if (!hasAnyLegalPendingMove(match.game)) {
+  nextTurn(match);
 
-      return callback?.({ success: true, dice1, dice2, pendingDice: match.game.pendingDice });
+  return callback?.({
+    success: true,
+    dice1,
+    dice2,
+    pendingDice: [],
+    noLegalMoves: true,
+    turnSkipped: true
+  });
+}
+
+broadcastState(match);
+startTurnTimeout(match);
+
+return callback?.({
+  success: true,
+  dice1,
+  dice2,
+  pendingDice: match.game.pendingDice,
+  noLegalMoves: false,
+  turnSkipped: false
+});
+
     } catch (e) {
       return callback?.({ success: false, message: e.message || "خطای roll" });
     }
@@ -1709,17 +1771,34 @@ io.on("connection", (socket) => {
         return callback?.({ success: true, moved: true, winnerColor });
       }
 
-      if (match.game.pendingDice.length > 0) {
-        match.game.turnMoved = true;
-        broadcastState(match);
-        return callback?.({
-          success: true,
-          moved: true,
-          consumedDie: dieValue,
-          pendingDice: match.game.pendingDice,
-          moreMovesAllowed: true,
-        });
-      }
+if (match.game.pendingDice.length > 0) {
+  match.game.turnMoved = true;
+
+  if (!hasAnyLegalPendingMove(match.game)) {
+    nextTurn(match);
+
+    return callback?.({
+      success: true,
+      moved: true,
+      consumedDie: dieValue,
+      pendingDice: [],
+      noLegalMoves: true,
+      turnSkipped: true,
+      moreMovesAllowed: false
+    });
+  }
+
+  broadcastState(match);
+
+  return callback?.({
+    success: true,
+    moved: true,
+    consumedDie: dieValue,
+    pendingDice: match.game.pendingDice,
+    moreMovesAllowed: true,
+  });
+}
+
 
       const isDoubleSix = match.game.dice1 === 6 && match.game.dice2 === 6;
       if (isDoubleSix) {

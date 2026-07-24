@@ -675,112 +675,56 @@
     drawPieces();
   }
 
-  function updateUI(){
-    if(!gameState){
-      rollBtn.disabled = true;
-      turnInfo.textContent = "";
-      setMsg("بازی هنوز شروع نشده است.");
-      dice1El.textContent = "🎲";
-      dice2El.textContent = "🎲";
-      pickedDieValue = null;
-      clearDiePickUI();
-      return;
-    }
-
-    // winner
-    if (gameState.winner){
-      rollBtn.disabled = true;
-      turnInfo.innerHTML = `برنده: <span class="tag ${gameState.winner}">${colorLabel[gameState.winner]}</span> 🎉`;
-      setMsg("بازی به پایان رسید.");
-      serverMsgEl.textContent = "";
-      dice1El.textContent = "🎉";
-      dice2El.textContent = "🎉";
-      pickedDieValue = null;
-      clearDiePickUI();
-      return;
-    }
-
-    const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-    const turnUserIdFromServer = gameState.currentTurnPlayerId ?? null;
-
-    const payload = getTokenPayload();
-    const myUserId = getMyUserIdFromPayload(payload);
-
-    let turnUserId = turnUserIdFromServer;
-    if (turnUserId == null && gameState.playerColors && turnColor) {
-      turnUserId = gameState.playerColors[turnColor] ?? null;
-    }
-
-    const turnDeadlineAtRaw = gameState.turnDeadlineAt;
-    const turnDeadlineAt = Number(turnDeadlineAtRaw || 0);
-    const hasDeadline = Number.isFinite(turnDeadlineAt) && turnDeadlineAt > 0;
-
-    const whoText = (turnUserId != null)
-      ? `کاربر نوبت: ${turnUserId}${(myUserId != null && String(myUserId) === String(turnUserId)) ? " (شما)" : ""}`
-      : `کاربر نوبت: نامشخص`;
-
-    let remainingText = "";
-    if (hasDeadline){
-      const remainingSeconds = Math.max(0, Math.ceil((turnDeadlineAt - Date.now())/1000));
-      remainingText = ` · زمان: <span class="tag" style="background:#222;color:#fff;">${remainingSeconds}s</span>`;
-    } else {
-      remainingText = ` · زمان: نامشخص`;
-    }
-
-    turnInfo.innerHTML =
-      `نوبت: <span class="tag ${turnColor}">${colorLabel[turnColor]}</span> · ${whoText}${remainingText}`;
-
-    // roll / pick / move UI
-    const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.rolled && !gameState.winner;
-    rollBtn.disabled = !canRoll;
-
-    const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
-
-    // وقتی rolled است، تاس‌ها را از pendingDice نمایش بده
-    if (gameState.rolled && pendingDice.length > 0){
-      dice1El.textContent = (pendingDice[0] ?? "🎲");
-      dice2El.textContent = (pendingDice[1] ?? "—");
-
-      const canPick = (myColor === turnColor) && gameState.rolled && !gameState.winner && pendingDice.length > 0;
-
-      dice1El.style.pointerEvents = canPick ? "auto" : "none";
-      dice2El.style.pointerEvents = canPick ? "auto" : "none";
-
-      // اگر تاسی که انتخاب شده دیگر تو pending نیست، پاکش کن
-      if (pickedDieValue != null && !pendingDice.includes(pickedDieValue)){
+function updateUI() {
+    if (!gameState) {
+        rollBtn.disabled = true;
+        turnInfo.textContent = "";
+        setMsg("بازی هنوز شروع نشده است.");
+        dice1El.textContent = "🎲";
+        dice2El.textContent = "🎲";
         pickedDieValue = null;
         clearDiePickUI();
-      }
-
-      syncDiePickUI();
-
-      if (myColor === turnColor){
-        if (pendingDice.length > 0 && pickedDieValue == null){
-          setMsg("تاس خودت را انتخاب کن، بعد یک مهره را بزن.");
-        } else {
-          setMsg("حالا یک مهره را بزن.");
-        }
-      } else {
-        setMsg("هنوز نوبت شما نیست.");
-      }
-    } else {
-      // اگر rolled نیست یا pending نداریم
-      dice1El.textContent = "🎲";
-      dice2El.textContent = "🎲";
-      dice1El.style.pointerEvents = "none";
-      dice2El.style.pointerEvents = "none";
-      pickedDieValue = null;
-      clearDiePickUI();
-
-      if (myColor === turnColor){
-        setMsg("تاس بیندازید.");
-      } else {
-        setMsg("هنوز نوبت شما نیست.");
-      }
+        return;
     }
+    if (gameState.winner) {
+        rollBtn.disabled = true;
+        turnInfo.innerHTML = `برنده: <span class="tag ${gameState.winner}">${colorLabel[gameState.winner]}</span> 🎉`;
+        setMsg("بازی به پایان رسید.");
+        dice1El.textContent = "🎉";
+        dice2El.textContent = "🎉";
+        pickedDieValue = null;
+        clearDiePickUI();
+        return;
+    }
+    const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+    const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.rolled && !gameState.winner;
+    rollBtn.disabled = !canRoll;
+    const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
+    if (gameState.rolled && pendingDice.length > 0) {
+        dice1El.textContent = (pendingDice[0] ?? "🎲");
+        dice2El.textContent = (pendingDice[1] ?? "—");
+        const isDice2Available = pendingDice.length > 1;
+        dice2El.style.pointerEvents = isDice2Available ? "auto" : "none";
+        dice2El.style.opacity = isDice2Available ? "1" : "0.5";
+        dice1El.style.pointerEvents = (myColor === turnColor) ? "auto" : "none";
+        if (pickedDieValue != null && !pendingDice.includes(pickedDieValue)) {
+            pickedDieValue = null;
+            clearDiePickUI();
+        }
+        syncDiePickUI();
+        setMsg(myColor === turnColor ? (pickedDieValue == null ? "تاس خودت را انتخاب کن." : "حالا یک مهره را بزن.") : "هنوز نوبت شما نیست.");
+    } else {
+        dice1El.textContent = "🎲";
+        dice2El.textContent = "🎲";
+        dice1El.style.pointerEvents = "none";
+        dice2El.style.pointerEvents = "none";
+        dice2El.style.opacity = "0.5";
+        pickedDieValue = null;
+        clearDiePickUI();
+        setMsg(myColor === turnColor ? "تاس بیندازید." : "هنوز نوبت شما نیست.");
+    }
+}
 
-    serverMsgEl.textContent = hasDeadline ? "" : "⚠️ turnDeadlineAt در state نیامده/صفر است.";
-  }
 
   setInterval(()=>{
     if(gameState) {
@@ -794,186 +738,156 @@
     return myColor && myColor === turnColor && !gameState.rolled;
   }
 
-  function rollDice(){
-if (!socket || !socket.connected) {
-setMsg("اتصال به سرور برقرار نیست.");
-return;
-}
-
-if (!currentMatchId) {
-setMsg("ابتدا وارد اتاق بازی شو.");
-return;
-}
-
-if (!canRollLocal()) {
-setMsg("الان اجازه ریختن تاس را نداری.");
-return;
-}
-
-rollBtn.disabled = true;
-pickedDieValue = null;
-clearDiePickUI();
-
-let animationCount = 0;
-
-dice1El.classList.add("rolling");
-dice2El.classList.add("rolling");
-
-const animation = setInterval(() => {
-dice1El.textContent = String(Math.floor(Math.random() * 6) + 1);
-dice2El.textContent = String(Math.floor(Math.random() * 6) + 1);
-
-animationCount++;
-
-if (animationCount > 12) {
-clearInterval(animation);
-}
-}, 70);
-
-socket.emit(
-"game:roll",
-{
-matchId: currentMatchId
-},
-(response) => {
-clearInterval(animation);
-
-dice1El.classList.remove("rolling");
-dice2El.classList.remove("rolling");
-
-if (response?.success) {
-dice1El.textContent = String(response.dice1 ?? "🎲");
-dice2El.textContent = String(response.dice2 ?? "🎲");
-
-pickedDieValue = null;
-clearDiePickUI();
-
-if (response.noMoves) {
-setMsg(
-response.message ||
-"هیچ حرکت مجازی برای این دو تاس وجود نداشت."
-);
-} else {
-setMsg(
-"یکی از تاس‌ها را انتخاب کن، سپس مهره موردنظر را بزن."
-);
-}
-
-return;
-}
-
-rollBtn.disabled = false;
-
-setMsg(
-response?.message ||
-"هنگام ریختن تاس خطایی رخ داد."
-);
-}
-);
+function rollDice() {
+  if (!socket || !socket.connected) {
+    setMsg("اتصال به سرور برقرار نیست.");
+    return;
   }
 
+  if (!currentMatchId) {
+    setMsg("ابتدا وارد اتاق بازی شو.");
+    return;
+  }
+
+  if (!canRollLocal()) {
+    setMsg("الان اجازه ریختن تاس را نداری.");
+    return;
+  }
+
+  rollBtn.disabled = true;
+  pickedDieValue = null;
+  clearDiePickUI();
+
+  let animationCount = 0;
+
+  dice1El.classList.add("rolling");
+  dice2El.classList.add("rolling");
+
+  const animation = setInterval(() => {
+    dice1El.textContent = String(
+      Math.floor(Math.random() * 6) + 1
+    );
+
+    dice2El.textContent = String(
+      Math.floor(Math.random() * 6) + 1
+    );
+
+    animationCount++;
+
+    if (animationCount > 12) {
+      clearInterval(animation);
+    }
+  }, 70);
+
+  socket.emit(
+    "game:roll",
+    {
+      matchId: currentMatchId
+    },
+    (response) => {
+      clearInterval(animation);
+
+      dice1El.classList.remove("rolling");
+      dice2El.classList.remove("rolling");
+
+      if (response?.success) {
+        dice1El.textContent = String(
+          response.dice1 ?? "🎲"
+        );
+
+        dice2El.textContent = String(
+          response.dice2 ?? "🎲"
+        );
+
+        pickedDieValue = null;
+        clearDiePickUI();
+
+if (response.noLegalMoves || response.turnSkipped) {
+
+          setMsg(
+            "هیچ حرکت مجازی برای این دو تاس وجود نداشت."
+          );
+        } else {
+          setMsg(
+            "یکی از تاس‌ها را انتخاب کن، سپس مهره موردنظر را بزن."
+          );
+        }
+
+        return;
+      }
+
+      rollBtn.disabled = false;
+
+      setMsg(
+        response?.message ||
+        "هنگام ریختن تاس خطایی رخ داد."
+      );
+    }
+  );
+}
+
+
   function onBoardClick(e){
-    if (!socket || !socket.connected || !gameState ||
-        !gameState.rolled || gameState.winner) return;
+    if(!socket || !gameState || !gameState.rolled || gameState.winner) return;
 
-    const turnColor =
-      gameState.currentTurnColor ??
-      colorOrder[gameState.currentTurn];
+    const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+    if(myColor !== turnColor) return;
 
-    if (myColor !== turnColor) {
-      setMsg("هنوز نوبت شما نیست.");
-      return;
-    }
-
-    const pendingDice =
-      Array.isArray(gameState.pendingDice)
-        ? gameState.pendingDice
-        : [];
-
-    if (!pendingDice.length) {
-      setMsg("تاس قابل استفاده‌ای باقی نمانده است.");
-      return;
-    }
+    const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
+    if(pendingDice.length === 0) return;
 
     if (pickedDieValue == null) {
       setMsg("اول یکی از تاس‌ها را انتخاب کن.");
       return;
     }
 
-    if (!pendingDice.includes(pickedDieValue)) {
-      pickedDieValue = null;
-      clearDiePickUI();
-      setMsg("تاس را دوباره انتخاب کن.");
-      return;
-    }
-
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
+    const scale = canvas.width / rect.width;
+    const x = (e.clientX - rect.left) * scale;
+    const y = (e.clientY - rect.top) * scale;
 
-    const pieces =
-      Array.isArray(gameState.pieces)
-        ? gameState.pieces
-        : [];
+    const movablePieces = gameState.pieces || [];
+    for (const p of movablePieces){
+      const pos = getPieceDrawPos(p);
+      if(!pos) continue;
+      if (Math.hypot(x-pos.x, y-pos.y) <= CELL*0.6){
+const selectedDieValue = pickedDieValue;
 
-    for (const piece of pieces) {
-      if (piece.color !== myColor) continue;
+pickedDieValue = null;
+clearDiePickUI();
 
-      const pos = getPieceDrawPos(piece);
-      if (!pos) continue;
-
-      if (Math.hypot(x - pos.x, y - pos.y) > CELL * 0.6) {
-        continue;
-      }
-
-      const selectedDieValue = pickedDieValue;
-      pickedDieValue = null;
-      clearDiePickUI();
-      setMsg("در حال ارسال حرکت...");
-
-      socket.emit("game:move", {
+    socket.emit("game:move", {
         matchId: currentMatchId,
-        pieceId: piece.id,
+        pieceId: p.id,
         dieValue: selectedDieValue
-      }, response => {
+    }, (response) => {
         if (!response?.success) {
-          const latest =
-            Array.isArray(gameState?.pendingDice)
-              ? gameState.pendingDice
-              : [];
-
-          if (latest.includes(selectedDieValue)) {
             pickedDieValue = selectedDieValue;
             syncDiePickUI();
-          }
-
-          setMsg(response?.message || "حرکت نامعتبر است.");
-          return;
+            setMsg(response?.message || "حرکت مجاز نیست.");
+            return;
         }
 
         pickedDieValue = null;
         clearDiePickUI();
 
-        if (response.winnerColor || response.winner) {
-          setMsg("بازی تمام شد.");
+        if (response.noLegalMoves || response.turnSkipped) {
+            setMsg("حرکت انجام شد؛ نوبت تمام شد.");
+        } else if (response.winnerColor) {
+            setMsg("بازی تمام شد.");
         } else if (response.bonusRoll) {
-          setMsg("دوباره تاس بینداز.");
-        } else if (
-          Array.isArray(response.pendingDice) &&
-          response.pendingDice.length
-        ) {
-          setMsg("تاس باقی‌مانده را انتخاب کن.");
+            setMsg("جفت ۶! دوباره تاس بینداز.");
+        } else if (Array.isArray(response.pendingDice) && response.pendingDice.length > 0) {
+            setMsg("تاس بعدی را انتخاب کن.");
         } else {
-          setMsg("حرکت انجام شد.");
+            setMsg("حرکت انجام شد.");
         }
-      });
+    });
 
-      return;
+
+        return;
+      }
     }
-
-    setMsg("روی یکی از مهره‌های خودت بزن.");
   }
 
   function chooseDieValue(dv){
@@ -993,21 +907,14 @@ response?.message ||
     chooseDieValue(dv);
   });
 
-  dice2El.addEventListener("click", () => {
-    if (!gameState || !gameState.rolled || gameState.winner) {
-      return;
-    }
+  dice2El.addEventListener("click", ()=>{
+    if(!gameState || !gameState.rolled || gameState.winner) return;
+    const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
+    if(pendingDice.length === 0) return;
+if (!pendingDice || pendingDice.length < 2) return;
+const dv = pendingDice[1];
 
-    const pendingDice =
-      Array.isArray(gameState.pendingDice)
-        ? gameState.pendingDice
-        : [];
-
-    if (pendingDice.length < 2) {
-      return;
-    }
-
-    chooseDieValue(pendingDice[1]);
+    chooseDieValue(dv);
   });
 
   rollBtn.addEventListener("click", rollDice);
@@ -1144,33 +1051,6 @@ response?.message ||
     socket.on("balanceChanged", data => {
       const newBalance = data?.newCoins ?? data?.coins;
       if (newBalance != null) balanceValueEl.textContent = String(newBalance);
-    });
-
-    socket.on("game:settled", data => {
-      if (!data) return;
-
-      const winnerName =
-        colorLabel?.[data.winnerColor] ||
-        data.winnerColor ||
-        data.winnerName ||
-        "نامشخص";
-
-      const amount =
-        data.winnerAmount ??
-        data.prize ??
-        data.amount ??
-        0;
-
-      serverMsgEl.textContent =
-        "تسویه انجام شد؛ برنده: " +
-        winnerName +
-        "، جایزه: " +
-        amount +
-        " سکه";
-
-      if (typeof updateBalance === "function") {
-        Promise.resolve(updateBalance()).catch(() => {});
-      }
     });
 
     socket.on("game:state", state => {
