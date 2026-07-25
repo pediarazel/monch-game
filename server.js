@@ -574,31 +574,25 @@ function createMatch(matchId) {
 }
 
 function resetMatchGame(match) {
-    const firstActiveTurn = colorOrder.findIndex(
+  const colorOrder = ["red", "green", "yellow", "blue"];
+
+  const firstActiveTurn = colorOrder.findIndex(
     (color) => match.playerColors[color] != null
   );
 
-  if (firstActiveTurn === -1) {
-    throw new Error("هیچ بازیکنی برای شروع نوبت پیدا نشد.");
-  }
+  const initialTurn = firstActiveTurn !== -1 ? firstActiveTurn : 0;
 
   match.game = {
-currentTurn: firstActiveTurn,
-
-
-    // قدیمی (دیگه استفاده نمی‌شود)
+    currentTurn: initialTurn,
     dice: 0,
-
-    // جدید
     dice1: 0,
     dice2: 0,
     pendingDice: [],
-
     rolled: false,
     winner: null,
     pieces: buildPieces(),
     turnMoved: false,
-    turnDeadlineAt: Date.now() + TURN_MS,
+    turnDeadlineAt: null,
     playerColors: {
       red: match.playerColors.red,
       green: match.playerColors.green,
@@ -606,9 +600,16 @@ currentTurn: firstActiveTurn,
       blue: match.playerColors.blue,
     },
   };
-  match.turnDeadlineAt = match.game.turnDeadlineAt;
-  match.turnId++;
+
+  match.turnDeadlineAt = null;
+  match.turnId = (match.turnId || 0) + 1;
+
+  console.log(
+    `[GAME STARTED] Match ${match.matchId} initialized with turn: ${colorOrder[initialTurn]}`
+  );
 }
+
+
 
 function getCurrentColor(match) {
   return colorOrder[match.game.currentTurn];
@@ -617,46 +618,34 @@ function getCurrentColor(match) {
 let io; // assigned after Server creation
 
 function broadcastState(match) {
-  if (!match?.game) {
-    return;
-  }
+  if (!match.game) return;
 
-  const snapshot = cloneGameForClient(match.game);
+  const colorOrder = ["red", "green", "yellow", "blue"];
+  const activeColor = colorOrder[match.game.currentTurn];
 
-  snapshot.matchId = match.matchId;
-  snapshot.status = match.status;
-  snapshot.tier = match.tier;
-
-  console.log("[BROADCAST STATE]", {
+  const snapshot = {
+    ...cloneGameForClient(match.game),
     matchId: match.matchId,
-    status: snapshot.status,
-    currentTurnColor: snapshot.currentTurnColor,
-    currentTurnPlayerId: snapshot.currentTurnPlayerId,
-    playerColors: snapshot.playerColors,
-  });
+    status: match.status,
+    tier: match.tier,
+    turnDeadlineAt: match.turnDeadlineAt || match.game.turnDeadlineAt || null,
+    playerColors: match.playerColors,
+    activeColor,
+  };
 
-  io.to(`match:${match.matchId}`).emit(
-    "game:state",
-    snapshot
-  );
+  io.to(`match:${match.matchId}`).emit("game:state", snapshot);
 }
 
 
+
 function nextTurn(match) {
-  if (!match.game || match.game.winner) {
-    return;
-  }
+  if (!match.game || match.game.winner) return;
 
-  /*
-   * در بازی ۳ نفره ممکن است یکی از رنگ‌ها بازیکن نداشته باشد.
-   * بنابراین آن‌قدر جلو می‌رویم تا به یک رنگ دارای بازیکن برسیم.
-   */
+  const colorOrder = ["red", "green", "yellow", "blue"];
+
   let attempts = 0;
-
   do {
-    match.game.currentTurn =
-      (match.game.currentTurn + 1) % colorOrder.length;
-
+    match.game.currentTurn = (match.game.currentTurn + 1) % colorOrder.length;
     attempts++;
   } while (
     attempts < colorOrder.length &&
@@ -672,11 +661,9 @@ function nextTurn(match) {
       currentTurn: match.game.currentTurn,
       playerColors: match.playerColors,
     });
-
     return;
   }
 
-  // پاک‌کردن اطلاعات تاس‌های نوبت قبلی
   match.game.dice = 0;
   match.game.dice1 = 0;
   match.game.dice2 = 0;
@@ -684,10 +671,7 @@ function nextTurn(match) {
   match.game.rolled = false;
   match.game.turnMoved = false;
 
-  match.game.turnDeadlineAt = Date.now() + TURN_MS;
-  match.turnDeadlineAt = match.game.turnDeadlineAt;
-
-  match.turnId++;
+  match.turnId = (match.turnId || 0) + 1;
 
   console.log("[NEXT TURN]", {
     matchId: match.matchId,
@@ -696,38 +680,37 @@ function nextTurn(match) {
     turnId: match.turnId,
   });
 
-  broadcastState(match);
   startTurnTimeout(match);
 }
 
 
+
 function startTurnTimeout(match) {
-  if (match.pendingTurnTimer) clearTimeout(match.pendingTurnTimer);
+  if (!match.game || match.game.winner) return;
+
+  if (match.pendingTurnTimer) {
+    clearTimeout(match.pendingTurnTimer);
+    match.pendingTurnTimer = null;
+  }
 
   const myTurnId = match.turnId;
-  const deadlineAt = match.game.turnDeadlineAt;
+
+  match.game.turnDeadlineAt = Date.now() + TURN_MS;
+  match.turnDeadlineAt = match.game.turnDeadlineAt;
+
+  broadcastState(match);
 
   match.pendingTurnTimer = setTimeout(() => {
-    if (!matches.has(match.matchId)) return;
     const m = matches.get(match.matchId);
+    if (!m) return;
     if (m.turnId !== myTurnId) return;
     if (!m.game || m.game.winner) return;
 
-    if (!m.game.rolled) {
-      nextTurn(m);
-      return;
-    }
-
-    const pending = Array.isArray(m.game.pendingDice) ? m.game.pendingDice : [];
-    if (pending.length > 0) {
-      // زمان تمام شد، تاس‌های این نوبت رو رها می‌کنیم و نوبت بعد
-      nextTurn(m);
-      return;
-    }
-
+    console.log(`[TURN TIMEOUT] Match ${m.matchId}, auto-passing turn.`);
     nextTurn(m);
-  }, Math.max(1, deadlineAt - Date.now() + 5));
+  }, TURN_MS);
 }
+
 
 function getNextDiceValueFromMatch() {
   return Math.floor(Math.random() * 6) + 1;
@@ -1369,25 +1352,37 @@ io.on("connection", (socket) => {
           ? payload.roomId.trim()
           : null;
 
-      if (!matchId)
-        return callback?.({ success: false, message: "شناسه اتاق معتبر نیست." });
+      if (!matchId) {
+        return callback?.({
+          success: false,
+          message: "شناسه اتاق معتبر نیست.",
+        });
+      }
 
       const tier = Number(payload?.tier);
-      if (!Number.isFinite(tier))
-        return callback?.({ success: false, message: "tier لازم است." });
+      if (!Number.isFinite(tier)) {
+        return callback?.({
+          success: false,
+          message: "tier لازم است.",
+        });
+      }
+
       assertValidTier(tier);
 
       if (!socket.user?.userId) {
-        console.log("[JOIN] socket.user missing. handshake:", {
-          auth: socket.handshake?.auth,
-          authorization: socket.handshake?.headers?.authorization,
+        return callback?.({
+          success: false,
+          message: "احراز هویت Socket.io انجام نشد.",
         });
-        return callback?.({ success: false, message: "احراز هویت Socket.io انجام نشد (socket.user ندارد)." });
       }
 
       const userId = Number(socket.user.userId);
-      if (!Number.isFinite(userId))
-        return callback?.({ success: false, message: "userId نامعتبر است." });
+      if (!Number.isFinite(userId)) {
+        return callback?.({
+          success: false,
+          message: "userId نامعتبر است.",
+        });
+      }
 
       connectedUsers.set(String(userId), socket.id);
 
@@ -1397,28 +1392,31 @@ io.on("connection", (socket) => {
 
       const match = matches.get(matchId);
 
-      if (match.tier === null) {
+      if (match.tier === null || match.tier === undefined) {
         match.tier = tier;
-      } else if (match.tier !== tier) {
+      } else if (Number(match.tier) !== tier) {
         return callback?.({
           success: false,
           message: `این بازی با ورودی ${match.tier} سکه ساخته شده است.`,
         });
       }
 
-      const alreadyAssigned =
-        Object.values(match.playerColors).includes(userId);
+      const colorOrder = ["red", "green", "yellow", "blue"];
 
-      if (match.status !== "waiting" && !alreadyAssigned) {
+      const alreadyAssignedColor = colorOrder.find(
+        (color) => match.playerColors[color] === userId
+      );
+
+      if (match.status !== "waiting" && !alreadyAssignedColor) {
         return callback?.({
           success: false,
-          message: "این بازی قبلاً شروع شده است.",
+          message: "این بازی قبلاً شروع شده است و شما در آن حضور ندارید.",
         });
       }
 
-      if (!alreadyAssigned) {
+      if (!alreadyAssignedColor) {
         const emptyColor = colorOrder.find(
-          (color) => match.playerColors[color] === null
+          (color) => match.playerColors[color] == null
         );
 
         if (!emptyColor) {
@@ -1434,7 +1432,9 @@ io.on("connection", (socket) => {
       await socket.join(`match:${matchId}`);
       match.players.set(userId, socket.id);
 
-      const filledColors = colorOrder.filter((c) => match.playerColors[c] !== null).length;
+      const filledColors = colorOrder.filter(
+        (color) => match.playerColors[color] != null
+      ).length;
 
       console.log("[JOIN]", {
         matchId,
@@ -1443,181 +1443,102 @@ io.on("connection", (socket) => {
         filledColors,
         status: match.status,
         playerColors: match.playerColors,
-        matchTier: match.tier,
       });
 
-      /*
-      |--------------------------------------------------------------------------
-      | شروع فوری با ۴ نفر
-      |--------------------------------------------------------------------------
-      */
-      if (filledColors === 4 && match.status === "waiting") {
-        /*
-         * چون نفر چهارم وارد شده، دیگر نیازی به تایمر
-         * شروع سه‌نفره نیست.
-         */
-        const existingTimer = matchTimers.get(matchId);
+      if (match.status === "playing") {
+        callback?.({
+          success: true,
+          message: "دوباره به بازی متصل شدید.",
+          matchId,
+          tier: match.tier,
+          filledColors,
+          status: match.status,
+          playerColors: match.playerColors,
+        });
 
+        broadcastState(match);
+        return;
+      }
+
+      if (filledColors === 4 && match.status === "waiting") {
+        const existingTimer = matchTimers.get(matchId);
         if (existingTimer) {
           clearTimeout(existingTimer);
           matchTimers.delete(matchId);
-
-          console.log("[MATCH TIMER CLEARED]", {
-            matchId,
-            reason: "fourth_player_joined",
-          });
         }
 
-        try {
-          const started = await startMatch(match);
+        const started = await startMatch(match);
 
-          return callback?.({
-            success: started,
-            message: started
-              ? "بازی با ۴ بازیکن شروع شد."
-              : "مسابقه قبلاً در حال شروع یا اجرا است.",
-            matchId,
-            tier: match.tier,
-            filledColors: 4,
-            status: match.status,
-            playerColors: match.playerColors,
-          });
-        } catch (error) {
-          return callback?.({
-            success: false,
-            message:
-              error?.message ||
-              "شروع بازی با ۴ بازیکن ممکن نشد.",
-            matchId,
-            status: match.status,
-          });
-        }
+        return callback?.({
+          success: started,
+          message: started ? "بازی با ۴ بازیکن شروع شد." : "شروع بازی ناموفق بود.",
+          matchId,
+          tier: match.tier,
+          filledColors,
+          status: match.status,
+          playerColors: match.playerColors,
+        });
       }
 
-      /*
-      |--------------------------------------------------------------------------
-      | ساخت تایمر برای بازی ۳ نفره
-      |--------------------------------------------------------------------------
-      */
       if (
         filledColors === 3 &&
         match.status === "waiting" &&
         !matchTimers.has(matchId)
       ) {
-        console.log("[THREE PLAYER TIMER STARTED]", {
-          matchId,
-          waitMilliseconds: THREE_PLAYER_WAIT_MS,
-          playerColors: match.playerColors,
-        });
-
         const timer = setTimeout(async () => {
-          /*
-           * تایمر اجرا شده است؛ بنابراین باید از Map حذف شود.
-           */
           matchTimers.delete(matchId);
 
-          try {
-            const currentMatch = matches.get(matchId);
+          const currentMatch = matches.get(matchId);
+          if (!currentMatch || currentMatch.status !== "waiting") return;
 
-            if (!currentMatch) {
-              console.log("[THREE PLAYER TIMER ABORTED]", {
-                matchId,
-                reason: "match_not_found",
+          const currentFilled = colorOrder.filter(
+            (color) => currentMatch.playerColors[color] != null
+          ).length;
+
+          if (currentFilled >= 3) {
+            try {
+              await startMatch(currentMatch);
+            } catch (error) {
+              console.error("[THREE PLAYER START FAILED]", error);
+              io.to(`match:${matchId}`).emit("match:error", {
+                message: error?.message || "شروع بازی ۳ نفره ممکن نشد.",
               });
-
-              return;
             }
-
-            if (currentMatch.status !== "waiting") {
-              console.log("[THREE PLAYER TIMER ABORTED]", {
-                matchId,
-                reason: "match_not_waiting",
-                status: currentMatch.status,
-              });
-
-              return;
-            }
-
-            const currentFilledColors = colorOrder.filter(
-              (color) =>
-                currentMatch.playerColors[color] != null
-            ).length;
-
-            /*
-             * بعد از پایان یک دقیقه، بازی فقط وقتی
-             * سه بازیکن دارد به‌صورت سه‌نفره شروع می‌شود.
-             *
-             * حالت چهار نفر معمولاً در همان room:join
-             * فوراً شروع خواهد شد.
-             */
-            if (currentFilledColors !== 3) {
-              console.log("[THREE PLAYER TIMER ABORTED]", {
-                matchId,
-                reason: "player_count_changed",
-                currentFilledColors,
-              });
-
-              return;
-            }
-
-            await startMatch(currentMatch);
-          } catch (error) {
-            console.error("[THREE PLAYER START FAILED]", {
-              matchId,
-              error: error?.message || String(error),
-            });
-
-            io.to(`match:${matchId}`).emit(
-              "game:start-error",
-              {
-                success: false,
-                matchId,
-                message:
-                  error?.message ||
-                  "شروع بازی ۳ نفره ممکن نشد.",
-              }
-            );
           }
         }, THREE_PLAYER_WAIT_MS);
 
         matchTimers.set(matchId, timer);
       }
 
-
-      callback?.({
+      return callback?.({
         success: true,
         message:
-          match.status === "playing"
-            ? "دوباره به بازی متصل شدید."
-            : filledColors === 3
-              ? "سه بازیکن حاضرند؛ بازی پس از ۶۰ ثانیه شروع می‌شود."
-              : "به صف انتظار اضافه شدید.",
+          filledColors === 3
+            ? "سه بازیکن حاضرند؛ بازی پس از زمان انتظار شروع می‌شود."
+            : "به اتاق اضافه شدید.",
         matchId,
         tier: match.tier,
         filledColors,
         status: match.status,
         playerColors: match.playerColors,
         waitingForThreePlayerStart:
-          filledColors === 3 &&
-          match.status === "waiting",
+          filledColors === 3 && match.status === "waiting",
         startAfterMs:
-          filledColors === 3 &&
-          match.status === "waiting"
+          filledColors === 3 && match.status === "waiting"
             ? THREE_PLAYER_WAIT_MS
             : null,
       });
-
-      if (match.status === "playing" && match.game) {
-        broadcastState(match);
-      }
-
-      return;
-
     } catch (e) {
       console.error("JOIN ERROR:", e);
-      return callback?.({ success: false, message: e.message || "خطای join" });
+      return callback?.({
+        success: false,
+        message: e.message || "خطای join",
+      });
     }
   });
+
+
+
 
   socket.on("game:roll", async (payload, callback) => {
     try {

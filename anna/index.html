@@ -516,10 +516,54 @@
   const GRID_COUNT = 13;
   const CELL = SIZE / GRID_COUNT;
 
-  let socket = null;
-  let myColor = null;
-  let gameState = null;
-  let currentMatchId = null;
+let socket = null;
+let myColor = null;
+let gameState = null;
+let turnTimerInterval = null; // برای شمارش معکوس نوبت
+let currentMatchId = null;
+
+// --- سیستم کمکی تایمر نوبت ---
+function formatRemainingMs(deadlineAt) {
+  if (!deadlineAt) return null;
+  const deadline = new Date(deadlineAt).getTime();
+  if (!Number.isFinite(deadline)) return null;
+  const now = Date.now();
+  const diff = Math.max(0, deadline - now);
+  return Math.ceil(diff / 1000);
+}
+
+function stopTurnTimer() {
+  if (turnTimerInterval) {
+    clearInterval(turnTimerInterval);
+    turnTimerInterval = null;
+  }
+}
+
+function startTurnTimer() {
+  stopTurnTimer();
+  if (!gameState || !gameState.turnDeadlineAt || gameState.winner) return;
+
+  const renderCountdown = () => {
+    if (!gameState || !gameState.turnDeadlineAt || gameState.winner) {
+      stopTurnTimer();
+      return;
+    }
+
+    const secs = formatRemainingMs(gameState.turnDeadlineAt);
+    const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+    const myColorText = myColor ? colorLabel[myColor] : "تماشاچی";
+    const turnColorText = turnColor ? colorLabel[turnColor] : "نامشخص";
+
+    turnInfo.innerHTML =
+      `نوبت: <span class="tag ${turnColor}">${turnColorText}</span> | ` +
+      `رنگ شما: <span class="tag ${myColor || "muted"}">${myColorText}</span> | ` +
+      `زمان باقی‌مانده: <b style="color:#ef4444; font-size:16px;">${secs !== null ? secs : "-"}</b> ثانیه`;
+  };
+
+  renderCountdown();
+  turnTimerInterval = setInterval(renderCountdown, 500);
+}
+
 
   // ✅ انتخاب تاس برای هر حرکت
   let pickedDieValue = null; // 1..6
@@ -598,37 +642,57 @@
     }
   }
 
-  function drawPieces(){
-    if(!gameState || !gameState.pieces) return;
-    const stack = {};
-    for (const p of gameState.pieces){
-      const key = p.state + (p.state==="path" ? p.pathIndex : (p.state==="home" ? p.color+p.homeIndex : p.id));
-      (stack[key] ||= []).push(p);
-    }
-    for (const key in stack){
-      stack[key].forEach((piece,i)=>{
-        const pos = getPieceDrawPos(piece);
-        if (!pos) return;
-        const offset = i*4;
+function drawPieces(){
+  if(!gameState || !gameState.pieces) return;
 
+  const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+  const stack = {};
+
+  for (const p of gameState.pieces){
+    const key = p.state + (p.state==="path" ? p.pathIndex : (p.state==="home" ? p.color+p.homeIndex : p.id));
+    (stack[key] ||= []).push(p);
+  }
+
+  for (const key in stack){
+    stack[key].forEach((piece,i)=>{
+      const pos = getPieceDrawPos(piece);
+      if (!pos) return;
+      const offset = i*4;
+      const x = pos.x + offset;
+      const y = pos.y + offset;
+
+      // Glow برای مهره‌های رنگِ نوبت فعلی
+      if (piece.color === turnColor && !gameState.winner) {
+        ctx.save();
         ctx.beginPath();
-        ctx.arc(pos.x+offset, pos.y+offset, CELL*0.28, 0, Math.PI*2);
+        ctx.arc(x, y, CELL * 0.35, 0, Math.PI * 2);
+        ctx.shadowColor = COLORS[piece.color];
+        ctx.shadowBlur = 15;
         ctx.fillStyle = COLORS[piece.color];
         ctx.fill();
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 2;
-        ctx.stroke();
+        ctx.restore();
+      }
 
-        if (myColor && piece.color === myColor) {
-          ctx.beginPath();
-          ctx.arc(pos.x+offset, pos.y+offset, CELL*0.38, 0, Math.PI*2);
-          ctx.strokeStyle = "#ffffff";
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-        }
-      });
-    }
+      ctx.beginPath();
+      ctx.arc(x, y, CELL*0.28, 0, Math.PI*2);
+      ctx.fillStyle = COLORS[piece.color];
+      ctx.fill();
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // دورخط سفید برای مهره‌های خود بازیکن
+      if (myColor && piece.color === myColor) {
+        ctx.beginPath();
+        ctx.arc(x, y, CELL*0.38, 0, Math.PI*2);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    });
   }
+}
+
 
   function draw(){
     ctx.clearRect(0,0,SIZE,SIZE);
@@ -1053,45 +1117,57 @@ const dv = pendingDice[1];
       if (newBalance != null) balanceValueEl.textContent = String(newBalance);
     });
 
-    socket.on("game:state", state => {
-      gameState = state;
+socket.on("game:state", state => {
+  gameState = state;
 
-      const payload = getTokenPayload();
-      const myUserId = getMyUserIdFromPayload(payload);
+  const payload = getTokenPayload();
+  const myUserId = getMyUserIdFromPayload(payload);
 
-      if (state?.playerColors && myUserId != null) {
-        myColor = colorOrder.find(color => String(state.playerColors[color]) === String(myUserId)) || null;
-      } else {
-        myColor = null;
-      }
+  if (state?.playerColors && myUserId != null) {
+    myColor = colorOrder.find(color => String(state.playerColors[color]) === String(myUserId)) || null;
+  } else {
+    myColor = null;
+  }
 
-      updateUI();
-      draw();
-    });
+  updateUI();
+  draw();
+  startTurnTimer();
+});
+
 
     socket.connect();
     return socket;
   }
 
-  logoutBtn.addEventListener("click", ()=>{
-    stopBalanceAutoRefresh();
-    clearToken();
-    balanceValueEl.textContent = "0";
-    setAuthResult("خروج شد. دوباره ورود کن.");
-    serverMsgEl.textContent = "";
-    setMsg("ابتدا ورود کن.");
+logoutBtn.addEventListener("click", ()=>{
+  stopBalanceAutoRefresh();
+  stopTurnTimer();
 
-    gameState = null;
-    myColor = null;
-    currentMatchId = null;
-    pickedDieValue = null;
-    clearDiePickUI();
+  clearToken();
+  balanceValueEl.textContent = "0";
+  setAuthResult("خروج شد. دوباره ورود کن.");
+  serverMsgEl.textContent = "";
+  setMsg("ابتدا ورود کن.");
 
-    if (socket) {
-      try { socket.removeAllListeners(); socket.disconnect(); } catch (error) {}
-      socket = null;
-    }
-  });
+  gameState = null;
+  myColor = null;
+  currentMatchId = null;
+  pickedDieValue = null;
+
+  clearDiePickUI();
+  dice1El.textContent = "🎲";
+  dice2El.textContent = "🎲";
+  turnInfo.textContent = "";
+
+  if (socket) {
+    try { socket.removeAllListeners(); socket.disconnect(); } catch (error) {}
+    socket = null;
+  }
+
+  draw();
+  updateUI();
+});
+
 
   const matchIdInput = document.getElementById("matchIdInput");
   const tierInput = document.getElementById("tierInput");
