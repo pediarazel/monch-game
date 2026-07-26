@@ -1013,11 +1013,12 @@ async function settleCoinsForMatch(match) {
     (color) => match.playerColors[color] != null
   ).length;
 
-  if (activePlayersCount < 3 || activePlayersCount > 4) {
-    throw new Error(
-      "تعداد بازیکنان برای تسویه مالی معتبر نیست."
-    );
-  }
+if (activePlayersCount < 2 || activePlayersCount > 4) {
+  throw new Error(
+    "تعداد بازیکنان برای تسویه مالی باید بین ۲ تا ۴ نفر باشد."
+  );
+}
+
 
   const totalPot = activePlayersCount * match.tier;
 
