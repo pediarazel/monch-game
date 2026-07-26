@@ -949,11 +949,10 @@ async function chargeTierFromPlayers(match) {
     .map((color) => match.playerColors[color])
     .filter((userId) => userId != null);
 
-  if (userIds.length < 3 || userIds.length > 4) {
-    throw new Error(
-      "برای شروع بازی باید ۳ یا ۴ بازیکن حضور داشته باشند."
-    );
-  }
+// بعد:
+if (userIds.length < 2 || userIds.length > 4) {
+  throw new Error("برای شروع بازی باید ۲، ۳ یا ۴ بازیکن حضور داشته باشند.");
+}
 
   if (new Set(userIds).size !== userIds.length) {
     throw new Error("شناسه بازیکنان مسابقه تکراری است.");
