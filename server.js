@@ -1682,27 +1682,27 @@ return callback?.({
       match.game.pendingDice.splice(idx, 1);
 
       const winnerColor = checkWinner(match.game);
-      if (winnerColor) {
-        match.game.winner = winnerColor;
-        match.status = "finished";
-        match.turnDeadlineAt = Date.now();
-        match.game.turnDeadlineAt = Date.now();
+if (winnerColor) {
+  match.game.winner = winnerColor;
+  match.status = "finished";
+  match.turnDeadlineAt = Date.now();
+  match.game.turnDeadlineAt = Date.now();
 
-        if (match.pendingTurnTimer) {
-          clearTimeout(match.pendingTurnTimer);
-          match.pendingTurnTimer = null;
-        }
+  if (match.pendingTurnTimer) {
+    clearTimeout(match.pendingTurnTimer);
+    match.pendingTurnTimer = null;
+  }
 
-        broadcastState(match);
+  broadcastState(match);
 
-        try {
-          await settleCoinsForMatch(match);
-        } catch (error) {
-          console.error("settleCoinsForMatch failed:", error);
-        }
+  try {
+    await settleCoinsForMatch(match);
+  } catch (error) {
+    console.error("settleCoinsForMatch failed:", error);
+  }
 
-        return callback?.({ success: true, moved: true, winnerColor });
-      }
+  return callback?.({ success: true, moved: true, winnerColor });
+}
 
 if (match.game.pendingDice.length > 0) {
   match.game.turnMoved = true;
