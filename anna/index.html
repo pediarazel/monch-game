@@ -795,16 +795,17 @@ function updateUI() {
         clearDiePickUI();
         return;
     }
-    if (gameState.winner) {
-        rollBtn.disabled = true;
-        turnInfo.innerHTML = `برنده: <span class="tag ${gameState.winner}">${colorLabel[gameState.winner]}</span> 🎉`;
-        setMsg("بازی به پایان رسید.");
-        dice1El.textContent = "🎉";
-        dice2El.textContent = "🎉";
-        pickedDieValue = null;
-        clearDiePickUI();
-        return;
-    }
+if (gameState.winner) {
+  joinBtn.disabled = false; // ✅ فعال شدن دکمه ورود به اتاق جدید
+  rollBtn.disabled = true;
+  turnInfo.innerHTML = `برنده: <span class="tag ${gameState.winner}">${colorLabel[gameState.winner]}</span> 🎉`;
+  setMsg("بازی به پایان رسید.");
+  dice1El.textContent = "🎉";
+  dice2El.textContent = "🎉";
+  pickedDieValue = null;
+  clearDiePickUI();
+  return;
+}
     const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
     const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.rolled && !gameState.winner;
     rollBtn.disabled = !canRoll;
