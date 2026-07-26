@@ -1285,10 +1285,24 @@ logoutBtn.addEventListener("click", ()=>{
     const s = connectSocketOnce();
     if(!s) return;
 
-    joinBtn.disabled = true;
-    setMsg("در حال اتصال به سوکت...");
-    socketStatusEl.textContent = "در حال اتصال...";
-    joinStatusEl.textContent = "منتظر connect...";
+joinBtn.disabled = true;
+setMsg("در حال آماده‌سازی برای ورود به اتاق...");
+
+// ✅ 1) تمیزکاری قبل از join جدید (خیلی مهم)
+try {
+  stopLobbyCountdown();
+  stopTurnTimer();
+} catch {}
+
+if (socket) {
+  try { socket.removeAllListeners(); } catch {}
+  try { socket.disconnect(); } catch {}
+  socket = null;
+}
+
+// ✅ 2) یک join جدید با سوکت تازه
+socketStatusEl.textContent = "در حال اتصال...";
+joinStatusEl.textContent = "منتظر connect...";
 
     try{
       await waitForSocketConnected(s, 15000);
@@ -1305,8 +1319,12 @@ logoutBtn.addEventListener("click", ()=>{
     serverMsgEl.textContent = "در حال ورود...";
 
     const joinPayload = { roomId: currentMatchId, tier };
-
+// ✅ 3) برای اینکه دوباره join به مشکل نخوره، listeners قبلی از این event روی همین socket نماند
+try { 
+  s.off("room:join"); 
+} catch {}
 s.emit("room:join", joinPayload, (resp)=>{
+  console.log("ROOM JOIN RESP:", resp);
   setDebug(prev => ({
     ...(prev && typeof prev === "object" ? prev : {}),
     roomJoinResponse: resp || null
