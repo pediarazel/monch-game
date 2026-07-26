@@ -241,8 +241,9 @@
 
   setMsg('صفحه لود شد ✅');
 
-const SOCKET_URL = (window.SOCKET_URL_OVERRIDE || window.location.origin);
-  const API_BASE = (window.API_BASE_OVERRIDE || "").trim() || "";
+const SOCKET_URL = window.SOCKET_URL_OVERRIDE || "https://monch-game.onrender.com";
+const API_BASE = (window.API_BASE_OVERRIDE || "https://monch-game.onrender.com").trim();
+
   function api(path){ return API_BASE ? (API_BASE.replace(/\/$/,'') + path) : path; }
 
   // --- Token helpers ---
@@ -1268,26 +1269,9 @@ logoutBtn.addEventListener("click", ()=>{
 
 
 
-  const matchIdInput = document.getElementById("matchIdInput");
-  const tierInput = document.getElementById("tierInput");
-  const joinBtn = document.getElementById("joinBtn");
-
-  joinBtn.addEventListener("click", async ()=>{
-    const token = getToken();
-    const matchIdNum = Number(matchIdInput.value);
-    const tier = Number(tierInput.value);
-
-    if(!token){ setAuthResult("ابتدا ورود کن."); return; }
-    if(!Number.isFinite(matchIdNum) || matchIdNum < 1){ setAuthResult("matchId نامعتبر است."); return; }
-    if(!Number.isFinite(tier) || ![20,50,100].includes(tier)){ setAuthResult("tier نامعتبر است."); return; }
-
-    currentMatchId = String(matchIdNum);
-
-    const s = connectSocketOnce();
-    if(!s) return;
-
-joinBtn.disabled = true;
-setMsg("در حال آماده‌سازی برای ورود به اتاق...");
+const matchIdInput = document.getElementById("matchIdInput");
+const tierInput = document.getElementById("tierInput");
+const joinBtn = document.getElementById("joinBtn");
 
 joinBtn.addEventListener("click", async ()=>{
   const token = getToken();
@@ -1300,7 +1284,6 @@ joinBtn.addEventListener("click", async ()=>{
 
   currentMatchId = String(matchIdNum);
 
-  // فقط تایمرها را تمیز کن، سوکت را اینجا قطع نکن
   stopLobbyCountdown();
   stopTurnTimer();
 
@@ -1348,74 +1331,22 @@ joinBtn.addEventListener("click", async ()=>{
         joinStatusEl.textContent = "✅ join success";
         setMsg("منتظر شروع یا دریافت state بازی بمانید...");
       }
-
-      joinBtn.disabled = false;
     } else {
       stopLobbyCountdown();
       const message = resp?.message || "خطا در join";
       serverMsgEl.textContent = "❌ ورود به اتاق: " + message;
       joinStatusEl.textContent = "❌ join failed";
       setMsg("ورود ناموفق بود.");
-      joinBtn.disabled = false;
     }
+
+    joinBtn.disabled = false;
   });
 });
 
-    try{
-      await waitForSocketConnected(s, 15000);
-      joinStatusEl.textContent = "✅ connect شد. ارسال room:join ...";
-    }catch(err){
-      joinBtn.disabled = false;
-      socketStatusEl.textContent = "❌ سوکت وصل نشد.";
-      joinStatusEl.textContent = "❌ connect wait failed: " + (err?.message || String(err));
-      setDebug({ connectWaitError: err?.message || String(err) });
-      return;
-    }
-
-    setMsg("در حال ورود به بازی...");
-    serverMsgEl.textContent = "در حال ورود...";
-
-    const joinPayload = { roomId: currentMatchId, tier };
-// ✅ 3) برای اینکه دوباره join به مشکل نخوره، listeners قبلی از این event روی همین socket نماند
-try { 
-  s.off("room:join"); 
-} catch {}
-s.emit("room:join", joinPayload, (resp)=>{
-  console.log("ROOM JOIN RESP:", resp);
-  setDebug(prev => ({
-    ...(prev && typeof prev === "object" ? prev : {}),
-    roomJoinResponse: resp || null
-  }));
-
-  if(resp && resp.success){
-    serverMsgEl.textContent = "✅ وارد اتاق شد: " + currentMatchId + " | tier=" + tier;
-
-    if (resp.waitingForThreePlayerStart && Number.isFinite(resp.startAfterMs)) {
-joinStatusEl.textContent = "⏳ بازیکنان کافی جمع شده‌اند؛ شروع خودکار در حال انتظار است";
-
-      startLobbyCountdown(resp.startAfterMs);
-    } else {
-      joinStatusEl.textContent = "✅ join success";
-      setMsg("منتظر شروع یا دریافت state بازی بمانید...");
-    }
-
-    // اگر بازی فوری شروع شود، game:started یا game:state می‌رسد
-    joinBtn.disabled = false;
-  } else {
-    stopLobbyCountdown();
-    const message = resp?.message || "خطا در join";
-    serverMsgEl.textContent = "❌ ورود به اتاق: " + message;
-    joinStatusEl.textContent = "❌ join failed";
-    setMsg("ورود ناموفق بود.");
-    joinBtn.disabled = false;
-  }
-});
-
-  });
-
-  draw();
-  rollBtn.disabled = true;
+draw();
+rollBtn.disabled = true;
 })();
+
 </script>
 </body>
 </html>
