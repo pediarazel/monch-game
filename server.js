@@ -736,11 +736,12 @@ async function startMatch(match) {
     (color) => match.playerColors[color] != null
   ).length;
 
-  if (activePlayersCount < 3 || activePlayersCount > 4) {
-    throw new Error(
-      "برای شروع بازی باید ۳ یا ۴ بازیکن حضور داشته باشند."
-    );
-  }
+if (activePlayersCount < 2 || activePlayersCount > 4) {
+  throw new Error(
+    "برای شروع بازی باید ۲، ۳ یا ۴ بازیکن حضور داشته باشند."
+  );
+}
+
 
   /*
    * وضعیت starting مانع می‌شود دو درخواست هم‌زمان،
@@ -766,10 +767,13 @@ async function startMatch(match) {
 
     io.to(`match:${match.matchId}`).emit("game:started", {
       success: true,
-      message:
-        activePlayersCount === 3
-          ? "بازی با ۳ بازیکن شروع شد."
-          : "بازی با ۴ بازیکن شروع شد.",
+message:
+  activePlayersCount === 2
+    ? "بازی با ۲ بازیکن شروع شد."
+    : activePlayersCount === 3
+      ? "بازی با ۳ بازیکن شروع شد."
+      : "بازی با ۴ بازیکن شروع شد.",
+
       matchId: match.matchId,
       tier: match.tier,
       filledColors: activePlayersCount,
@@ -1480,54 +1484,62 @@ io.on("connection", (socket) => {
         });
       }
 
-      if (
-        filledColors === 3 &&
-        match.status === "waiting" &&
-        !matchTimers.has(matchId)
-      ) {
-        const timer = setTimeout(async () => {
-          matchTimers.delete(matchId);
+if (
+  filledColors >= 2 &&
+  filledColors < 4 &&
+  match.status === "waiting" &&
+  !matchTimers.has(matchId)
+) {
+  const timer = setTimeout(async () => {
+    matchTimers.delete(matchId);
 
-          const currentMatch = matches.get(matchId);
-          if (!currentMatch || currentMatch.status !== "waiting") return;
+    const currentMatch = matches.get(matchId);
+    if (!currentMatch || currentMatch.status !== "waiting") return;
 
-          const currentFilled = colorOrder.filter(
-            (color) => currentMatch.playerColors[color] != null
-          ).length;
+    const currentFilled = colorOrder.filter(
+      (color) => currentMatch.playerColors[color] != null
+    ).length;
 
-          if (currentFilled >= 3) {
-            try {
-              await startMatch(currentMatch);
-            } catch (error) {
-              console.error("[THREE PLAYER START FAILED]", error);
-              io.to(`match:${matchId}`).emit("match:error", {
-                message: error?.message || "شروع بازی ۳ نفره ممکن نشد.",
-              });
-            }
-          }
-        }, THREE_PLAYER_WAIT_MS);
-
-        matchTimers.set(matchId, timer);
+    if (currentFilled >= 2 && currentFilled < 4) {
+      try {
+        await startMatch(currentMatch);
+      } catch (error) {
+        console.error("[2-3 PLAYER START FAILED]", error);
+        io.to(`match:${matchId}`).emit("match:error", {
+          message: error?.message || "شروع بازی با بازیکنان موجود ممکن نشد.",
+        });
       }
+    }
+  }, THREE_PLAYER_WAIT_MS);
 
-      return callback?.({
-        success: true,
-        message:
-          filledColors === 3
-            ? "سه بازیکن حاضرند؛ بازی پس از زمان انتظار شروع می‌شود."
-            : "به اتاق اضافه شدید.",
-        matchId,
-        tier: match.tier,
-        filledColors,
-        status: match.status,
-        playerColors: match.playerColors,
-        waitingForThreePlayerStart:
-          filledColors === 3 && match.status === "waiting",
-        startAfterMs:
-          filledColors === 3 && match.status === "waiting"
-            ? THREE_PLAYER_WAIT_MS
-            : null,
-      });
+  matchTimers.set(matchId, timer);
+}
+
+
+return callback?.({
+  success: true,
+  message:
+    filledColors >= 2 && filledColors < 4
+      ? "بازیکنان کافی حاضرند؛ بازی پس از ۶۰ ثانیه شروع می‌شود."
+      : "به اتاق اضافه شدید.",
+  matchId,
+  tier: match.tier,
+  filledColors,
+  status: match.status,
+  playerColors: match.playerColors,
+  waitingForThreePlayerStart:
+    filledColors >= 2 &&
+    filledColors < 4 &&
+    match.status === "waiting",
+  startAfterMs:
+    filledColors >= 2 &&
+    filledColors < 4 &&
+    match.status === "waiting"
+      ? THREE_PLAYER_WAIT_MS
+      : null,
+});
+
+
     } catch (e) {
       console.error("JOIN ERROR:", e);
       return callback?.({
@@ -1841,19 +1853,20 @@ if (match.game.pendingDice.length > 0) {
          * اگر تعداد بازیکنان از سه کمتر شد،
          * تایمر بازی سه‌نفره باید لغو شود.
          */
-        if (
-          filledColors < 3 &&
-          matchTimers.has(matchId)
-        ) {
-          clearTimeout(matchTimers.get(matchId));
-          matchTimers.delete(matchId);
+if (
+  filledColors < 2 &&
+  matchTimers.has(matchId)
+) {
+  clearTimeout(matchTimers.get(matchId));
+  matchTimers.delete(matchId);
 
-          console.log("[MATCH TIMER CANCELLED]", {
-            matchId,
-            reason: "players_below_three",
-            filledColors,
-          });
-        }
+  console.log("[MATCH TIMER CANCELLED]", {
+    matchId,
+    reason: "players_below_two",
+    filledColors,
+  });
+}
+
 
         /*
          * مسابقه کاملاً خالی را از حافظه حذف می‌کنیم.

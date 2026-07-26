@@ -241,7 +241,7 @@
 
   setMsg('صفحه لود شد ✅');
 
-  const SOCKET_URL = window.location.origin;
+const SOCKET_URL = (window.SOCKET_URL_OVERRIDE || window.location.origin);
   const API_BASE = (window.API_BASE_OVERRIDE || "").trim() || "";
   function api(path){ return API_BASE ? (API_BASE.replace(/\/$/,'') + path) : path; }
 
@@ -520,7 +520,9 @@ let socket = null;
 let myColor = null;
 let gameState = null;
 let turnTimerInterval = null; // برای شمارش معکوس نوبت
+let lobbyCountdownInterval = null; // برای شمارش معکوس قبل از شروع بازی
 let currentMatchId = null;
+
 
 // --- سیستم کمکی تایمر نوبت ---
 function formatRemainingMs(deadlineAt) {
@@ -537,6 +539,48 @@ function stopTurnTimer() {
     clearInterval(turnTimerInterval);
     turnTimerInterval = null;
   }
+}
+
+function stopLobbyCountdown() {
+  if (lobbyCountdownInterval) {
+    clearInterval(lobbyCountdownInterval);
+    lobbyCountdownInterval = null;
+  }
+}
+
+function startLobbyCountdown(startAfterMs) {
+  stopLobbyCountdown();
+
+  if (!Number.isFinite(startAfterMs) || startAfterMs <= 0) {
+    joinStatusEl.textContent = "در انتظار شروع بازی...";
+    return;
+  }
+
+  const endAt = Date.now() + startAfterMs;
+
+  const render = () => {
+    const remainingMs = Math.max(0, endAt - Date.now());
+    const secs = Math.ceil(remainingMs / 1000);
+
+joinStatusEl.textContent =
+  `⏳ بازیکنان کافی حاضرند. شروع خودکار بازی تا ${secs} ثانیه دیگر`;
+
+
+    serverMsgEl.textContent =
+      `در حال انتظار برای شروع خودکار بازی... ${secs} ثانیه مانده`;
+
+    setMsg(`بازی هنوز شروع نشده. ${secs} ثانیه تا شروع خودکار باقی مانده.`);
+
+    if (remainingMs <= 0) {
+      stopLobbyCountdown();
+      joinStatusEl.textContent = "⌛ زمان انتظار تمام شد، منتظر شروع بازی از سمت سرور...";
+      serverMsgEl.textContent = "⌛ در حال شروع بازی...";
+      setMsg("منتظر دریافت شروع بازی از سرور...");
+    }
+  };
+
+  render();
+  lobbyCountdownInterval = setInterval(render, 500);
 }
 
 function startTurnTimer() {
@@ -563,6 +607,7 @@ function startTurnTimer() {
   renderCountdown();
   turnTimerInterval = setInterval(renderCountdown, 500);
 }
+
 
 
   // ✅ انتخاب تاس برای هر حرکت
@@ -1112,9 +1157,11 @@ function connectSocketOnce() {
     });
   });
 
-  socket.on("disconnect", reason => {
-    socketStatusEl.textContent = "⚠️ اتصال سوکت قطع شد: " + (reason || "نامشخص");
-  });
+socket.on("disconnect", reason => {
+  stopLobbyCountdown();
+  socketStatusEl.textContent = "⚠️ اتصال سوکت قطع شد: " + (reason || "نامشخص");
+});
+
 
   socket.io.on("reconnect_attempt", attemptNumber => {
     socketStatusEl.textContent = `در حال تلاش مجدد برای اتصال (${attemptNumber})...`;
@@ -1129,42 +1176,73 @@ function connectSocketOnce() {
     socketStatusEl.textContent = "❌ تلاش‌های اتصال مجدد ناموفق بود.";
   });
 
-  socket.on("balanceChanged", data => {
-    const newBalance = data?.newCoins ?? data?.coins;
-    if (newBalance != null) balanceValueEl.textContent = String(newBalance);
-  });
+socket.on("balanceChanged", data => {
+  const newBalance = data?.newCoins ?? data?.coins;
+  if (newBalance != null) balanceValueEl.textContent = String(newBalance);
+});
 
-  socket.on("game:state", state => {
-    gameState = state;
+socket.on("game:started", payload => {
+  stopLobbyCountdown();
+  joinStatusEl.textContent = "🎮 بازی شروع شد";
+  serverMsgEl.textContent = "🎮 بازی از سمت سرور شروع شد.";
+  setMsg("بازی شروع شد. منتظر دریافت وضعیت بازی...");
+  setDebug(prev => ({
+    ...(prev && typeof prev === "object" ? prev : {}),
+    gameStartedPayload: payload || null
+  }));
+});
 
-    const payload = getTokenPayload();
-    const myUserId = getMyUserIdFromPayload(payload);
+socket.on("game:state", state => {
+  gameState = state;
 
-    if (state?.playerColors && myUserId != null) {
-      myColor = colorOrder.find(
-        color => String(state.playerColors[color]) === String(myUserId)
-      ) || null;
-    } else {
-      myColor = null;
-    }
+  const payload = getTokenPayload();
+  const myUserId = getMyUserIdFromPayload(payload);
 
-    updateUI();
-    draw();
-    startTurnTimer();
-  });
+  if (state?.playerColors && myUserId != null) {
+    myColor = colorOrder.find(
+      color => String(state.playerColors[color]) === String(myUserId)
+    ) || null;
+  } else {
+    myColor = null;
+  }
 
-  socket.connect();
-  return socket;
+  stopLobbyCountdown();
+  joinStatusEl.textContent = "✅ وضعیت بازی دریافت شد";
+  serverMsgEl.textContent = "✅ state بازی دریافت شد.";
+
+  updateUI();
+  draw();
+  startTurnTimer();
+});
+
+socket.on("match:error", payload => {
+  stopLobbyCountdown();
+  const message = payload?.message || "خطا در شروع یا مدیریت بازی";
+  joinStatusEl.textContent = "❌ match:error";
+  serverMsgEl.textContent = "❌ " + message;
+  setMsg(message);
+  setDebug(prev => ({
+    ...(prev && typeof prev === "object" ? prev : {}),
+    matchErrorPayload: payload || null
+  }));
+});
+
+socket.connect();
+return socket;
 }
 
 logoutBtn.addEventListener("click", ()=>{
+
   stopBalanceAutoRefresh();
   stopTurnTimer();
+  stopLobbyCountdown();
 
   clearToken();
   balanceValueEl.textContent = "0";
   setAuthResult("خروج شد. دوباره ورود کن.");
   serverMsgEl.textContent = "";
+  joinStatusEl.textContent = "";
+  socketStatusEl.textContent = "";
   setMsg("ابتدا ورود کن.");
 
   gameState = null;
@@ -1185,6 +1263,7 @@ logoutBtn.addEventListener("click", ()=>{
   draw();
   updateUI();
 });
+
 
 
   const matchIdInput = document.getElementById("matchIdInput");
@@ -1226,19 +1305,36 @@ logoutBtn.addEventListener("click", ()=>{
 
     const joinPayload = { roomId: currentMatchId, tier };
 
-    s.emit("room:join", joinPayload, (resp)=>{
-      if(resp && resp.success){
-        serverMsgEl.textContent = "✅ وارد اتاق شد: " + currentMatchId + " | tier=" + tier;
-        joinStatusEl.textContent = "✅ join success";
-        setMsg("منتظر state بازی بمانید...");
-      } else {
-        const message = resp?.message || "خطا در join";
-        serverMsgEl.textContent = "❌ ورود به اتاق: " + message;
-        joinStatusEl.textContent = "❌ join failed";
-        setMsg("ورود ناموفق بود.");
-        joinBtn.disabled = false;
-      }
-    });
+s.emit("room:join", joinPayload, (resp)=>{
+  setDebug(prev => ({
+    ...(prev && typeof prev === "object" ? prev : {}),
+    roomJoinResponse: resp || null
+  }));
+
+  if(resp && resp.success){
+    serverMsgEl.textContent = "✅ وارد اتاق شد: " + currentMatchId + " | tier=" + tier;
+
+    if (resp.waitingForThreePlayerStart && Number.isFinite(resp.startAfterMs)) {
+joinStatusEl.textContent = "⏳ بازیکنان کافی جمع شده‌اند؛ شروع خودکار در حال انتظار است";
+
+      startLobbyCountdown(resp.startAfterMs);
+    } else {
+      joinStatusEl.textContent = "✅ join success";
+      setMsg("منتظر شروع یا دریافت state بازی بمانید...");
+    }
+
+    // اگر بازی فوری شروع شود، game:started یا game:state می‌رسد
+    joinBtn.disabled = false;
+  } else {
+    stopLobbyCountdown();
+    const message = resp?.message || "خطا در join";
+    serverMsgEl.textContent = "❌ ورود به اتاق: " + message;
+    joinStatusEl.textContent = "❌ join failed";
+    setMsg("ورود ناموفق بود.");
+    joinBtn.disabled = false;
+  }
+});
+
   });
 
   draw();
