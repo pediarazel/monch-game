@@ -497,29 +497,48 @@
     lobbyCountdownInterval = null;
   }
 
-  function startLobbyCountdown(startAfterMs) {
-    stopLobbyCountdown();
-    if (!Number.isFinite(startAfterMs) || startAfterMs <= 0) return;
+  function renderLobbyByDeadline(lobbyPayload) {
+    const { deadlineAt, phase, searchingFor, message, filledColors } = lobbyPayload || {};
 
-    const endAt = Date.now() + startAfterMs;
+    stopLobbyCountdown();
+
+    const hasDeadline = !!deadlineAt;
+    if (!hasDeadline) {
+      // متن ثابت
+      let t = message || "";
+      if (!t) {
+        if (phase === 2) t = "👥 نفر دوم وارد شد. در حال جستجوی نفر سوم...";
+        else if (phase === 3) t = "👥 نفر سوم وارد شد. در حال جستجوی نفر چهارم...";
+        else t = "در حال اتصال...";
+      }
+      joinStatusEl.textContent = t;
+      serverMsgEl.textContent = "";
+      return;
+    }
+
+    const deadlineAtMs = new Date(deadlineAt).getTime();
+    if (!Number.isFinite(deadlineAtMs)) return;
+
     const render = () => {
-      const remainingMs = Math.max(0, endAt - Date.now());
-      const secs = Math.ceil(remainingMs / 1000);
+      const secs = formatRemainingMs(deadlineAt);
+      const base =
+        phase === 2
+          ? `👤 نفر دوم پیدا شد. در حال جستجوی نفر سوم...`
+          : phase === 3
+            ? `👥 نفر سوم پیدا شد. در حال جستجوی نفر چهارم...`
+            : (message || "در حال جستجو...");
 
       joinStatusEl.textContent =
-        `⏳ صف آماده است. شروع خودکار تا ${secs} ثانیه دیگر (یا با رسیدن نفر ۴)`;
+        `⏳ ${base} (${secs} ثانیه دیگر)`;
 
-      serverMsgEl.textContent =
-        `در انتظار شروع... ${secs} ثانیه`;
+      serverMsgEl.textContent = filledColors
+        ? `تعداد فعلی: ${filledColors}`
+        : "";
 
-      setMsg(`در انتظار شروع بازی... ${secs} ثانیه مانده`);
-      if (remainingMs <= 0) {
-        stopLobbyCountdown();
-        joinStatusEl.textContent = "⌛ زمان انتظار تمام شد. منتظر شروع از سرور...";
-        serverMsgEl.textContent = "⌛ در حال شروع بازی...";
-        setMsg("منتظر start از سمت سرور...");
-      }
+      setMsg(`در حال جستجوی نفر بعدی... ${secs} ثانیه مانده`);
+      if (secs <= 0) stopLobbyCountdown();
     };
+
     render();
     lobbyCountdownInterval = setInterval(render, 500);
   }
@@ -716,7 +735,6 @@
     drawPieces();
   }
 
-  // UI update
   function updateUI() {
     if (!gameState) {
       rollBtn.disabled = true;
@@ -753,7 +771,7 @@
       dice2El.textContent = (pendingDice[1] ?? "—");
 
       dice1El.style.pointerEvents = (myColor === turnColor) ? "auto" : "none";
-      dice2El.style.pointerEvents = (myColor === turnColor && pendingDice.length > 1) ? "auto" : "none";
+dice2El.style.pointerEvents = (myColor === turnColor && pendingDice.length > 1) ? "auto" : "none";
       dice1El.style.opacity = 1;
       dice2El.style.opacity = (pendingDice.length > 1) ? 1 : 0.5;
 
@@ -763,7 +781,7 @@
       }
 
       syncDiePickUI();
-setMsg(myColor === turnColor ? (pickedDieValue == null ? "تاس خودت را انتخاب کن." : "حالا یک مهره را بزن.") : "هنوز نوبت شما نیست.");
+      setMsg(myColor === turnColor ? (pickedDieValue == null ? "تاس خودت را انتخاب کن." : "حالا یک مهره را بزن.") : "هنوز نوبت شما نیست.");
     } else {
       dice1El.textContent = "🎲";
       dice2El.textContent = "🎲";
@@ -1061,18 +1079,14 @@ setMsg(myColor === turnColor ? (pickedDieValue == null ? "تاس خودت را �
       socketStatusEl.textContent = "⚠️ اتصال سوکت قطع شد: " + (reason || "نامشخص");
     });
 
-    socket.on("match:playerCountUpdated", data => {
-      setDebug(prev => ({ ...(prev && typeof prev === "object" ? prev : {}), playerCountUpdated: data }));
+    socket.on("lobby:status", data => {
+      setDebug(prev => ({ ...(prev && typeof prev === "object" ? prev : {}), lobbyStatus: data }));
       if (!data) return;
-
-      if (data.event === "FOURTH_JOINED") {
-        peopleNewsEl.textContent = "🎉 بازی شروع می‌شود!";
-      } else if (data.event === "THIRD_JOINED") {
-        peopleNewsEl.textContent = "👥 نفر سوم وارد شد";
-      } else if (data.event === "SECOND_JOINED") {
-        peopleNewsEl.textContent = "👤 نفر دوم وارد شد";
-      } else {
-        peopleNewsEl.textContent = "🎲 نفر جدید وارد شد";
+      renderLobbyByDeadline(data);
+      if (data?.phase === 4) {
+        peopleNewsEl.textContent = "🎮 بازی شروع می‌شود!";
+      } else if (data?.searchingFor) {
+        peopleNewsEl.textContent = `⏳ در حال جستجوی نفر ${data.searchingFor}...`;
       }
     });
 
@@ -1225,13 +1239,13 @@ setMsg(myColor === turnColor ? (pickedDieValue == null ? "تاس خودت را �
       setDebug(prev => ({ ...(prev && typeof prev === "object" ? prev : {}), roomJoinResponse: resp || null }));
 
       if(resp && resp.success){
-        if (resp.matchId) currentMatchId = String(resp.matchId);
+        // تا قبل از game:state، لابی با lobby:status نمایش داده میشه
+        if (resp?.matchId) currentMatchId = String(resp.matchId);
 
         if (resp.waiting === true || resp.status === "waiting") {
-          joinStatusEl.textContent = "⏳ منتظر نفرات بیشتر... (تا نفر ۴)";
+          joinStatusEl.textContent = "⏳ منتظر نفرات بیشتر هستید...";
           serverMsgEl.textContent = "در صف منتظر شروع بازی...";
           setMsg("در صف منتظر نفرات بیشتر هستید...");
-          if (Number.isFinite(resp.startAfterMs)) startLobbyCountdown(resp.startAfterMs);
         } else {
           joinStatusEl.textContent = "✅ join success";
           serverMsgEl.textContent = "✅ join success";
@@ -1245,17 +1259,15 @@ setMsg(myColor === turnColor ? (pickedDieValue == null ? "تاس خودت را �
         setMsg("ورود ناموفق بود.");
         joinInProgress = false;
         joinBtn.disabled = false;
+        rollBtn.disabled = false;
       }
 
-      // اگر هنوز matchId نداده، joinBtn رو باز نگه می‌داریم که دوباره نزنه
       setTimeout(()=>{
-        // joinBtn می‌تونه دوباره disable بمونه تا وصل کامل
         joinBtn.disabled = false;
       }, 500);
     });
   });
 
-  // اولیه
   draw();
   updateUI();
 })();
