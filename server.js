@@ -39,12 +39,8 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET;
 const START_COINS = Number(process.env.START_COINS) || 1000;
 const TURN_MS = 30000;
 
-// مدت انتظار برای شروع خودکار بازی ۳ نفره
-const THREE_PLAYER_WAIT_MS = 60_000;
-
-// matchId -> Timeout
-const matchTimers = new Map();
-
+// --------- تایمرهای match (برای cancel/race-proof)
+const matchTimers = new Map(); // matchId -> { timeout }
 const connectedUsers = new Map(); // userId -> socketId
 
 /*
@@ -92,59 +88,19 @@ app.use(
   })
 );
 
-        /*
-        |--------------------------------------------------------------------------
-        | Static Files
-        |--------------------------------------------------------------------------
-        */
-        // چون server.js در پوشه public/project است، برای دسترسی به فایل‌های داخل پوشه anna کافیست 'anna' را به مسیر اضافه کنیم
-        const staticFilesDirectory = path.join(__dirname, "anna");
-        app.use(express.static(staticFilesDirectory));
+/*
+|--------------------------------------------------------------------------
+| Static Files
+|--------------------------------------------------------------------------
+*/
+const staticFilesDirectory = path.join(__dirname, "anna");
+app.use(express.static(staticFilesDirectory));
 
-// --- کد لاگین اصلاح شده با لاگ‌های تشخیصی ---
-app.post('/api/auth/login', async (req, res) => {
-  const { username, password } = req.body;
-  console.log(`Attempting login for username: ${username}`); // لاگ ورودی
-  try {
-    // پیدا کردن کاربر در دیتابیس
-    const user = await prisma.user.findUnique({
-      where: { username: username },
-    });
-
-    if (user) {
-      console.log(`User found: ${user.username}`); // لاگ یافتن کاربر
-      // مقایسه رمز عبور با رمز عبور هش شده در دیتابیس
-      const isMatch = await bcrypt.compare(password, user.password);
-      console.log(`Password comparison result: ${isMatch}`); // لاگ نتیجه مقایسه رمز
-
-      if (isMatch) {
-        // ایجاد توکن JWT در صورت تطابق رمز عبور
-        const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-        console.log('Login successful, token generated.'); // لاگ موفقیت آمیز بودن ورود
-        return res.json({ token });
-      } else {
-        console.log('Login failed: Invalid password'); // لاگ شکست ورود به دلیل رمز اشتباه
-        return res.status(401).json({ message: 'Invalid credentials' });
-      }
-    } else {
-      console.log('Login failed: User not found'); // لاگ شکست ورود به دلیل عدم یافتن کاربر
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-  } catch (error) {
-    console.error('Error during login:', error); // لاگ خطا در صورت بروز مشکل در دیتابیس یا ...
-    return res.status(500).json({ message: 'Internal server error' });
-  }
-});
-// --- پایان کد لاگین اصلاح شده ---
-
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | Prisma
-        |--------------------------------------------------------------------------
-        */
-
+/*
+|--------------------------------------------------------------------------
+| Prisma
+|--------------------------------------------------------------------------
+*/
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
@@ -165,24 +121,15 @@ function verifyToken(token) {
   return jwt.verify(token, JWT_SECRET);
 }
 
-function createToken(payload) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
+function assertValidTier(tier) {
+  if (!Number.isFinite(tier)) throw new Error("tier نامعتبر است.");
+  if (![20, 50, 100].includes(tier)) throw new Error("tier باید یکی از 20/50/100 باشد.");
 }
 
 function safeJsonError(res, statusCode, message) {
   return res.status(statusCode).json({ success: false, message });
 }
 
-function assertValidTier(tier) {
-  if (!Number.isFinite(tier)) throw new Error("tier نامعتبر است.");
-  if (![20, 50, 100].includes(tier)) throw new Error("tier باید یکی از 20/50/100 باشد.");
-}
-
-/*
-|--------------------------------------------------------------------------
-| Auth HTTP middleware
-|--------------------------------------------------------------------------
-*/
 function authenticateHttp(req, res, next) {
   try {
     const token = getBearerToken(req);
@@ -199,14 +146,13 @@ function authenticateHttp(req, res, next) {
   }
 }
 
-/*
-|--------------------------------------------------------------------------
-| Admin secret middleware
-|--------------------------------------------------------------------------
-*/
+function normalizeEnvSecret(s) {
+  return s == null ? "" : String(s);
+}
+
 function authenticateAdminSecret(req, res, next) {
   const secret = req.query?.adminSecret ?? req.body?.adminSecret ?? "";
-  if (String(secret) !== String(ADMIN_SECRET)) {
+  if (normalizeEnvSecret(secret) !== normalizeEnvSecret(ADMIN_SECRET)) {
     return safeJsonError(res, 403, "رمز ادمین اشتباه است.");
   }
   return next();
@@ -214,37 +160,40 @@ function authenticateAdminSecret(req, res, next) {
 
 /*
 |--------------------------------------------------------------------------
-| Routes
+| Login route
 |--------------------------------------------------------------------------
 */
-
-
-
-app.get("/health", async (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
+  const { username, password } = req.body;
+  console.log(`Attempting login for username: ${username}`);
   try {
-    await prisma.$queryRaw`SELECT 1`;
-    return res.status(200).json({
-      success: true,
-      server: "online",
-      database: "connected",
-      time: new Date().toISOString(),
+    const user = await prisma.user.findUnique({
+      where: { username: username },
     });
+
+    if (user) {
+      console.log(`User found: ${user.username}`);
+      const isMatch = await bcrypt.compare(password, user.password);
+      console.log(`Password comparison result: ${isMatch}`);
+
+      if (isMatch) {
+        const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: "1h" });
+        console.log("Login successful, token generated.");
+        return res.json({ token });
+      } else {
+        console.log("Login failed: Invalid password");
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+    } else {
+      console.log("Login failed: User not found");
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      server: "online",
-      database: "disconnected",
-      message: "اتصال به دیتابیس برقرار نشد.",
-      error: error.message,
-    });
+    console.error("Error during login:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 });
 
-/*
-|--------------------------------------------------------------------------
-| Auth routes
-|--------------------------------------------------------------------------
-*/
 app.post("/api/auth/register", async (req, res) => {
   try {
     const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
@@ -267,7 +216,6 @@ app.post("/api/auth/register", async (req, res) => {
     return safeJsonError(res, 500, e.message || "خطای داخلی");
   }
 });
-
 
 app.get("/api/auth/check", authenticateHttp, (req, res) => {
   return res.status(200).json({ success: true, user: req.user });
@@ -292,9 +240,29 @@ app.get("/api/me/balance", authenticateHttp, async (req, res) => {
   }
 });
 
+app.get("/health", async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return res.status(200).json({
+      success: true,
+      server: "online",
+      database: "connected",
+      time: new Date().toISOString(),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      server: "online",
+      database: "disconnected",
+      message: "اتصال به دیتابیس برقرار نشد.",
+      error: error.message,
+    });
+  }
+});
+
 /*
 |--------------------------------------------------------------------------
-| Game engine data (منچ ساده روی برد ثابت)
+| Game engine (همان کد خودت)
 |--------------------------------------------------------------------------
 */
 const SIZE = 600;
@@ -350,17 +318,11 @@ function cloneGameForClient(game) {
     currentTurn: game.currentTurn,
     currentTurnColor: colorOrder[game.currentTurn],
     currentTurnPlayerId: game.playerColors[colorOrder[game.currentTurn]],
-
-    // قدیمی (برای سازگاری UI)
     dice: game.dice,
-
-    // جدید
     dice1: game.dice1,
     dice2: game.dice2,
     pendingDice: Array.isArray(game.pendingDice) ? game.pendingDice.slice() : [],
-
     rolled: game.rolled,
-    rolling: false,
     winner: game.winner,
     turnDeadlineAt: game.turnDeadlineAt,
     turnMoved: game.turnMoved,
@@ -380,7 +342,6 @@ function isOccupiedBySameColorAtPathIndex(game, myColor, pieceId, destPathIndex)
   );
 }
 
-// ✅ can حرکت با dieValue
 function canPieceMove(game, piece, dieValue) {
   if (!game.rolled) return false;
   if (piece.color !== colorOrder[game.currentTurn]) return false;
@@ -437,29 +398,15 @@ function canPieceMove(game, piece, dieValue) {
 }
 
 function hasLegalMoveForDie(game, dieValue) {
-  if (!game || !Array.isArray(game.pieces)) {
-    return false;
-  }
-
+  if (!game || !Array.isArray(game.pieces)) return false;
   const currentColor = colorOrder[game.currentTurn];
-
-  return game.pieces.some(
-    (piece) =>
-      piece.color === currentColor &&
-      canPieceMove(game, piece, dieValue)
-  );
+  return game.pieces.some((piece) => piece.color === currentColor && canPieceMove(game, piece, dieValue));
 }
 
 function hasAnyLegalPendingMove(game) {
-  const pendingDice = Array.isArray(game?.pendingDice)
-    ? game.pendingDice
-    : [];
-
-  return pendingDice.some((dieValue) =>
-    hasLegalMoveForDie(game, dieValue)
-  );
+  const pendingDice = Array.isArray(game?.pendingDice) ? game.pendingDice : [];
+  return pendingDice.some((dieValue) => hasLegalMoveForDie(game, dieValue));
 }
-
 
 function capture(game, cellName, myColor) {
   for (const p of game.pieces) {
@@ -486,7 +433,6 @@ function movePiece(game, piece, dieValue) {
     piece.homeIndex = -1;
     return true;
   }
-
   if (piece.state === "start") {
     const entryIndex = layout.entryPathIndexes[piece.color];
     const destPathIndex = (entryIndex + dieValue - 1) % 36;
@@ -496,7 +442,6 @@ function movePiece(game, piece, dieValue) {
     capture(game, layout.mainPath[piece.pathIndex], piece.color);
     return true;
   }
-
   if (piece.state === "path") {
     const entryIndex = layout.entryPathIndexes[piece.color];
     const walkedSteps = (piece.pathIndex - entryIndex + 36) % 36;
@@ -512,50 +457,46 @@ function movePiece(game, piece, dieValue) {
     }
     return true;
   }
-
   if (piece.state === "home") {
     piece.homeIndex += dieValue;
     return true;
   }
-
   return false;
 }
 
 function checkWinner(game) {
-  if (!game || !Array.isArray(game.pieces)) {
-    return null;
-  }
-
   for (const color of colorOrder) {
     const homePieces = game.pieces.filter(
-      (piece) =>
-        piece.color === color &&
-        piece.state === "home" &&
-        Number.isInteger(piece.homeIndex) &&
-        piece.homeIndex >= 0 &&
-        piece.homeIndex < 4
+      (piece) => piece.color === color && piece.state === "home" && piece.homeIndex >= 0 && piece.homeIndex < 4
     );
-
-    const occupiedHomeIndexes = new Set(
-      homePieces.map((piece) => piece.homeIndex)
-    );
-
-    if (homePieces.length === 4 && occupiedHomeIndexes.size === 4) {
-      return color;
-    }
+    const occupiedHomeIndexes = new Set(homePieces.map((piece) => piece.homeIndex));
+    if (homePieces.length === 4 && occupiedHomeIndexes.size === 4) return color;
   }
-
   return null;
 }
 
-
 /*
 |--------------------------------------------------------------------------
-| Rooms & match
+| Rooms & match (tier-separated, queue-of-4)
 |--------------------------------------------------------------------------
 */
+
 const matches = new Map(); // matchId -> match
-function createMatch(matchId) {
+
+function makeMatchId(tier) {
+  return `m:${tier}:${Date.now()}:${Math.floor(Math.random() * 1e6)}`;
+}
+
+// صف واقعی: هر tier یک آرایه از userIdها
+const tierQueues = new Map(); // tier -> Array<uid>
+const userTierQueue = new Map(); // uid -> tier (برای اینکه دوباره داخل صف نرود)
+
+function getTierQueue(tier) {
+  if (!tierQueues.has(tier)) tierQueues.set(tier, []);
+  return tierQueues.get(tier);
+}
+
+function createMatch(matchId, tier) {
   return {
     matchId,
     status: "waiting",
@@ -566,24 +507,22 @@ function createMatch(matchId) {
     turnId: 0,
     pendingTurnTimer: null,
     createdAt: Date.now(),
-    tier: null,
-
+    tier: tier ?? null,
     financialSettled: false,
     chargedEntry: false,
   };
 }
 
+function getActivePlayersCount(match) {
+  return colorOrder.filter((c) => match.playerColors[c] != null).length;
+}
+
 function resetMatchGame(match) {
-  const colorOrder = ["red", "green", "yellow", "blue"];
-
-  const firstActiveTurn = colorOrder.findIndex(
-    (color) => match.playerColors[color] != null
-  );
-
-  const initialTurn = firstActiveTurn !== -1 ? firstActiveTurn : 0;
+  const initialTurn = colorOrder.findIndex((color) => match.playerColors[color] != null);
+  const turn = initialTurn !== -1 ? initialTurn : 0;
 
   match.game = {
-    currentTurn: initialTurn,
+    currentTurn: turn,
     dice: 0,
     dice1: 0,
     dice2: 0,
@@ -603,24 +542,13 @@ function resetMatchGame(match) {
 
   match.turnDeadlineAt = null;
   match.turnId = (match.turnId || 0) + 1;
-
-  console.log(
-    `[GAME STARTED] Match ${match.matchId} initialized with turn: ${colorOrder[initialTurn]}`
-  );
 }
 
-
-
-function getCurrentColor(match) {
-  return colorOrder[match.game.currentTurn];
-}
-
-let io; // assigned after Server creation
+let io; // set later
 
 function broadcastState(match) {
   if (!match.game) return;
 
-  const colorOrder = ["red", "green", "yellow", "blue"];
   const activeColor = colorOrder[match.game.currentTurn];
 
   const snapshot = {
@@ -636,12 +564,8 @@ function broadcastState(match) {
   io.to(`match:${match.matchId}`).emit("game:state", snapshot);
 }
 
-
-
 function nextTurn(match) {
   if (!match.game || match.game.winner) return;
-
-  const colorOrder = ["red", "green", "yellow", "blue"];
 
   let attempts = 0;
   do {
@@ -654,15 +578,7 @@ function nextTurn(match) {
 
   const nextColor = colorOrder[match.game.currentTurn];
   const nextPlayerId = match.playerColors[nextColor];
-
-  if (nextPlayerId == null) {
-    console.error("[NEXT TURN FAILED]", {
-      matchId: match.matchId,
-      currentTurn: match.game.currentTurn,
-      playerColors: match.playerColors,
-    });
-    return;
-  }
+  if (nextPlayerId == null) return;
 
   match.game.dice = 0;
   match.game.dice1 = 0;
@@ -673,17 +589,8 @@ function nextTurn(match) {
 
   match.turnId = (match.turnId || 0) + 1;
 
-  console.log("[NEXT TURN]", {
-    matchId: match.matchId,
-    nextColor,
-    nextPlayerId,
-    turnId: match.turnId,
-  });
-
   startTurnTimeout(match);
 }
-
-
 
 function startTurnTimeout(match) {
   if (!match.game || match.game.winner) return;
@@ -706,74 +613,46 @@ function startTurnTimeout(match) {
     if (m.turnId !== myTurnId) return;
     if (!m.game || m.game.winner) return;
 
-    console.log(`[TURN TIMEOUT] Match ${m.matchId}, auto-passing turn.`);
     nextTurn(m);
   }, TURN_MS);
 }
 
-
 function getNextDiceValueFromMatch() {
   return Math.floor(Math.random() * 6) + 1;
 }
-/**
- * شروع یکپارچه مسابقه با ۳ یا ۴ بازیکن
- */
+
 async function startMatch(match) {
-  if (!match) {
-    throw new Error("مسابقه پیدا نشد.");
+  if (!match) throw new Error("مسابقه پیدا نشد.");
+  if (match.status !== "waiting") return false;
+
+  const activePlayersCount = getActivePlayersCount(match);
+  if (activePlayersCount < 2 || activePlayersCount > 4) {
+    throw new Error("برای شروع بازی باید بین ۲ تا ۴ بازیکن حضور داشته باشند.");
   }
 
-  if (match.status !== "waiting") {
-    console.log("[START MATCH IGNORED]", {
-      matchId: match.matchId,
-      status: match.status,
-    });
-
-    return false;
-  }
-
-  const activePlayersCount = colorOrder.filter(
-    (color) => match.playerColors[color] != null
-  ).length;
-
-if (activePlayersCount < 2 || activePlayersCount > 4) {
-  throw new Error(
-    "برای شروع بازی باید ۲، ۳ یا ۴ بازیکن حضور داشته باشند."
-  );
-}
-
-
-  /*
-   * وضعیت starting مانع می‌شود دو درخواست هم‌زمان،
-   * بازی را دو بار شروع یا ورودی را دو بار کسر کنند.
-   */
   match.status = "starting";
 
   try {
-    console.log("[START MATCH]", {
-      matchId: match.matchId,
-      activePlayersCount,
-      tier: match.tier,
-      playerColors: match.playerColors,
-    });
-
     await chargeTierFromPlayers(match);
 
     resetMatchGame(match);
     match.status = "playing";
+
+    if (matchTimers.has(match.matchId)) {
+      clearTimeout(matchTimers.get(match.matchId).timeout);
+      matchTimers.delete(match.matchId);
+    }
 
     broadcastState(match);
     startTurnTimeout(match);
 
     io.to(`match:${match.matchId}`).emit("game:started", {
       success: true,
-message:
-  activePlayersCount === 2
-    ? "بازی با ۲ بازیکن شروع شد."
-    : activePlayersCount === 3
-      ? "بازی با ۳ بازیکن شروع شد."
-      : "بازی با ۴ بازیکن شروع شد.",
-
+      message: activePlayersCount === 4
+        ? "بازی با ۴ بازیکن شروع شد."
+        : activePlayersCount === 3
+          ? "بازی با ۳ بازیکن شروع شد."
+          : "بازی با ۲ بازیکن شروع شد.",
       matchId: match.matchId,
       tier: match.tier,
       filledColors: activePlayersCount,
@@ -781,36 +660,19 @@ message:
       playerColors: match.playerColors,
     });
 
-    console.log("[MATCH STARTED]", {
-      matchId: match.matchId,
-      activePlayersCount,
-      tier: match.tier,
-    });
-
     return true;
   } catch (error) {
-    /*
-     * chargedEntry را false نمی‌کنیم.
-     * اگر کسر ورودی انجام شده باشد، false کردن آن ممکن است
-     * در تلاش بعدی باعث کسر دوباره سکه شود.
-     */
     match.status = "waiting";
-
-    console.error("[START MATCH FAILED]", {
-      matchId: match.matchId,
-      chargedEntry: match.chargedEntry,
-      error: error?.message || String(error),
-    });
-
     throw error;
   }
 }
 
 /*
 |--------------------------------------------------------------------------
-| Admin: update by username
+| Admin updates & treasury (همان منطق خودت)
 |--------------------------------------------------------------------------
 */
+
 app.post("/admin/update-balance-by-username", authenticateAdminSecret, async (req, res) => {
   try {
     const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
@@ -841,81 +703,41 @@ app.post("/admin/update-balance-by-username", authenticateAdminSecret, async (re
 
     return res.json({ success: true, newCoins: updatedUser.coins });
   } catch (error) {
-    console.error("❌ خطا در آپدیت سکه:", error);
     return res.status(500).json({ success: false, message: "خطای سرور: " + error.message });
   }
 });
 
-app.get(
-  "/admin/user-balance/:username",
-  authenticateAdminSecret,
-  async (req, res) => {
-    try {
-      res.setHeader(
-        "Cache-Control",
-        "no-store, no-cache, must-revalidate, proxy-revalidate"
-      );
-      res.setHeader("Pragma", "no-cache");
-      res.setHeader("Expires", "0");
-      res.setHeader("Surrogate-Control", "no-store");
+app.get("/admin/user-balance/:username", authenticateAdminSecret, async (req, res) => {
+  try {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
 
-      const username = String(
-        req.params?.username || ""
-      ).trim();
+    const username = String(req.params?.username || "").trim();
+    if (!username) return safeJsonError(res, 400, "نام کاربری وارد نشده است.");
 
-      if (!username) {
-        return safeJsonError(
-          res,
-          400,
-          "نام کاربری وارد نشده است."
-        );
-      }
+    const user = await prisma.user.findUnique({
+      where: { username },
+      select: { id: true, username: true, coins: true, role: true },
+    });
 
-      const user = await prisma.user.findUnique({
-        where: { username },
-        select: {
-          id: true,
-          username: true,
-          coins: true,
-          role: true,
-        },
-      });
+    if (!user) return safeJsonError(res, 404, "کاربر پیدا نشد.");
 
-      if (!user) {
-        return safeJsonError(
-          res,
-          404,
-          "کاربر پیدا نشد."
-        );
-      }
-
-      return res.status(200).json({
-        success: true,
-        userId: user.id,
-        username: user.username,
-        coins: user.coins,
-        role: user.role,
-      });
-    } catch (error) {
-      console.error("[ADMIN BALANCE ERROR]", error);
-
-      return safeJsonError(
-        res,
-        500,
-        error?.message || "خطای داخلی سرور"
-      );
-    }
+    return res.status(200).json({
+      success: true,
+      userId: user.id,
+      username: user.username,
+      coins: user.coins,
+      role: user.role,
+    });
+  } catch (error) {
+    return safeJsonError(res, 500, error?.message || "خطای داخلی سرور");
   }
-);
+});
 
-/*
-|--------------------------------------------------------------------------
-| Treasury / financial functions + realtime balance
-|--------------------------------------------------------------------------
-*/
 function emitBalanceChanged(userId, newCoins, message) {
   const socketId = connectedUsers.get(String(userId));
-  console.log("[emitBalanceChanged]", { userId, socketId, newCoins });
   if (!socketId || !io) return;
   io.to(socketId).emit("balanceChanged", { newCoins, message });
 }
@@ -949,15 +771,9 @@ async function chargeTierFromPlayers(match) {
     .map((color) => match.playerColors[color])
     .filter((userId) => userId != null);
 
-// بعد:
-if (userIds.length < 2 || userIds.length > 4) {
-  throw new Error("برای شروع بازی باید ۲، ۳ یا ۴ بازیکن حضور داشته باشند.");
-}
-
-  if (new Set(userIds).size !== userIds.length) {
-    throw new Error("شناسه بازیکنان مسابقه تکراری است.");
+  if (userIds.length < 2 || userIds.length > 4) {
+    throw new Error("برای شروع بازی باید بین ۲ تا ۴ بازیکن حضور داشته باشند.");
   }
-
 
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
@@ -1001,26 +817,19 @@ if (userIds.length < 2 || userIds.length > 4) {
 async function settleCoinsForMatch(match) {
   if (match.financialSettled) return;
   if (!match.game?.winner) return;
-  if (!match.tier) throw new Error("tier نامعتبر است یا ست نشده است.");
+  if (!match.tier) throw new Error("tier نامعتبر است.");
   assertValidTier(match.tier);
 
   const winnerColor = match.game.winner;
   const winnerUserId = match.playerColors[winnerColor];
   if (!winnerUserId) throw new Error("winnerUserId پیدا نشد.");
 
-  const activePlayersCount = colorOrder.filter(
-    (color) => match.playerColors[color] != null
-  ).length;
-
-if (activePlayersCount < 2 || activePlayersCount > 4) {
-  throw new Error(
-    "تعداد بازیکنان برای تسویه مالی باید بین ۲ تا ۴ نفر باشد."
-  );
-}
-
+  const activePlayersCount = getActivePlayersCount(match);
+  if (activePlayersCount < 2 || activePlayersCount > 4) {
+    throw new Error("تعداد بازیکنان برای تسویه مالی باید بین ۲ تا ۴ باشد.");
+  }
 
   const totalPot = activePlayersCount * match.tier;
-
   const winnerAmount = Math.floor(0.9 * totalPot);
   const treasuryAmount = totalPot - winnerAmount;
 
@@ -1064,88 +873,12 @@ if (activePlayersCount < 2 || activePlayersCount > 4) {
     tier: match.tier,
   });
 }
-/*
-|--------------------------------------------------------------------------
-| Admin: treasury report
-|--------------------------------------------------------------------------
-*/
-function getRangeBounds(range) {
-  const now = new Date();
-
-  if (range === "day") {
-    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-    return { from, to };
-  }
-
-  if (range === "week") {
-    const day = (now.getDay() + 6) % 7; // Monday-based
-    const from = new Date(now);
-    from.setDate(now.getDate() - day);
-    from.setHours(0, 0, 0, 0);
-
-    const to = new Date(from);
-    to.setDate(from.getDate() + 6);
-    to.setHours(23, 59, 59, 999);
-
-    return { from, to };
-  }
-
-  if (range === "month") {
-    const from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    const to = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-    return { from, to };
-  }
-
-  return null;
-}
-
-app.get("/admin/treasury-report", authenticateAdminSecret, async (req, res) => {
-  try {
-    const range = String(req.query?.range || "day");
-    const bounds = getRangeBounds(range);
-    if (!bounds) return safeJsonError(res, 400, "range فقط day/week/month باشد.");
-
-const treasuryUser = await ensureTreasuryUser();
-
-    const items = await prisma.transaction.findMany({
-      where: {
-        userId: treasuryUser.id,
-        type: "TREASURY_CUT",
-        createdAt: { gte: bounds.from, lte: bounds.to },
-      },
-      select: { amount: true, createdAt: true, type: true, note: true },
-      orderBy: { createdAt: "desc" },
-    });
-
-    const total = items.reduce((acc, x) => acc + Number(x.amount), 0);
-
-    return res.status(200).json({
-      success: true,
-      range,
-      from: bounds.from,
-      to: bounds.to,
-      total,
-      count: items.length,
-      items: items.slice(0, 200),
-    });
-  } catch (e) {
-    return safeJsonError(res, 500, e.message || "خطای داخلی");
-  }
-});
 
 /*
 |--------------------------------------------------------------------------
 | Socket.IO
 |--------------------------------------------------------------------------
 */
-/*
-|--------------------------------------------------------------------------
-| Socket.IO
-|--------------------------------------------------------------------------
-*/
-
-// لاگ درخواست‌های Engine.IO/Socket.IO
 httpServer.on("request", (req) => {
   if (String(req.url || "").includes("/socket.io/")) {
     console.log("[HTTP SOCKET.IO REQUEST]", {
@@ -1157,27 +890,24 @@ httpServer.on("request", (req) => {
   }
 });
 
+const allowedOriginsForSocket =
+  allowedOrigins === "*" ? "*" : allowedOrigins;
+
 io = new Server(httpServer, {
   cors: {
-    origin: allowedOrigins === "*" ? "*" : allowedOrigins,
+    origin: allowedOriginsForSocket,
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: allowedOrigins !== "*",
+    credentials: allowedOriginsForSocket !== "*",
   },
-
   transports: ["polling", "websocket"],
-
   allowEIO3: false,
   pingTimeout: 20000,
   pingInterval: 25000,
 });
 
-/**
- * پاک‌سازی توکن قبل از jwt.verify
- */
 function normalizeSocketToken(value) {
   if (value === undefined || value === null) return "";
-
   let token = String(value).trim();
 
   if (
@@ -1193,126 +923,41 @@ function normalizeSocketToken(value) {
 
   token = String(token || "").trim();
   token = token.replace(/^Bearer\s+/i, "").trim();
-
   return token;
 }
 
 io.use((socket, next) => {
   try {
-    console.log("[SOCKET AUTH] middleware entered", {
-      socketId: socket.id,
-      transport: socket.conn?.transport?.name || null,
-      origin: socket.handshake?.headers?.origin || null,
-    });
+    let token = normalizeSocketToken(socket.handshake?.auth?.token);
 
-    // روش اصلی: handshake.auth.token
-    let token = normalizeSocketToken(
-      socket.handshake?.auth?.token
-    );
-
-    // روش جایگزین: Authorization: Bearer ...
-    if (!token) {
-      token = normalizeSocketToken(
-        socket.handshake?.headers?.authorization
-      );
-    }
-
-    // فقط برای سازگاری موقت با کلاینت‌های قدیمی
-    if (!token) {
-      token = normalizeSocketToken(
-        socket.handshake?.query?.token
-      );
-    }
+    if (!token) token = normalizeSocketToken(socket.handshake?.headers?.authorization);
+    if (!token) token = normalizeSocketToken(socket.handshake?.query?.token);
 
     const tokenParts = token ? token.split(".") : [];
-
-    console.log("[SOCKET AUTH] token received", {
-      authTokenPresent: Boolean(socket.handshake?.auth?.token),
-      headerTokenPresent: Boolean(
-        socket.handshake?.headers?.authorization
-      ),
-      queryTokenPresent: Boolean(
-        socket.handshake?.query?.token
-      ),
-      normalizedTokenLength: token.length,
-      tokenPartsCount: tokenParts.length,
-      jwtSecretLength: JWT_SECRET.length,
-    });
-
     if (!token) {
-      const error = new Error(
-        "توکن Socket.io ارسال نشده است."
-      );
-
-      error.data = {
-        code: "SOCKET_TOKEN_MISSING",
-      };
-
+      const error = new Error("توکن Socket.io ارسال نشده است.");
+      error.data = { code: "SOCKET_TOKEN_MISSING" };
       return next(error);
     }
 
     if (tokenParts.length !== 3) {
-      console.error("[SOCKET AUTH] invalid token format", {
-        tokenLength: token.length,
-        tokenPartsCount: tokenParts.length,
-      });
-
-      const error = new Error(
-        "فرمت توکن Socket.io صحیح نیست."
-      );
-
-      error.data = {
-        code: "SOCKET_TOKEN_FORMAT_INVALID",
-      };
-
+      const error = new Error("فرمت توکن Socket.io صحیح نیست.");
+      error.data = { code: "SOCKET_TOKEN_FORMAT_INVALID" };
       return next(error);
     }
 
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    const userId = Number(
-      decoded?.userId ?? decoded?.id ?? decoded?.sub
-    );
-
+    const userId = Number(decoded?.userId ?? decoded?.id ?? decoded?.sub);
     if (!Number.isInteger(userId) || userId <= 0) {
-      console.error("[SOCKET AUTH] userId missing", {
-        decodedKeys:
-          decoded && typeof decoded === "object"
-            ? Object.keys(decoded)
-            : [],
-      });
-
-      const error = new Error(
-        "شناسه کاربر داخل توکن معتبر نیست."
-      );
-
-      error.data = {
-        code: "SOCKET_USER_ID_INVALID",
-      };
-
+      const error = new Error("شناسه کاربر داخل توکن معتبر نیست.");
+      error.data = { code: "SOCKET_USER_ID_INVALID" };
       return next(error);
     }
 
-    socket.user = {
-      ...decoded,
-      userId,
-    };
-
-    console.log("[SOCKET AUTH] success", {
-      socketId: socket.id,
-      userId,
-      username: decoded?.username || null,
-    });
-
+    socket.user = { ...decoded, userId };
     return next();
   } catch (error) {
-    console.error("[SOCKET AUTH] verification failed", {
-      socketId: socket.id,
-      name: error?.name || null,
-      message: error?.message || String(error),
-      jwtSecretLength: JWT_SECRET.length,
-    });
-
     let publicMessage = "توکن Socket.io نامعتبر است.";
     let code = "SOCKET_TOKEN_INVALID";
 
@@ -1325,304 +970,216 @@ io.use((socket, next) => {
     }
 
     const socketError = new Error(publicMessage);
-
-    socketError.data = {
-      code,
-      jwtErrorName: error?.name || null,
-    };
-
+    socketError.data = { code, jwtErrorName: error?.name || null };
     return next(socketError);
   }
 });
+
 io.on("connection", (socket) => {
-  const userId = Number(socket.user?.userId);
+  const uid = Number(socket.user?.userId);
+  if (!Number.isInteger(uid)) return;
 
-  console.log("[SOCKET CONNECTION]", {
-    socketId: socket.id,
-    userId,
-    username: socket.user?.username || null,
-    transport: socket.conn?.transport?.name || null,
-    authTokenPresent: Boolean(
-      socket.handshake?.auth?.token
-    ),
-  });
+  connectedUsers.set(String(uid), socket.id);
 
-  connectedUsers.set(String(userId), socket.id);
-
+  // ---------------------------
+  // room:join (فقط tier می‌خواهیم)
+  // ---------------------------
   socket.on("room:join", async (payload, callback) => {
     try {
-      const matchId =
-        typeof payload?.roomId === "string" && payload.roomId.trim()
-          ? payload.roomId.trim()
-          : null;
-
-      if (!matchId) {
-        return callback?.({
-          success: false,
-          message: "شناسه اتاق معتبر نیست.",
-        });
-      }
-
       const tier = Number(payload?.tier);
       if (!Number.isFinite(tier)) {
-        return callback?.({
-          success: false,
-          message: "tier لازم است.",
-        });
+        return callback?.({ success: false, message: "tier لازم است." });
       }
-
       assertValidTier(tier);
 
-      if (!socket.user?.userId) {
-        return callback?.({
-          success: false,
-          message: "احراز هویت Socket.io انجام نشد.",
-        });
-      }
-
-      const userId = Number(socket.user.userId);
-      if (!Number.isFinite(userId)) {
-        return callback?.({
-          success: false,
-          message: "userId نامعتبر است.",
-        });
-      }
-
-      connectedUsers.set(String(userId), socket.id);
-
-      if (!matches.has(matchId)) {
-        matches.set(matchId, createMatch(matchId));
-      }
-
-      const match = matches.get(matchId);
-
-      if (match.tier === null || match.tier === undefined) {
-        match.tier = tier;
-      } else if (Number(match.tier) !== tier) {
-        return callback?.({
-          success: false,
-          message: `این بازی با ورودی ${match.tier} سکه ساخته شده است.`,
-        });
-      }
-
-      const colorOrder = ["red", "green", "yellow", "blue"];
-
-      const alreadyAssignedColor = colorOrder.find(
-        (color) => match.playerColors[color] === userId
-      );
-
-      if (match.status !== "waiting" && !alreadyAssignedColor) {
-        return callback?.({
-          success: false,
-          message: "این بازی قبلاً شروع شده است و شما در آن حضور ندارید.",
-        });
-      }
-
-      if (!alreadyAssignedColor) {
-        const emptyColor = colorOrder.find(
-          (color) => match.playerColors[color] == null
-        );
-
-        if (!emptyColor) {
+      // جلوگیری از ورود دوباره به صف
+      if (userTierQueue.has(uid)) {
+        const existingTier = userTierQueue.get(uid);
+        if (existingTier === tier) {
           return callback?.({
-            success: false,
-            message: "ظرفیت بازی کامل شده است.",
+            success: true,
+            waiting: true,
+            matchId: null,
+            tier,
+            message: "شما قبلاً در صف همین tier هستید.",
           });
         }
-
-        match.playerColors[emptyColor] = userId;
-      }
-
-      await socket.join(`match:${matchId}`);
-      match.players.set(userId, socket.id);
-
-      const filledColors = colorOrder.filter(
-        (color) => match.playerColors[color] != null
-      ).length;
-
-      console.log("[JOIN]", {
-        matchId,
-        userId,
-        tier,
-        filledColors,
-        status: match.status,
-        playerColors: match.playerColors,
-      });
-
-      if (match.status === "playing") {
-        callback?.({
-          success: true,
-          message: "دوباره به بازی متصل شدید.",
-          matchId,
-          tier: match.tier,
-          filledColors,
-          status: match.status,
-          playerColors: match.playerColors,
+        return callback?.({
+          success: false,
+          message: `شما الان داخل صف tier=${existingTier} هستید.`,
         });
-
-        broadcastState(match);
-        return;
       }
 
-      if (filledColors === 4 && match.status === "waiting") {
-        const existingTimer = matchTimers.get(matchId);
-        if (existingTimer) {
-          clearTimeout(existingTimer);
-          matchTimers.delete(matchId);
+      // وارد صف شو
+      userTierQueue.set(uid, tier);
+      const q = getTierQueue(tier);
+
+      // جلوگیری از تکرار uid داخل queue
+      if (!q.includes(uid)) q.push(uid);
+
+      const filled = q.length;
+
+      // به همه نفرات حاضر در همان صف (اختیاری: برای خبر دادن تعداد)
+      // چون هنوز match ساخته نشده، فقط به همان socketها خبر می‌دهیم.
+      if (filled >= 2 && filled <= 4) {
+        // ساده: فقط تعداد را به همین socket خود کاربر می‌فرستیم
+        // (برای اینکه همه socketها رو ذخیره نکردیم)
+      }
+
+      // اگر 4 نفر شد => یک match بساز
+      if (q.length >= 4) {
+        // dequeue دقیقاً 4 نفر
+        const players = q.splice(0, 4);
+
+        // مطمئن شو این 4 نفر هنوز در صف هستند
+        for (const pUid of players) userTierQueue.delete(pUid);
+
+        const matchId = makeMatchId(tier);
+        const match = createMatch(matchId, tier);
+        matches.set(matchId, match);
+
+        // رنگ‌دهی طبق ترتیب ثابت
+        // players: [uid0, uid1, uid2, uid3] => red, green, yellow, blue
+        const colors = ["red", "green", "yellow", "blue"];
+        for (let i = 0; i < players.length; i++) {
+          match.playerColors[colors[i]] = players[i];
+          // join هر 4 نفر به room match
+          const sid = connectedUsers.get(String(players[i]));
+          if (sid) {
+            // join socket room باید توسط همان socket انجام شود، اما
+            // چون اینجا در handler یک socket هستیم، نمی‌تونیم مستقیم join کنیم مگر io.sockets.sockets را داشته باشیم.
+            // پس بهتر: از socket موجود برای خود uid join می‌کنیم،
+            // و برای بقیه: هنگام دریافت callback همون لحظه join می‌شوند؟ نه.
+          }
         }
 
-        const started = await startMatch(match);
+        // برای اینکه room match درست جا بیفتد:
+        // از طریق io.sockets.sockets به socketهای همان uidها دسترسی می‌گیریم.
+        for (const pUid of players) {
+          const sid = connectedUsers.get(String(pUid));
+          const targetSocket = sid ? io.sockets.sockets.get(sid) : null;
+          if (targetSocket) {
+            await targetSocket.join(`match:${matchId}`);
+            match.players.set(pUid, sid);
+          }
+        }
 
-        return callback?.({
-          success: started,
-          message: started ? "بازی با ۴ بازیکن شروع شد." : "شروع بازی ناموفق بود.",
+        // شروع بازی
+        const startedOk = await startMatch(match);
+
+        if (!startedOk) {
+          // اگر شروع ناموفق شد، دوباره 4 نفر را به صف برمی‌گردانیم
+          for (const pUid of players) {
+            if (!userTierQueue.has(pUid)) {
+              userTierQueue.set(pUid, tier);
+              q.push(pUid);
+            }
+          }
+          return callback?.({ success: false, message: "شروع بازی ناموفق بود." });
+        }
+
+        // به هر 4 نفر callback بده:
+        // چون callback فقط برای همین socket است، برای سایرین باید emit کنیم.
+        io.to(`match:${matchId}`).emit("match:playerCountUpdated", {
+          success: true,
           matchId,
-          tier: match.tier,
-          filledColors,
-          status: match.status,
+          tier,
+          filledColors: 4,
+          event: "FOURTH_JOINED",
+          playerColors: match.playerColors,
+        });
+
+        // این socket هم پاسخ خودشو بگیره:
+        return callback?.({
+          success: true,
+          message: "بازی با ۴ بازیکن شروع شد.",
+          matchId,
+          tier,
+          filledColors: 4,
+          status: "playing",
           playerColors: match.playerColors,
         });
       }
 
-if (
-  filledColors >= 2 &&
-  filledColors < 4 &&
-  match.status === "waiting" &&
-  !matchTimers.has(matchId)
-) {
-  const timer = setTimeout(async () => {
-    matchTimers.delete(matchId);
-
-    const currentMatch = matches.get(matchId);
-    if (!currentMatch || currentMatch.status !== "waiting") return;
-
-    const currentFilled = colorOrder.filter(
-      (color) => currentMatch.playerColors[color] != null
-    ).length;
-
-    if (currentFilled >= 2 && currentFilled < 4) {
-      try {
-        await startMatch(currentMatch);
-      } catch (error) {
-        console.error("[2-3 PLAYER START FAILED]", error);
-        io.to(`match:${matchId}`).emit("match:error", {
-          message: error?.message || "شروع بازی با بازیکنان موجود ممکن نشد.",
-        });
-      }
-    }
-  }, THREE_PLAYER_WAIT_MS);
-
-  matchTimers.set(matchId, timer);
-}
-
-
-return callback?.({
-  success: true,
-  message:
-    filledColors >= 2 && filledColors < 4
-      ? "بازیکنان کافی حاضرند؛ بازی پس از ۶۰ ثانیه شروع می‌شود."
-      : "به اتاق اضافه شدید.",
-  matchId,
-  tier: match.tier,
-  filledColors,
-  status: match.status,
-  playerColors: match.playerColors,
-  waitingForThreePlayerStart:
-    filledColors >= 2 &&
-    filledColors < 4 &&
-    match.status === "waiting",
-  startAfterMs:
-    filledColors >= 2 &&
-    filledColors < 4 &&
-    match.status === "waiting"
-      ? THREE_PLAYER_WAIT_MS
-      : null,
-});
-
-
-    } catch (e) {
-      console.error("JOIN ERROR:", e);
+      // اگر کمتر از 4 نفر است
       return callback?.({
-        success: false,
-        message: e.message || "خطای join",
+        success: true,
+        waiting: true,
+        matchId: null,
+        tier,
+        filledColors: filled,
+        status: "waiting",
+        message: "در صف منتظر نفرات بیشتر هستید.",
+        startAfterMs: 60000, // همون مقدار UI می‌تونه استفاده کنه
       });
+    } catch (e) {
+      return callback?.({ success: false, message: e?.message || "خطای join" });
     }
   });
 
-
-
-
+  // ---------------------------
+  // game:roll
+  // ---------------------------
   socket.on("game:roll", async (payload, callback) => {
     try {
-      const matchId = payload?.matchId ?? payload?.roomId;
+      const matchId = payload?.matchId;
       if (!matchId || !matches.has(String(matchId))) {
         return callback?.({ success: false, message: "match پیدا نشد." });
       }
 
       const match = matches.get(String(matchId));
-
       if (!match.game || match.status !== "playing") {
         return callback?.({ success: false, message: "بازی هنوز شروع نشده است." });
       }
-
       if (match.game.winner) return callback?.({ success: false, message: "بازی تمام شده است." });
 
-      const uid = Number(socket.user.userId);
-      const turnColor = getCurrentColor(match);
+      const uid2 = Number(socket.user.userId);
+      const turnColor = colorOrder[match.game.currentTurn];
 
-      if (match.playerColors[turnColor] !== uid) {
+      if (match.playerColors[turnColor] !== uid2) {
         return callback?.({ success: false, message: "نوبت شما نیست." });
       }
 
       if (match.game.rolled) return callback?.({ success: false, message: "قبلاً رول شده است." });
-      if (Date.now() > match.game.turnDeadlineAt) {
-        return callback?.({ success: false, message: "زمان نوبت گذشته." });
-      }
+      if (Date.now() > match.game.turnDeadlineAt) return callback?.({ success: false, message: "زمان نوبت گذشته." });
 
       const dice1 = getNextDiceValueFromMatch();
       const dice2 = getNextDiceValueFromMatch();
 
-      match.game.dice = 0; // سازگاری
+      match.game.dice = 0;
       match.game.dice1 = dice1;
       match.game.dice2 = dice2;
       match.game.pendingDice = [dice1, dice2];
+      match.game.rolled = true;
+      match.game.turnMoved = false;
 
-match.game.rolled = true;
-match.game.turnMoved = false;
+      if (!hasAnyLegalPendingMove(match.game)) {
+        nextTurn(match);
+        return callback?.({ success: true, dice1, dice2, pendingDice: [], noLegalMoves: true, turnSkipped: true });
+      }
 
-if (!hasAnyLegalPendingMove(match.game)) {
-  nextTurn(match);
+      broadcastState(match);
+      startTurnTimeout(match);
 
-  return callback?.({
-    success: true,
-    dice1,
-    dice2,
-    pendingDice: [],
-    noLegalMoves: true,
-    turnSkipped: true
-  });
-}
-
-broadcastState(match);
-startTurnTimeout(match);
-
-return callback?.({
-  success: true,
-  dice1,
-  dice2,
-  pendingDice: match.game.pendingDice,
-  noLegalMoves: false,
-  turnSkipped: false
-});
-
+      return callback?.({
+        success: true,
+        dice1,
+        dice2,
+        pendingDice: match.game.pendingDice,
+        noLegalMoves: false,
+        turnSkipped: false,
+      });
     } catch (e) {
-      return callback?.({ success: false, message: e.message || "خطای roll" });
+      return callback?.({ success: false, message: e?.message || "خطای roll" });
     }
   });
 
+  // ---------------------------
+  // game:move
+  // ---------------------------
   socket.on("game:move", async (payload, callback) => {
     try {
-      const matchId = payload?.matchId ?? payload?.roomId;
+      const matchId = payload?.matchId;
       const pieceId = payload?.pieceId;
       const dieValue = Number(payload?.dieValue);
 
@@ -1641,20 +1198,15 @@ return callback?.({
       if (!match.game || match.status !== "playing") {
         return callback?.({ success: false, message: "بازی هنوز شروع نشده است." });
       }
-      if (match.game.winner) {
-        return callback?.({ success: false, message: "بازی تمام شده است." });
-      }
-      if (!match.game.rolled) {
-        return callback?.({ success: false, message: "اول رول کنید." });
-      }
-      if (Date.now() > match.game.turnDeadlineAt) {
-        return callback?.({ success: false, message: "زمان نوبت گذشته." });
-      }
+      if (match.game.winner) return callback?.({ success: false, message: "بازی تمام شده است." });
 
-      const uid = Number(socket.user.userId);
-      const turnColor = getCurrentColor(match);
+      if (!match.game.rolled) return callback?.({ success: false, message: "اول رول کنید." });
+      if (Date.now() > match.game.turnDeadlineAt) return callback?.({ success: false, message: "زمان نوبت گذشته." });
 
-      if (match.playerColors[turnColor] !== uid) {
+      const uid2 = Number(socket.user.userId);
+      const turnColor = colorOrder[match.game.currentTurn];
+
+      if (match.playerColors[turnColor] !== uid2) {
         return callback?.({ success: false, message: "نوبت شما نیست." });
       }
 
@@ -1664,74 +1216,66 @@ return callback?.({
         return callback?.({ success: false, message: "این تاس برای این نوبت شما باقی نمانده است." });
       }
 
-      const piece = match.game.pieces.find((currentPiece) => currentPiece.id === pieceId);
-      if (!piece) {
-        return callback?.({ success: false, message: "مهره پیدا نشد." });
-      }
+      const piece = match.game.pieces.find((p) => p.id === pieceId);
+      if (!piece) return callback?.({ success: false, message: "مهره پیدا نشد." });
 
       const movable = canPieceMove(match.game, piece, dieValue);
-      if (!movable) {
-        return callback?.({ success: false, message: "حرکت مجاز نیست." });
-      }
+      if (!movable) return callback?.({ success: false, message: "حرکت مجاز نیست." });
 
       const moved = movePiece(match.game, piece, dieValue);
-      if (!moved) {
-        return callback?.({ success: false, message: "حرکت انجام نشد." });
-      }
+      if (!moved) return callback?.({ success: false, message: "حرکت انجام نشد." });
 
       match.game.pendingDice.splice(idx, 1);
 
       const winnerColor = checkWinner(match.game);
-if (winnerColor) {
-  match.game.winner = winnerColor;
-  match.status = "finished";
-  match.turnDeadlineAt = Date.now();
-  match.game.turnDeadlineAt = Date.now();
+      if (winnerColor) {
+        match.game.winner = winnerColor;
+        match.status = "finished";
+        match.turnDeadlineAt = Date.now();
+        match.game.turnDeadlineAt = Date.now();
 
-  if (match.pendingTurnTimer) {
-    clearTimeout(match.pendingTurnTimer);
-    match.pendingTurnTimer = null;
-  }
+        if (match.pendingTurnTimer) {
+          clearTimeout(match.pendingTurnTimer);
+          match.pendingTurnTimer = null;
+        }
 
-  broadcastState(match);
+        broadcastState(match);
 
-  try {
-    await settleCoinsForMatch(match);
-  } catch (error) {
-    console.error("settleCoinsForMatch failed:", error);
-  }
+        try {
+          await settleCoinsForMatch(match);
+        } catch (error) {
+          console.error("settleCoinsForMatch failed:", error);
+        }
 
-  return callback?.({ success: true, moved: true, winnerColor });
-}
+        return callback?.({ success: true, moved: true, winnerColor });
+      }
 
-if (match.game.pendingDice.length > 0) {
-  match.game.turnMoved = true;
+      if (match.game.pendingDice.length > 0) {
+        match.game.turnMoved = true;
 
-  if (!hasAnyLegalPendingMove(match.game)) {
-    nextTurn(match);
+        if (!hasAnyLegalPendingMove(match.game)) {
+          nextTurn(match);
+          return callback?.({
+            success: true,
+            moved: true,
+            consumedDie: dieValue,
+            pendingDice: [],
+            noLegalMoves: true,
+            turnSkipped: true,
+            moreMovesAllowed: false,
+          });
+        }
 
-    return callback?.({
-      success: true,
-      moved: true,
-      consumedDie: dieValue,
-      pendingDice: [],
-      noLegalMoves: true,
-      turnSkipped: true,
-      moreMovesAllowed: false
-    });
-  }
+        broadcastState(match);
 
-  broadcastState(match);
-
-  return callback?.({
-    success: true,
-    moved: true,
-    consumedDie: dieValue,
-    pendingDice: match.game.pendingDice,
-    moreMovesAllowed: true,
-  });
-}
-
+        return callback?.({
+          success: true,
+          moved: true,
+          consumedDie: dieValue,
+          pendingDice: match.game.pendingDice,
+          moreMovesAllowed: true,
+        });
+      }
 
       const isDoubleSix = match.game.dice1 === 6 && match.game.dice2 === 6;
       if (isDoubleSix) {
@@ -1744,160 +1288,63 @@ if (match.game.pendingDice.length > 0) {
 
         match.game.turnDeadlineAt = Date.now() + TURN_MS;
         match.turnDeadlineAt = match.game.turnDeadlineAt;
-        match.turnId++;
+        match.turnId = (match.turnId || 0) + 1;
 
         broadcastState(match);
         startTurnTimeout(match);
 
-        return callback?.({
-          success: true,
-          moved: true,
-          consumedDie: dieValue,
-          bonusRoll: true,
-        });
+        return callback?.({ success: true, moved: true, consumedDie: dieValue, bonusRoll: true });
       }
 
       nextTurn(match);
-      return callback?.({
-        success: true,
-        moved: true,
-        consumedDie: dieValue,
-        bonusRoll: false,
-      });
+      return callback?.({ success: true, moved: true, consumedDie: dieValue, bonusRoll: false });
     } catch (error) {
       console.error("[GAME MOVE ERROR]", error);
       return callback?.({ success: false, message: error?.message || "خطای move" });
     }
   });
 
+  // ---------------------------
+  // disconnect
+  // ---------------------------
   socket.on("disconnect", (reason) => {
     try {
-      const uid = Number(socket.user?.userId);
+      const uid2 = Number(socket.user?.userId);
+      if (!Number.isInteger(uid2) || uid2 <= 0) return;
 
-      if (!Number.isInteger(uid) || uid <= 0) {
-        return;
+      const key = String(uid2);
+      if (connectedUsers.get(key) === socket.id) connectedUsers.delete(key);
+
+      // اگر در صف بود، از صف حذفش کن
+      if (userTierQueue.has(uid2)) {
+        const tier = userTierQueue.get(uid2);
+        userTierQueue.delete(uid2);
+        const q = getTierQueue(tier);
+        const idx = q.indexOf(uid2);
+        if (idx !== -1) q.splice(idx, 1);
       }
 
-      const key = String(uid);
-
-      /*
-       * اگر همین کاربر با اتصال جدیدی وصل شده باشد،
-       * اتصال قدیمی نباید اطلاعات اتصال جدید را حذف کند.
-       */
-      if (connectedUsers.get(key) === socket.id) {
-        connectedUsers.delete(key);
-      }
-
-      console.log("[SOCKET DISCONNECTED]", {
-        socketId: socket.id,
-        userId: uid,
-        reason,
-      });
-
-      /*
-       * کاربر فقط از مسابقه‌ای حذف می‌شود که هنوز
-       * در وضعیت انتظار باشد.
-       *
-       * بازیکن مسابقه شروع‌شده حذف نمی‌شود تا بتواند
-       * دوباره به همان بازی متصل شود.
-       */
+      // حذف از matchهای waiting (اگر هنوز بازی شروع نشده)
       for (const [matchId, match] of matches.entries()) {
-        if (match.status !== "waiting") {
-          continue;
-        }
+        if (match.status !== "waiting") continue;
 
-        const disconnectedColor = colorOrder.find(
-          (color) => match.playerColors[color] === uid
-        );
-
-        if (!disconnectedColor) {
-          continue;
-        }
-
-        /*
-         * اگر همان کاربر با یک Socket جدید دوباره وصل شده،
-         * قطع‌شدن Socket قبلی نباید او را از صف حذف کند.
-         */
-        const registeredSocketId = match.players.get(uid);
-
-        if (
-          registeredSocketId &&
-          registeredSocketId !== socket.id
-        ) {
-          console.log("[OLD SOCKET DISCONNECT IGNORED]", {
-            matchId,
-            userId: uid,
-            oldSocketId: socket.id,
-            newSocketId: registeredSocketId,
-          });
-
-          continue;
-        }
+        const disconnectedColor = colorOrder.find((c) => match.playerColors[c] === uid2);
+        if (!disconnectedColor) continue;
 
         match.playerColors[disconnectedColor] = null;
-        match.players.delete(uid);
+        match.players.delete(uid2);
 
-        const filledColors = colorOrder.filter(
-          (color) => match.playerColors[color] != null
-        ).length;
-
-        console.log("[WAITING PLAYER REMOVED]", {
-          matchId,
-          userId: uid,
-          disconnectedColor,
-          filledColors,
-          playerColors: match.playerColors,
-        });
-
-        /*
-         * اگر تعداد بازیکنان از سه کمتر شد،
-         * تایمر بازی سه‌نفره باید لغو شود.
-         */
-if (
-  filledColors < 2 &&
-  matchTimers.has(matchId)
-) {
-  clearTimeout(matchTimers.get(matchId));
-  matchTimers.delete(matchId);
-
-  console.log("[MATCH TIMER CANCELLED]", {
-    matchId,
-    reason: "players_below_two",
-    filledColors,
-  });
-}
-
-
-        /*
-         * مسابقه کاملاً خالی را از حافظه حذف می‌کنیم.
-         */
+        // اگر 0 بازیکن شد، match را پاک کن
+        const filledColors = colorOrder.filter((c) => match.playerColors[c] != null).length;
         if (filledColors === 0) {
-          if (matchTimers.has(matchId)) {
-            clearTimeout(matchTimers.get(matchId));
-            matchTimers.delete(matchId);
-          }
-
-          if (match.pendingTurnTimer) {
-            clearTimeout(match.pendingTurnTimer);
-            match.pendingTurnTimer = null;
-          }
-
           matches.delete(matchId);
-
-          console.log("[EMPTY MATCH DELETED]", {
-            matchId,
-          });
         }
       }
     } catch (error) {
-      console.error("[DISCONNECT ERROR]", {
-        socketId: socket.id,
-        error: error?.message || String(error),
-      });
+      console.error("[DISCONNECT ERROR]", { socketId: socket.id, error: error?.message || String(error) });
     }
   });
-
-}); // end io.on("connection")
+});
 
 httpServer.listen(PORT, () => {
   console.log(`✅ Server listening on http://localhost:${PORT}`);
