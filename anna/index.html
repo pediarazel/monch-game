@@ -643,21 +643,19 @@
   }
 
 function drawPieces(){
-  if (!gameState || !gameState.pieces) return;
+  if (!gameState || !Array.isArray(gameState.pieces)) return;
 
   const turnColor = (gameState.currentTurnColor ?? colorOrder?.[gameState.currentTurn]);
   const winner = gameState.winner;
 
-  const byKey = {};
-  for (const p of gameState.pieces){
-    const k = p.state + (p.state === "path" ? p.pathIndex : (p.state === "home" ? p.color + p.homeIndex : p.id));
-    (byKey[k] ||= []).push(p);
+  const baseR = CELL * 0.30;   // اندازه مهره
+  const ringR = CELL * 0.38;   // اندازه دور/سایه نوبت
+
+  // اگر COLORS مثل { red:"#ff0000", blue:"#00aaff" } هست:
+  function getBaseHex(keyOrHex){
+    if (!keyOrHex) return "#ffffff";
+    return COLORS[keyOrHex] ?? keyOrHex; // اگر خودش hex بود هم جواب میده
   }
-
-  const baseRadius = CELL * 0.30;     // بدنه
-  const ringRadius = CELL * 0.36;     // قاب روشن
-  const innerRadius = CELL * 0.22;    // هایلایت
-
   function hexToRgb(hex){
     const h = String(hex).replace("#","");
     const r = parseInt(h.slice(0,2),16);
@@ -666,89 +664,75 @@ function drawPieces(){
     return {r,g,b};
   }
   function rgba(hex, a){
-    const c = COLORS[hex] ? COLORS[hex] : hex; // اگر piece.color خودش key رنگه
-    const {r,g,b} = hexToRgb(c);
+    const {r,g,b} = hexToRgb(getBaseHex(hex));
     return `rgba(${r},${g},${b},${a})`;
   }
 
-  for (const k in byKey){
-    const pieces = byKey[k];
+  const t = performance.now() / 1000;         // ثانیه
+  const pulse = 0.55 + 0.45 * Math.sin(t * 6); // روشن-خاموش (6 رو کمتر/بیشتر کن)
 
-    pieces.forEach((piece, i)=>{
-      const pos = getPieceDrawPos(piece);
-      if (!pos) return;
+  for (const piece of gameState.pieces){
+    const pos = getPieceDrawPos(piece);
+    if (!pos) continue;
 
-      const x = pos.x + i * 4;
-      const y = pos.y + i * 4;
+    const x = pos.x;
+    const y = pos.y;
 
-      const baseHex = COLORS[piece.color] || "#ffffff";
+    const baseHex = getBaseHex(piece.color);
+    const isTurnPiece = (!winner && piece.color === turnColor);
 
-      // ----- بدنه خیلی واضح (بدون فلزی) -----
-      const grad = ctx.createRadialGradient(
-        x - baseRadius*0.28, y - baseRadius*0.35, 0,
-        x, y, baseRadius
-      );
-      grad.addColorStop(0, rgba(baseHex, 1.0));
-      grad.addColorStop(0.55, rgba(baseHex, 0.98));
-      grad.addColorStop(1, "rgba(0,0,0,0.35)");
+    // سایه خیلی کم زیر مهره (همیشه)
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(x + 2, y + 4, CELL*0.18, CELL*0.12, 0, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.fill();
+    ctx.restore();
 
-      ctx.save();
+    // بدنه مهره (خیلی واضح، بدون فلزی)
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, baseR, 0, Math.PI*2);
 
-      // سایه خیلی کم (برای شارپ بودن)
+    // گرادیان خیلی ملایم فقط برای “پر بودن” رنگ
+    const g = ctx.createRadialGradient(x - baseR*0.25, y - baseR*0.25, 0, x, y, baseR);
+    g.addColorStop(0.0, rgba(baseHex, 1.0));
+    g.addColorStop(0.6, rgba(baseHex, 0.98));
+    g.addColorStop(1.0, "rgba(0,0,0,0.20)");
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    // حلقه خیلی نازک ثابت برای مشخص بودن
+    ctx.strokeStyle = "rgba(255,255,255,0.25)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // ✅ نوبت: دور مهره سایه‌ی روشن/خاموش
+    if (isTurnPiece){
+      const alpha = 0.15 + 0.55 * pulse; // شدت سایه
+      const blur = 8 + 20 * pulse;        // میزان تارشدگی
+      const ringAlpha = 0.25 + 0.45 * pulse;
+
+      ctx.shadowColor = rgba(baseHex, 1);
+      ctx.shadowBlur = blur;
+
+      // حلقه روشن
       ctx.beginPath();
-      ctx.ellipse(x + 2, y + 4, CELL*0.18, CELL*0.12, 0, 0, Math.PI*2);
-      ctx.fillStyle = "rgba(0,0,0,0.45)";
-      ctx.fill();
-
-      // بدنه
-      ctx.beginPath();
-      ctx.arc(x, y, baseRadius, 0, Math.PI*2);
-      ctx.fillStyle = grad;
-      ctx.fill();
-
-      // هایلایت داخلی برای وضوح
-      ctx.beginPath();
-      ctx.arc(x, y, innerRadius, 0, Math.PI*2);
-      ctx.fillStyle = "rgba(255,255,255,0.45)";
-      ctx.fill();
-
-      // رینگ دور مهره (ثابت، ولی نازک)
-      ctx.beginPath();
-      ctx.arc(x, y, baseRadius + 2, 0, Math.PI*2);
-      ctx.strokeStyle = "rgba(255,255,255,0.20)";
-      ctx.lineWidth = 2;
+      ctx.arc(x, y, ringR, 0, Math.PI*2);
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = rgba(baseHex, ringAlpha);
       ctx.stroke();
 
-      // ----- دورِ نوبت روشن/خاموش -----
-      const isTurn = (!winner && piece.color === turnColor);
+      // یک حلقه بیرونی نرم‌تر
+      ctx.shadowBlur = (blur * 0.65);
+      ctx.beginPath();
+      ctx.arc(x, y, ringR + 5, 0, Math.PI*2);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = rgba(baseHex, alpha);
+      ctx.stroke();
+    }
 
-      if (isTurn){
-        // قاب چشمگیر و روشن
-        // اگر می‌خوای “خاموش-روشن” با زمان داشته باشه، از gameState یا زمان استفاده کن
-        const t = (performance.now() / 1000);
-        const pulse = 0.65 + 0.35 * Math.sin(t * 6); // سریع روشن/خاموش
-
-        ctx.beginPath();
-        ctx.arc(x, y, ringRadius, 0, Math.PI*2);
-        ctx.lineWidth = 4;
-
-        ctx.shadowColor = "rgba(255,255,255,0.95)";
-        ctx.shadowBlur = 18 * pulse;
-
-        ctx.strokeStyle = `rgba(255,255,255,${0.70 + 0.25*pulse})`;
-        ctx.stroke();
-
-        // حلقه دوم کمی بیرونی
-        ctx.beginPath();
-        ctx.arc(x, y, ringRadius + 5, 0, Math.PI*2);
-        ctx.lineWidth = 2;
-        ctx.shadowBlur = 10 * pulse;
-        ctx.strokeStyle = `rgba(255,255,255,${0.30 + 0.20*pulse})`;
-        ctx.stroke();
-      }
-
-      ctx.restore();
-    });
+    ctx.restore();
   }
 }
 
