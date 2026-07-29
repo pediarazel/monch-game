@@ -735,65 +735,56 @@
     drawPieces();
   }
 
-  function updateUI() {
+function updateUI() {
     if (!gameState) {
-      rollBtn.disabled = true;
-      turnInfo.textContent = "";
-      setMsg("بازی هنوز شروع نشده است.");
-      dice1El.textContent = "🎲";
-      dice2El.textContent = "🎲";
-      pickedDieValue = null;
-      clearDiePickUI();
-      return;
-    }
-
-    if (gameState.winner) {
-      joinBtn.disabled = false;
-      rollBtn.disabled = true;
-      turnInfo.innerHTML = `برنده: <span class="tag ${gameState.winner}">${colorLabel[gameState.winner]}</span> 🎉`;
-      setMsg("بازی به پایان رسید.");
-      dice1El.textContent = "🎉";
-      dice2El.textContent = "🎉";
-      pickedDieValue = null;
-      clearDiePickUI();
-      return;
-    }
-
-    const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-    const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.rolled && !gameState.winner;
-
-    rollBtn.disabled = !(canRoll);
-
-    const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
-
-    if (gameState.rolled && pendingDice.length > 0) {
-      dice1El.textContent = (pendingDice[0] ?? "🎲");
-      dice2El.textContent = (pendingDice[1] ?? "—");
-
-      dice1El.style.pointerEvents = (myColor === turnColor) ? "auto" : "none";
-dice2El.style.pointerEvents = (myColor === turnColor && pendingDice.length > 1) ? "auto" : "none";
-      dice1El.style.opacity = 1;
-      dice2El.style.opacity = (pendingDice.length > 1) ? 1 : 0.5;
-
-      if (pickedDieValue != null && !pendingDice.includes(pickedDieValue)) {
+        rollBtn.disabled = true;
+        turnInfo.textContent = "";
+        setMsg("بازی هنوز شروع نشده است.");
+        dice1El.textContent = "🎲";
+        dice2El.textContent = "🎲";
         pickedDieValue = null;
         clearDiePickUI();
-      }
-
-      syncDiePickUI();
-      setMsg(myColor === turnColor ? (pickedDieValue == null ? "تاس خودت را انتخاب کن." : "حالا یک مهره را بزن.") : "هنوز نوبت شما نیست.");
-    } else {
-      dice1El.textContent = "🎲";
-      dice2El.textContent = "🎲";
-      dice1El.style.pointerEvents = "none";
-      dice2El.style.pointerEvents = "none";
-      dice1El.style.opacity = "0.5";
-      dice2El.style.opacity = "0.5";
-      pickedDieValue = null;
-      clearDiePickUI();
-      setMsg(myColor === turnColor ? "تاس بیندازید." : "هنوز نوبت شما نیست.");
+        return;
     }
-  }
+if (gameState.winner) {
+  joinBtn.disabled = false; // ✅ فعال شدن دکمه ورود به اتاق جدید
+  rollBtn.disabled = true;
+  turnInfo.innerHTML = `برنده: <span class="tag ${gameState.winner}">${colorLabel[gameState.winner]}</span> 🎉`;
+  setMsg("بازی به پایان رسید.");
+  dice1El.textContent = "🎉";
+  dice2El.textContent = "🎉";
+  pickedDieValue = null;
+  clearDiePickUI();
+  return;
+}
+    const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+    const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.rolled && !gameState.winner;
+    rollBtn.disabled = !canRoll;
+    const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
+    if (gameState.rolled && pendingDice.length > 0) {
+        dice1El.textContent = (pendingDice[0] ?? "🎲");
+        dice2El.textContent = (pendingDice[1] ?? "—");
+        const isDice2Available = pendingDice.length > 1;
+        dice2El.style.pointerEvents = isDice2Available ? "auto" : "none";
+        dice2El.style.opacity = isDice2Available ? "1" : "0.5";
+        dice1El.style.pointerEvents = (myColor === turnColor) ? "auto" : "none";
+        if (pickedDieValue != null && !pendingDice.includes(pickedDieValue)) {
+            pickedDieValue = null;
+            clearDiePickUI();
+        }
+        syncDiePickUI();
+        setMsg(myColor === turnColor ? (pickedDieValue == null ? "تاس خودت را انتخاب کن." : "حالا یک مهره را بزن.") : "هنوز نوبت شما نیست.");
+    } else {
+        dice1El.textContent = "🎲";
+        dice2El.textContent = "🎲";
+        dice1El.style.pointerEvents = "none";
+        dice2El.style.pointerEvents = "none";
+        dice2El.style.opacity = "0.5";
+        pickedDieValue = null;
+        clearDiePickUI();
+        setMsg(myColor === turnColor ? "تاس بیندازید." : "هنوز نوبت شما نیست.");
+    }
+}
 
   // آپدیت UI
   setInterval(()=>{
