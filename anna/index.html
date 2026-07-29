@@ -753,28 +753,127 @@ function drawPieces(){
       hl.addColorStop(0.18, "rgba(255,255,255,0.25)");
       hl.addColorStop(0.60, "rgba(255,255,255,0.08)");
       hl.addColorStop(1.00, "rgba(255,255,255,0.00)");
+function drawPieces(){
+  if(!gameState || !gameState.pieces) return;
 
+  const stack = {};
+  for (const p of gameState.pieces){
+    const key = p.state + (p.state==="path" ? p.pathIndex : (p.state==="home" ? p.color+p.homeIndex : p.id));
+    (stack[key] ||= []).push(p);
+  }
+
+  const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+
+  function hexToRgb(hex){
+    const h = String(hex).replace("#","");
+    const r = parseInt(h.slice(0,2),16);
+    const g = parseInt(h.slice(2,4),16);
+    const b = parseInt(h.slice(4,6),16);
+    return {r,g,b};
+  }
+  function rgbaFromHex(hex,a){
+    const {r,g,b} = hexToRgb(COLORS[hex] ? COLORS[hex] : hex);
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  for (const key in stack){
+    const pieces = stack[key];
+
+    pieces.forEach((piece, i)=>{
+      const pos = getPieceDrawPos(piece);
+      if (!pos) return;
+
+      const offset = i * 4;
+      const x = pos.x + offset;
+      const y = pos.y + offset;
+
+      const base = COLORS[piece.color] || "#ffffff";
+
+      const rBase  = CELL * 0.29;
+      const rGlow  = CELL * 0.42;
+      const rInner = CELL * 0.22;
+      const rRing  = CELL * 0.33;
+
+      // Glow + حلقه فقط برای نوبت
+      if (piece.color === turnColor && !gameState.winner) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x, y, rGlow, 0, Math.PI*2);
+        ctx.shadowColor = rgbaFromHex(base, 0.95);
+        ctx.shadowBlur = 30;
+        ctx.globalAlpha = 0.22;
+        ctx.fillStyle = rgbaFromHex(base, 0.75);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x, y, rRing + 2, 0, Math.PI*2);
+        ctx.strokeStyle = rgbaFromHex(base, 0.95);
+        ctx.lineWidth = 3;
+        ctx.shadowColor = rgbaFromHex(base, 0.9);
+        ctx.shadowBlur = 18;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // سایه زیر مهره
+      ctx.save();
+      ctx.beginPath();
+      ctx.ellipse(x + 2, y + 4, CELL*0.22, CELL*0.14, 0, 0, Math.PI*2);
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fill();
+      ctx.restore();
+
+      // بدنه: رنگ خودش پررنگ + حس کریستالی
+      const g = ctx.createLinearGradient(0, -CELL, 0, CELL);
+      g.addColorStop(0.00, rgbaFromHex(base, 0.95));
+      g.addColorStop(0.35, rgbaFromHex(base, 0.98));
+      g.addColorStop(0.70, rgbaFromHex(base, 0.90));
+      g.addColorStop(1.00, "rgba(0,0,0,0.35)");
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, rBase, 0, Math.PI*2);
+      ctx.fillStyle = g;
+      ctx.fill();
+
+      // رینگ براق
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // حلقه عمق
+      ctx.beginPath();
+      ctx.arc(x, y, rRing, 0, Math.PI*2);
+      ctx.strokeStyle = "rgba(0,0,0,0.35)";
+      ctx.lineWidth = 1.3;
+      ctx.stroke();
+
+      // هایلایت کریستالی
+      const hl = ctx.createRadialGradient(
+        x - rBase*0.28, y - rBase*0.35, 0,
+        x, y, rBase
+      );
+      hl.addColorStop(0.00, "rgba(255,255,255,0.95)");
+      hl.addColorStop(0.18, "rgba(255,255,255,0.25)");
+      hl.addColorStop(0.55, "rgba(255,255,255,0.08)");
+      hl.addColorStop(1.00, "rgba(255,255,255,0.00)");
       ctx.beginPath();
       ctx.arc(x, y, rInner, 0, Math.PI*2);
       ctx.fillStyle = hl;
       ctx.fill();
 
-      // اگر مهره خودته: قاب سفید خیلی ظریف
+      // اگر مهره خودته: قاب خیلی ظریف
       if (myColor && piece.color === myColor) {
         ctx.beginPath();
-        ctx.arc(x, y, rBase*1.08, 0, Math.PI*2);
+        ctx.arc(x, y, rBase*1.06, 0, Math.PI*2);
         ctx.strokeStyle = "rgba(255,255,255,0.95)";
         ctx.lineWidth = 2.2;
         ctx.shadowColor = "rgba(255,255,255,0.9)";
         ctx.shadowBlur = 10;
         ctx.stroke();
       }
-
-      // نقطه بازتاب کوچک (حس شیشه بیشتر)
-      ctx.beginPath();
-      ctx.arc(x - rBase*0.15, y - rBase*0.15, CELL*0.055, 0, Math.PI*2);
-      ctx.fillStyle = "rgba(255,255,255,0.70)";
-      ctx.fill();
 
       ctx.restore();
     });
