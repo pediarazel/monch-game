@@ -72,7 +72,8 @@ const allowedOrigins =
   CLIENT_ORIGIN === "*"
     ? "*"
     : CLIENT_ORIGIN.split(",").map((origin) => origin.trim()).filter(Boolean);
-
+const allowedOriginsForSocket =
+  allowedOrigins === "*" ? "*" : allowedOrigins;
 app.use(
   cors({
     origin(origin, callback) {
