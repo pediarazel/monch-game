@@ -36,10 +36,9 @@ const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "*";
 const JWT_SECRET = process.env.JWT_SECRET;
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 
-const START_COINS = Number(process.env.START_COINS) || 1000;
 const TURN_MS = 30000;
 
-// --------- تایمرهای match (برای cancel/race-proof)
+// --------- تایمرهای match
 const matchTimers = new Map(); // matchId -> { timeout }
 const connectedUsers = new Map(); // userId -> socketId
 
@@ -160,36 +159,21 @@ function authenticateAdminSecret(req, res, next) {
 
 /*
 |--------------------------------------------------------------------------
-| Login route
+| Auth routes
 |--------------------------------------------------------------------------
 */
 app.post("/api/auth/login", async (req, res) => {
   const { username, password } = req.body;
-  console.log(`Attempting login for username: ${username}`);
   try {
-    const user = await prisma.user.findUnique({
-      where: { username: username },
-    });
+    const user = await prisma.user.findUnique({ where: { username } });
+    if (!user) return res.status(401).json({ message: "Invalid credentials" });
 
-    if (user) {
-      console.log(`User found: ${user.username}`);
-      const isMatch = await bcrypt.compare(password, user.password);
-      console.log(`Password comparison result: ${isMatch}`);
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
 
-      if (isMatch) {
-        const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: "1h" });
-        console.log("Login successful, token generated.");
-        return res.json({ token });
-      } else {
-        console.log("Login failed: Invalid password");
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-    } else {
-      console.log("Login failed: User not found");
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "1h" });
+    return res.json({ token });
   } catch (error) {
-    console.error("Error during login:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -403,11 +387,6 @@ function hasLegalMoveForDie(game, dieValue) {
   return game.pieces.some((piece) => piece.color === currentColor && canPieceMove(game, piece, dieValue));
 }
 
-function hasAnyLegalPendingMove(game) {
-  const pendingDice = Array.isArray(game?.pendingDice) ? game?.pendingDice : [];
-  return pendingDice.some((dieValue) => hasLegalMoveForDie(game, dieValue));
-}
-
 function capture(game, cellName, myColor) {
   for (const p of game.pieces) {
     if (p.color === myColor) continue;
@@ -477,38 +456,30 @@ function checkWinner(game) {
 
 /*
 |--------------------------------------------------------------------------
-| Rooms & match (جدید: لابی مرحله‌ای 2->3->4)
+| Rooms & match
 |--------------------------------------------------------------------------
 */
-
 const matches = new Map(); // matchId -> match
-let io; // set later
+let io;
 
-const tierLobbies = new Map(); // tier -> lobby (که matchId دارد)
+const tierLobbies = new Map(); // tier -> lobby
 
 function makeMatchId(tier) {
   return `m:${tier}:${Date.now()}:${Math.floor(Math.random() * 1e6)}`;
 }
 
-const userTierQueue = new Map(); // uid -> tier
-
 function createLobby(tier) {
-  const matchId = makeMatchId(tier);
   return {
-    matchId,
+    matchId: makeMatchId(tier),
     tier,
-    status: "lobby", // lobby
+    status: "lobby",
     createdAt: Date.now(),
-    // رنگ‌ها با ترتیب رسیدن می‌آیند
-    playerUidsInOrder: [], // تا 4
-    // map رنگ -> uid
+    playerUidsInOrder: [],
     playerColors: { red: null, green: null, yellow: null, blue: null },
-    // لابی تایمر
-    lobbyPhase: 1, // 1-> منتظر نفر۲، 2-> searching3 ،3-> searching4 ،4-> full
+    lobbyPhase: 1,
     lobbyDeadlineAt: null,
     lobbyTimer: null,
     timerToken: 0,
-    // برای بازی
     ready: false,
   };
 }
@@ -522,18 +493,11 @@ function activePlayersCountFromPlayerColors(playerColors) {
   return colorOrder.filter((c) => playerColors[c] != null).length;
 }
 
-function getNextColorForIndex(i) {
-  // i=0 => red, 1=>green, 2=>yellow, 3=>blue
-  return colorOrder[i];
-}
-
 function assignColorsToLobbyPlayers(lobby) {
-  // بر اساس playerUidsInOrder
   const colors = ["red", "green", "yellow", "blue"];
   for (let i = 0; i < lobby.playerUidsInOrder.length; i++) {
     lobby.playerColors[colors[i]] = lobby.playerUidsInOrder[i];
   }
-  // باقی null
   for (let i = lobby.playerUidsInOrder.length; i < 4; i++) {
     lobby.playerColors[colors[i]] = null;
   }
@@ -549,14 +513,9 @@ function emitLobbyStatus(lobby, data) {
     deadlineAt: data?.deadlineAt ?? lobby.lobbyDeadlineAt ?? null,
     deadlineMs: data?.deadlineMs ?? null,
     message: data?.message ?? null,
-
-    // برای UI
-    searchingFor: data?.searchingFor ?? null, // 3 یا 4
+    searchingFor: data?.searchingFor ?? null,
     status: data?.status ?? "lobby",
   };
-
-  // به تمام کسانی که در match room هستند emit می‌کنیم
-  // (ما از لحظه وجود matchId در room اتاق match:${matchId} می‌چینیم)
   io.to(`match:${lobby.matchId}`).emit("lobby:status", payload);
 }
 
@@ -567,14 +526,38 @@ function stopLobbyTimer(lobby) {
   lobby.lobbyDeadlineAt = null;
 }
 
+async function getUsersCoins(userIds) {
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, coins: true },
+  });
+  return new Map(users.map((u) => [u.id, u.coins]));
+}
+
+function emitBalanceChanged(userId, newCoins, message) {
+  const socketId = connectedUsers.get(String(userId));
+  if (!socketId || !io) return;
+  io.to(socketId).emit("balanceChanged", { newCoins, message });
+}
+
+async function ensureTreasuryUser() {
+  const username = "treasury";
+  const existing = await prisma.user.findUnique({ where: { username } });
+  if (existing) return existing;
+
+  const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 12);
+
+  return prisma.user.create({
+    data: { username, password: passwordHash, coins: 0, role: "TREASURY" },
+  });
+}
+
 async function chargeTierFromPlayers(match) {
   if (match.chargedEntry) return;
   if (!match.tier) throw new Error("tier نامعتبر است یا ست نشده است.");
   assertValidTier(match.tier);
 
-  const userIds = colorOrder
-    .map((color) => match.playerColors[color])
-    .filter((userId) => userId != null);
+  const userIds = colorOrder.map((color) => match.playerColors[color]).filter((userId) => userId != null);
 
   if (userIds.length < 2 || userIds.length > 4) {
     throw new Error("برای شروع بازی باید بین ۲ تا ۴ بازیکن حضور داشته باشند.");
@@ -679,39 +662,12 @@ async function settleCoinsForMatch(match) {
   });
 }
 
-// ---------- treasury / balance helpers (بدون تغییر منطقی از کدت) ----------
-function emitBalanceChanged(userId, newCoins, message) {
-  const socketId = connectedUsers.get(String(userId));
-  if (!socketId || !io) return;
-  io.to(socketId).emit("balanceChanged", { newCoins, message });
-}
-
-async function getUsersCoins(userIds) {
-  const users = await prisma.user.findMany({
-    where: { id: { in: userIds } },
-    select: { id: true, coins: true },
-  });
-  return new Map(users.map((u) => [u.id, u.coins]));
-}
-
-async function ensureTreasuryUser() {
-  const username = "treasury";
-  const existing = await prisma.user.findUnique({ where: { username } });
-  if (existing) return existing;
-
-  const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 12);
-
-  return prisma.user.create({
-    data: { username, password: passwordHash, coins: 0, role: "TREASURY" },
-  });
-}
-
 // ---------- match game ----------
 function createMatchFromLobby(lobby) {
   return {
     matchId: lobby.matchId,
     status: "waiting",
-    players: new Map(), // userId -> socketId
+    players: new Map(),
     playerColors: { ...lobby.playerColors },
     game: null,
     turnDeadlineAt: 0,
@@ -721,8 +677,6 @@ function createMatchFromLobby(lobby) {
     tier: lobby.tier,
     financialSettled: false,
     chargedEntry: false,
-    // برای cancel race
-    activePlayersSnapshot: activePlayersCountFromPlayerColors(lobby.playerColors),
   };
 }
 
@@ -745,12 +699,7 @@ function resetMatchGame(match) {
     pieces: buildPieces(),
     turnMoved: false,
     turnDeadlineAt: null,
-    playerColors: {
-      red: match.playerColors.red,
-      green: match.playerColors.green,
-      yellow: match.playerColors.yellow,
-      blue: match.playerColors.blue,
-    },
+    playerColors: { ...match.playerColors },
   };
 
   match.turnDeadlineAt = null;
@@ -762,7 +711,7 @@ function broadcastState(match) {
 
   const activeColor = colorOrder[match.game.currentTurn];
 
-  const snapshot = {
+  io.to(`match:${match.matchId}`).emit("game:state", {
     ...cloneGameForClient(match.game),
     matchId: match.matchId,
     status: match.status,
@@ -770,9 +719,7 @@ function broadcastState(match) {
     turnDeadlineAt: match.turnDeadlineAt || match.game.turnDeadlineAt || null,
     playerColors: match.playerColors,
     activeColor,
-  };
-
-  io.to(`match:${match.matchId}`).emit("game:state", snapshot);
+  });
 }
 
 function startTurnTimeout(match) {
@@ -795,7 +742,6 @@ function startTurnTimeout(match) {
     if (!m) return;
     if (m.turnId !== myTurnId) return;
     if (!m.game || m.game.winner) return;
-
     nextTurn(m);
   }, TURN_MS);
 }
@@ -807,14 +753,7 @@ function nextTurn(match) {
   do {
     match.game.currentTurn = (match.game.currentTurn + 1) % colorOrder.length;
     attempts++;
-  } while (
-    attempts < colorOrder.length &&
-    match.playerColors[colorOrder[match.game.currentTurn]] == null
-  );
-
-  const nextColor = colorOrder[match.game.currentTurn];
-  const nextPlayerId = match.playerColors[nextColor];
-  if (nextPlayerId == null) return;
+  } while (attempts < colorOrder.length && match.playerColors[colorOrder[match.game.currentTurn]] == null);
 
   match.game.dice = 0;
   match.game.dice1 = 0;
@@ -845,14 +784,8 @@ async function startMatch(match) {
 
   try {
     await chargeTierFromPlayers(match);
-
     resetMatchGame(match);
     match.status = "playing";
-
-    if (matchTimers.has(match.matchId)) {
-      clearTimeout(matchTimers.get(match.matchId).timeout);
-      matchTimers.delete(match.matchId);
-    }
 
     broadcastState(match);
     startTurnTimeout(match);
@@ -879,74 +812,138 @@ async function startMatch(match) {
   }
 }
 
-// ---------- Admin updates ----------
-app.post("/admin/update-balance-by-username", authenticateAdminSecret, async (req, res) => {
-  try {
-    const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
-    const amount = Number(req.body?.amount);
+// ---------- lobby phase logic ----------
+function setLobbyDeadline(lobby, seconds) {
+  lobby.timerToken++;
+  lobby.lobbyDeadlineAt = Date.now() + seconds * 1000;
 
-    if (!username) return safeJsonError(res, 400, "username لازم است.");
-    if (!Number.isFinite(amount)) return safeJsonError(res, 400, "amount باید عدد باشد.");
+  const token = lobby.timerToken;
+  if (lobby.lobbyTimer) clearTimeout(lobby.lobbyTimer);
 
-    const user = await prisma.user.findUnique({
-      where: { username },
-      select: { id: true, username: true, coins: true },
+  lobby.lobbyTimer = setTimeout(() => {
+    const current = tierLobbies.get(lobby.tier);
+    if (!current) return;
+    if (current.timerToken !== token) return;
+    handleLobbyTimeout(current).catch((e) => console.error("handleLobbyTimeout error:", e));
+  }, seconds * 1000);
+}
+
+async function handleLobbyTimeout(lobby) {
+  const count = lobby.playerUidsInOrder.length;
+  if (count === 2) return startMatchFromLobby(lobby, 2);
+  if (count === 3) return startMatchFromLobby(lobby, 3);
+  if (count >= 4) return startMatchFromLobby(lobby, 4);
+}
+
+function getLobbyPhaseFromCount(count) {
+  if (count <= 1) return 1;
+  if (count === 2) return 2;
+  if (count === 3) return 3;
+  return 4;
+}
+
+async function onLobbyPlayerJoined(tier) {
+  const lobby = tierLobbies.get(tier);
+  if (!lobby) return;
+
+  const count = lobby.playerUidsInOrder.length;
+  lobby.lobbyPhase = getLobbyPhaseFromCount(count);
+
+  if (count === 2) {
+    lobby.status = "lobby";
+    lobby.lobbyDeadlineAt = null;
+    lobby.lobbyPhase = 2;
+
+    emitLobbyStatus(lobby, {
+      phase: 2,
+      searchingFor: 3,
+      deadlineAt: null,
+      message: "در حال جستجوی نفر سوم...",
+      status: "SEARCHING_3",
     });
-    if (!user) return res.json({ success: false, message: "کاربر با این نام کاربری یافت نشد!" });
 
-    const updatedUser = await prisma.user.update({
-      where: { username },
-      data: { coins: { increment: amount } },
-      select: { id: true, username: true, coins: true },
+    setLobbyDeadline(lobby, 60);
+
+    emitLobbyStatus(lobby, {
+      phase: 2,
+      searchingFor: 3,
+      deadlineAt: lobby.lobbyDeadlineAt,
+      deadlineMs: 60000,
+      message: "در حال جستجوی نفر سوم... (۶۰ ثانیه)",
+      status: "SEARCHING_3",
     });
-
-    const targetSocketId = connectedUsers.get(String(updatedUser.id));
-    if (targetSocketId && io) {
-      io.to(targetSocketId).emit("balanceChanged", {
-        newCoins: updatedUser.coins,
-        message: "موجودی شما توسط ادمین به روزرسانی شد",
-      });
-    }
-
-    return res.json({ success: true, newCoins: updatedUser.coins });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: "خطای سرور: " + error.message });
+    return;
   }
-});
-app.get("/admin/user-balance/:username", authenticateAdminSecret, async (req, res) => {
-  try {
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-    res.setHeader("Pragma", "no-cache");
-    res.setHeader("Expires", "0");
-    res.setHeader("Surrogate-Control", "no-store");
 
-    const username = String(req.params?.username || "").trim();
-    if (!username) return safeJsonError(res, 400, "نام کاربری وارد نشده است.");
+  if (count === 3) {
+    lobby.lobbyPhase = 3;
+    setLobbyDeadline(lobby, 60);
 
-    const user = await prisma.user.findUnique({
-      where: { username },
-      select: { id: true, username: true, coins: true, role: true },
+    emitLobbyStatus(lobby, {
+      phase: 3,
+      searchingFor: 4,
+      deadlineAt: lobby.lobbyDeadlineAt,
+      deadlineMs: 60000,
+      message: "در حال جستجوی نفر چهارم...",
+      status: "SEARCHING_4",
     });
-
-    if (!user) return safeJsonError(res, 404, "کاربر پیدا نشد.");
-
-    return res.status(200).json({
-      success: true,
-      userId: user.id,
-      username: user.username,
-      coins: user.coins,
-      role: user.role,
-    });
-  } catch (error) {
-    return safeJsonError(res, 500, error?.message || "خطای داخلی سرور");
+    return;
   }
-});
 
-/*
-|--------------------------------------------------------------------------
-| Socket.IO
-|--------------------------------------------------------------------------
-*/
+  if (count >= 4) {
+    lobby.lobbyPhase = 4;
+
+    emitLobbyStatus(lobby, {
+      phase: 4,
+      searchingFor: null,
+      deadlineAt: lobby.lobbyDeadlineAt,
+      message: "نفر چهارم پیدا شد ✅",
+      status: "FULL",
+    });
+
+    await startMatchFromLobby(lobby, 4);
+  }
+}
+
+async function startMatchFromLobby(lobby, filledColors) {
+  if (!lobby || lobby.status !== "lobby") return;
+  if (![2, 3, 4].includes(filledColors)) return;
+
+  assignColorsToLobbyPlayers(lobby);
+
+  const match = createMatchFromLobby(lobby);
+  matches.set(match.matchId, match);
+
+  lobby.status = "matching";
+  if (lobby.lobbyTimer) clearTimeout(lobby.lobbyTimer);
+  lobby.lobbyTimer = null;
+
+for (const uid of lobby.playerUidsInOrder) {
+  const sid = connectedUsers.get(String(uid));
+  if (sid) {
+    const targetSocket = io.sockets.sockets.get(sid);
+    if (targetSocket) await targetSocket.join(`match:${match.matchId}`);
+    match.players.set(uid, sid);
+  }
+}
+// بعد از join room ها
+  const ok = await startMatch(match);
+  if (!ok) {
+    lobby.status = "lobby";
+    lobby.playerUidsInOrder = [];
+    lobby.playerColors = { red: null, green: null, yellow: null, blue: null };
+    lobby.lobbyPhase = 1;
+    lobby.lobbyDeadlineAt = null;
+    stopLobbyTimer(lobby);
+  }
+
+  // خود startMatch می‌فرسته game:started و game:state
+}
+
+//
+// ------------------------------------------------------------
+// Socket.IO
+// ------------------------------------------------------------
 httpServer.on("request", (req) => {
   if (String(req.url || "").includes("/socket.io/")) {
     console.log("[HTTP SOCKET.IO REQUEST]", {
@@ -958,8 +955,25 @@ httpServer.on("request", (req) => {
   }
 });
 
-const allowedOriginsForSocket =
-  allowedOrigins === "*" ? "*" : allowedOrigins;
+function normalizeSocketToken(value) {
+  if (value === undefined || value === null) return "";
+  let token = String(value).trim();
+
+  if (
+    (token.startsWith('"') && token.endsWith('"')) ||
+    (token.startsWith("'") && token.endsWith("'"))
+  ) {
+    try {
+      token = JSON.parse(token);
+    } catch {
+      token = token.slice(1, -1);
+    }
+  }
+
+  token = String(token || "").trim();
+  token = token.replace(/^Bearer\s+/i, "").trim();
+  return token;
+}
 
 io = new Server(httpServer, {
   cors: {
@@ -974,23 +988,9 @@ io = new Server(httpServer, {
   pingInterval: 25000,
 });
 
-function normalizeSocketToken(value) {
-  if (value === undefined || value === null) return "";
-  let token = String(value).trim();
-
-  if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
-    try { token = JSON.parse(token); } catch { token = token.slice(1, -1); }
-  }
-
-  token = String(token || "").trim();
-  token = token.replace(/^Bearer\s+/i, "").trim();
-  return token;
-}
-
 io.use((socket, next) => {
   try {
     let token = normalizeSocketToken(socket.handshake?.auth?.token);
-
     if (!token) token = normalizeSocketToken(socket.handshake?.headers?.authorization);
     if (!token) token = normalizeSocketToken(socket.handshake?.query?.token);
 
@@ -1000,7 +1000,6 @@ io.use((socket, next) => {
       error.data = { code: "SOCKET_TOKEN_MISSING" };
       return next(error);
     }
-
     if (tokenParts.length !== 3) {
       const error = new Error("فرمت توکن Socket.io صحیح نیست.");
       error.data = { code: "SOCKET_TOKEN_FORMAT_INVALID" };
@@ -1038,234 +1037,44 @@ io.use((socket, next) => {
 
 /*
 |--------------------------------------------------------------------------
-| Lobby phase logic: 2 -> 3 -> 4
-|--------------------------------------------------------------------------
-*/
-
-function setLobbyDeadline(lobby, seconds) {
-  lobby.timerToken++;
-  lobby.lobbyDeadlineAt = Date.now() + seconds * 1000;
-
-  const token = lobby.timerToken;
-  if (lobby.lobbyTimer) clearTimeout(lobby.lobbyTimer);
-
-  lobby.lobbyTimer = setTimeout(() => {
-    const current = tierLobbies.get(lobby.tier);
-    if (!current) return;
-    if (current.timerToken !== token) return; // cancel/race-proof
-
-    // وقتی تایمر تمام شد، طبق فاز تصمیم بگیریم
-    // فاز 2: یعنی deadline بعد از نفر۲ شروع شده و باید سناریو شروع شود
-    // فاز 3: deadline بعد از نفر۳ شروع شده و باید سناریو شروع شود
-    // فاز 1: نداریم
-    // فاز 4: در اصل باید با نفر۴ شروع شود (تایمر ممکن است نرسد)
-    handleLobbyTimeout(current).catch((e) => console.error("handleLobbyTimeout error:", e));
-  }, seconds * 1000);
-}
-
-async function handleLobbyTimeout(lobby) {
-  // تعداد فعلی
-  const count = lobby.playerUidsInOrder.length;
-
-  // اگر 2 نفر داریم -> بازی 2 نفره
-  if (count === 2) {
-    // start match with 2
-    await startMatchFromLobby(lobby, 2);
-    return;
-  }
-
-  // اگر 3 نفر داریم -> بازی 3 نفره
-  if (count === 3) {
-    await startMatchFromLobby(lobby, 3);
-    return;
-  }
-
-  // اگر کمتر/بیشتر شد، امن‌ترین کار:
-  // اگر 4 نفر داریم معمولاً قبل تایمر باید شروع شود، ولی اینجا fallback
-  if (count >= 4) {
-    await startMatchFromLobby(lobby, 4);
-    return;
-  }
-
-  // کمتر از 2 نفر: کاری نکن
-}
-
-async function startMatchFromLobby(lobby, filledColors) {
-  // اگر قبلاً لابی بخصوصی match ساخته یا status تغییر کرده باشد، فیلتر می‌کنیم
-  if (!lobby || lobby.status !== "lobby") return;
-  if (![2, 3, 4].includes(filledColors)) return;
-
-  // رنگ‌ها را ست کن
-  assignColorsToLobbyPlayers(lobby);
-
-  // match ساخته شود
-  const matchId = lobby.matchId;
-  const match = createMatchFromLobby(lobby);
-
-  matches.set(matchId, match);
-
-  // lobby را غیر فعال کن
-  lobby.status = "matching";
-  if (lobby.lobbyTimer) clearTimeout(lobby.lobbyTimer);
-  lobby.lobbyTimer = null;
-
-  // join room برای همه حاضرها:
-  for (const uid of lobby.playerUidsInOrder) {
-    const sid = connectedUsers.get(String(uid));
-    if (sid) {
-      const targetSocket = io.sockets.sockets.get(sid);
-      if (targetSocket) await targetSocket.join(`match:${matchId}`);
-      match.players.set(uid, sid);
-    }
-  }
-
-  // شروع match اصلی (charging + بازی)
-  const ok = await startMatch(match);
-  if (!ok) {
-    // اگر شروع ناموفق بود، لابی جدید بازسازی شود
-    lobby.status = "lobby";
-    lobby.playerUidsInOrder = [];
-    lobby.playerColors = { red: null, green: null, yellow: null, blue: null };
-    lobby.lobbyPhase = 1;
-    lobby.lobbyDeadlineAt = null;
-    stopLobbyTimer(lobby);
-  }
-
-  // بعد از شروع، ما به هر حال game:started و game:state را در startMatch می‌فرستیم
-  // UI هم تا آنجا روی game:state سوییچ می‌کند.
-}
-
-function getLobbyPhaseFromCount(count) {
-  // count نفرات موجود
-  if (count <= 1) return 1;
-  if (count === 2) return 2; // waiting for 3
-  if (count === 3) return 3; // waiting for 4
-  return 4; // full
-}
-
-async function onLobbyPlayerJoined(tier) {
-  const lobby = tierLobbies.get(tier);
-  if (!lobby) return;
-
-  const count = lobby.playerUidsInOrder.length;
-  lobby.lobbyPhase = getLobbyPhaseFromCount(count);
-
-  // بروزرسانی UI لابی
-  if (count === 2) {
-    // ورود نفر دوم: فاز SEARCHING_3 و تایمر 60
-    lobby.status = "lobby";
-    lobby.lobbyDeadlineAt = null;
-    lobby.lobbyPhase = 2;
-
-    emitLobbyStatus(lobby, {
-      phase: 2,
-      searchingFor: 3,
-      deadlineAt: null,
-      message: "در حال جستجوی نفر سوم...",
-      status: "SEARCHING_3",
-    });
-
-    // تایمر 60 ثانیه‌ای از الان
-    setLobbyDeadline(lobby, 60);
-
-    emitLobbyStatus(lobby, {
-      phase: 2,
-      searchingFor: 3,
-      deadlineAt: lobby.lobbyDeadlineAt,
-      deadlineMs: 60000,
-      message: "در حال جستجوی نفر سوم... (۶۰ ثانیه)",
-      status: "SEARCHING_3",
-    });
-    return;
-  }
-
-  if (count === 3) {
-    // ورود نفر سوم: ریست تایمر و فاز SEARCHING_4
-    lobby.lobbyPhase = 3;
-
-    // ریست تایمر از لحظه ورود نفر سوم
-    setLobbyDeadline(lobby, 60);
-
-    emitLobbyStatus(lobby, {
-      phase: 3,
-      searchingFor: 4,
-      deadlineAt: lobby.lobbyDeadlineAt,
-      deadlineMs: 60000,
-      message: "در حال جستجوی نفر چهارم...",
-      status: "SEARCHING_4",
-    });
-    return;
-  }
-
-  if (count >= 4) {
-    // فاز full: شروع بازی 4 نفره (بدون منتظر ماندن برای تایمر)
-    lobby.lobbyPhase = 4;
-
-    emitLobbyStatus(lobby, {
-      phase: 4,
-      searchingFor: null,
-      deadlineAt: lobby.lobbyDeadlineAt,
-      message: "نفر چهارم پیدا شد ✅",
-      status: "FULL",
-    });
-
-    // start با 4
-    await startMatchFromLobby(lobby, 4);
-  }
-}
-
-/*
-|--------------------------------------------------------------------------
-| Connection handlers
+| Lobby join + Game events
 |--------------------------------------------------------------------------
 */
 io.on("connection", (socket) => {
   const uid = Number(socket.user?.userId);
-  if (!Number.isInteger(uid)) return;
+  if (!Number.isInteger(uid) || uid <= 0) return;
 
   connectedUsers.set(String(uid), socket.id);
 
-  // برای جلوگیری از join دوباره در لابی همان tier:
-  // (ساده: اگر uid داخل playerUidsInOrder هست، دوباره اضافه نکن)
+  // Join lobby / match room
   socket.on("room:join", async (payload, callback) => {
     try {
       const tier = Number(payload?.tier);
-      if (!Number.isFinite(tier)) return callback?.({ success: false, message: "tier لازم است." });
+      if (!Number.isFinite(tier)) {
+        return callback?.({ success: false, message: "tier لازم است." });
+      }
       assertValidTier(tier);
 
       const lobby = getTierLobby(tier);
 
-      // اگر قبلاً این user داخل همین lobby هست، دوباره اضافه نکن
       if (!lobby.playerUidsInOrder.includes(uid)) {
-        // فقط اگر lobby هنوز در lobby phase است
-        // اگر matching شد، اجازه نده
         if (lobby.status !== "lobby") {
           return callback?.({
             success: false,
             message: "این لابی در حال شروع است. لطفاً دوباره تلاش کنید.",
           });
         }
-
-        // به لابی اضافه کن
         lobby.playerUidsInOrder.push(uid);
       }
 
-      // join به اتاق matchId (حتی قبل از startMatch)
       await socket.join(`match:${lobby.matchId}`);
 
-      // محاسبه filled
       const filled = lobby.playerUidsInOrder.length;
+      lobby.lobbyPhase = getLobbyPhaseFromCount(filled);
 
-      // فاز بر اساس تعداد
-      const phase = getLobbyPhaseFromCount(filled);
-      lobby.lobbyPhase = phase;
-
-      // اگر هنوز نفر 3 یا 4 نیومده، deadline مدیریت میشه
-      // بلافاصله بعد از اضافه شدن باید onLobbyPlayerJoined اجرا شود
+      // آپدیت فاز و تایمر
       await onLobbyPlayerJoined(tier);
 
-      const filledColors = filled; // چون از 2 به بعد معنی داره
-      // جواب callback مخصوص همین socket
       if (filled < 2) {
         emitLobbyStatus(lobby, {
           phase: 1,
@@ -1279,7 +1088,7 @@ io.on("connection", (socket) => {
           waiting: true,
           matchId: lobby.matchId,
           tier,
-          filledColors,
+          filledColors: filled,
           status: "waiting",
           startAfterMs: null,
         });
@@ -1309,7 +1118,6 @@ io.on("connection", (socket) => {
         });
       }
 
-      // filled === 4 (یا بیشتر)
       return callback?.({
         success: true,
         waiting: false,
@@ -1325,8 +1133,6 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     try {
-      // حذف از لابی‌ها
-      // اگر lobby در حال matching/playing است، حذف فقط برای صف‌ها مهم است
       for (const [tier, lobby] of tierLobbies.entries()) {
         if (!lobby) continue;
 
@@ -1334,10 +1140,8 @@ io.on("connection", (socket) => {
         if (idx !== -1 && lobby.status === "lobby") {
           lobby.playerUidsInOrder.splice(idx, 1);
 
-          // تایمر را اگر دارید دوباره می‌نویسیم
           stopLobbyTimer(lobby);
 
-          // اگر تعداد به 1 رسید، فازبرگردد
           if (lobby.playerUidsInOrder.length < 2) {
             lobby.lobbyPhase = 1;
             emitLobbyStatus(lobby, {
@@ -1349,28 +1153,248 @@ io.on("connection", (socket) => {
               status: "WAIT_2",
             });
           } else if (lobby.playerUidsInOrder.length === 2) {
-            // دو نفر ماندند -> دوباره 60 از الان
             onLobbyPlayerJoined(tier).catch(() => {});
           } else if (lobby.playerUidsInOrder.length === 3) {
-            // سه نفر ماندند -> دوباره 60 برای نفر چهارم
             onLobbyPlayerJoined(tier).catch(() => {});
           }
         }
       }
 
-      // حذف نقشه socket
-      if (connectedUsers.get(String(uid)) === socket.id) connectedUsers.delete(String(uid));
+      if (connectedUsers.get(String(uid)) === socket.id) {
+        connectedUsers.delete(String(uid));
+      }
     } catch (error) {
       console.error("[DISCONNECT ERROR]", error);
     }
   });
+
+  // ---------------- Game: roll ----------------
+  socket.on("game:roll", (payload, callback) => {
+    try {
+      const matchId = String(payload?.matchId ?? "");
+      const m = matches.get(matchId);
+      if (!m || !m.game || !m.playerColors) {
+        return callback?.({ success: false, message: "match پیدا نشد." });
+      }
+
+      const userId = Number(socket.user?.userId);
+      if (!Number.isInteger(userId) || userId <= 0) {
+        return callback?.({ success: false, message: "userId نامعتبر است." });
+      }
+
+      const currentColor = colorOrder[m.game.currentTurn];
+      const expectedUserId = m.playerColors[currentColor];
+      if (expectedUserId == null || expectedUserId !== userId) {
+        return callback?.({ success: false, message: "الان نوبت شما نیست." });
+      }
+
+      if (m.game.winner) {
+        return callback?.({ success: false, message: "بازی تمام شده است." });
+      }
+
+      if (!m.game.turnDeadlineAt || Date.now() > m.game.turnDeadlineAt) {
+        return callback?.({ success: false, message: "نوبت منقضی شده یا هنوز شروع نشده است." });
+      }
+
+      if (m.game.rolled) {
+        return callback?.({ success: false, message: "قبلاً تاس ریختی." });
+      }
+
+      const d1 = getNextDiceValueFromMatch();
+      const d2 = getNextDiceValueFromMatch();
+
+      m.game.dice1 = d1;
+      m.game.dice2 = d2;
+      m.game.dice = d1 + d2;
+
+      const isBonusSix = d1 === 6 && d2 === 6;
+
+      if (isBonusSix) {
+        // ✅ bonus: نوبت عوض نشه، رول مجدد مجاز باشه
+        m.game.dice1 = 6;
+        m.game.dice2 = 6;
+        m.game.dice = 12;
+
+        m.game.pendingDice = []; // چون حرکت نمی‌خوایم اینجا انجام بدیم
+        m.game.rolled = false;    // اجازه roll دوباره
+        m.game.turnMoved = false;
+
+        // deadline رو تمدید کن تا کاربر فرصت کلیک roll داشته باشه
+        m.game.turnDeadlineAt = Date.now() + TURN_MS;
+        m.turnDeadlineAt = m.game.turnDeadlineAt;
+
+        broadcastState(m);
+
+        return callback?.({
+          success: true,
+          dice1: 6,
+          dice2: 6,
+          bonusRoll: true,
+          pendingDice: [],
+          noLegalMoves: false,
+          turnSkipped: false,
+          winnerColor: null,
+        });
+      }
+
+      // حالت عادی/اسکیپ:
+      m.game.pendingDice = [d1, d2];
+      m.game.rolled = true;
+      m.game.turnMoved = false;
+
+      const canMove1 = hasLegalMoveForDie(m.game, d1);
+      const canMove2 = hasLegalMoveForDie(m.game, d2);
+      const noLegalMoves = !canMove1 && !canMove2;
+
+      if (noLegalMoves) {
+        // ✅ skip: نوبت عوض میشه
+        const myTurnId = m.turnId;
+
+        m.game.pendingDice = [];
+        m.game.dice1 = 0;
+        m.game.dice2 = 0;
+        m.game.dice = 0;
+
+        m.game.rolled = false;
+        m.game.turnMoved = true;
+
+        broadcastState(m);
+
+        setImmediate(() => {
+          const mm = matches.get(matchId);
+          if (!mm) return;
+          if (mm.turnId !== myTurnId) return;
+          nextTurn(mm);
+        });
+
+        return callback?.({
+          success: true,
+          dice1: d1,
+          dice2: d2,
+          noLegalMoves: true,
+          turnSkipped: true,
+          bonusRoll: false,
+          pendingDice: [],
+        });
+      }
+
+      broadcastState(m);
+
+      return callback?.({
+        success: true,
+        dice1: d1,
+        dice2: d2,
+        bonusRoll: false,
+        noLegalMoves: false,
+        turnSkipped: false,
+        pendingDice: m.game.pendingDice.slice(),
+        winnerColor: null,
+      });
+    } catch (e) {
+      return callback?.({ success: false, message: e?.message || "roll error" });
+    }
+  });
+
+  // ---------------- Game: move ----------------
+  socket.on("game:move", (payload, callback) => {
+    try {
+      const matchId = String(payload?.matchId ?? "");
+      const pieceId = String(payload?.pieceId ?? "");
+      const dieValue = Number(payload?.dieValue);
+
+      const m = matches.get(matchId);
+      if (!m || !m.game) return callback?.({ success: false, message: "match پیدا نشد." });
+
+      const userId = Number(socket.user?.userId);
+      if (!Number.isInteger(userId) || userId <= 0) {
+        return callback?.({ success: false, message: "userId نامعتبر است." });
+      }
+
+      const currentColor = colorOrder[m.game.currentTurn];
+      const expectedUserId = m.playerColors[currentColor];
+      if (expectedUserId == null || expectedUserId !== userId) {
+        return callback?.({ success: false, message: "الان نوبت شما نیست." });
+      }
+
+      if (m.game.winner) return callback?.({ success: false, message: "بازی تمام شده است." });
+
+      if (!m.game.rolled || !Array.isArray(m.game.pendingDice) || m.game.pendingDice.length === 0) {
+        return callback?.({ success: false, message: "اول باید تاس ریخته شود." });
+      }
+
+      if (!Number.isFinite(dieValue) || dieValue < 1 || dieValue > 6) {
+        return callback?.({ success: false, message: "dieValue نامعتبر است." });
+      }
+
+      if (!m.game.pendingDice.includes(dieValue)) {
+        return callback?.({ success: false, message: "این تاس برای شما موجود نیست." });
+      }
+
+      const piece = m.game.pieces.find((p) => p.id === pieceId);
+      if (!piece) return callback?.({ success: false, message: "piece پیدا نشد." });
+
+      if (!canPieceMove(m.game, piece, dieValue)) {
+        return callback?.({ success: false, message: "حرکت مجاز نیست." });
+      }
+
+      movePiece(m.game, piece, dieValue);
+
+      const idx = m.game.pendingDice.indexOf(dieValue);
+      if (idx !== -1) m.game.pendingDice.splice(idx, 1);
+
+      const winnerColor = checkWinner(m.game);
+      m.game.winner = winnerColor || null;
+
+      if (m.game.winner) {
+        broadcastState(m);
+        settleCoinsForMatch(m).catch((e) => console.error("settle error:", e));
+
+        return callback?.({
+          success: true,
+          winnerColor: m.game.winner,
+          bonusRoll: false,
+          pendingDice: m.game.pendingDice,
+        });
+      }
+
+      // اگر هنوز تاس باقیه => ادامه نوبت
+      if (m.game.pendingDice.length > 0) {
+        m.game.turnMoved = true;
+        broadcastState(m);
+
+        return callback?.({
+          success: true,
+          bonusRoll: false,
+          pendingDice: m.game.pendingDice.slice(),
+          turnSkipped: false,
+          winnerColor: null,
+        });
+      }
+
+      // اگر تاس تموم شد => نوبت بعد
+      m.game.turnMoved = true;
+      m.game.rolled = false;
+      m.game.pendingDice = [];
+
+      const myTurnId = m.turnId;
+      broadcastState(m);
+
+      setImmediate(() => nextTurn(m));
+
+      return callback?.({
+        success: true,
+        bonusRoll: false,
+        pendingDice: [],
+        turnSkipped: false,
+        winnerColor: null,
+      });
+    } catch (e) {
+      return callback?.({ success: false, message: e?.message || "move error" });
+    }
+  });
 });
 
-/*
-|--------------------------------------------------------------------------
-| Start server
-|--------------------------------------------------------------------------
-*/
+// Start
 httpServer.listen(PORT, () => {
   console.log(`✅ Server listening on http://localhost:${PORT}`);
 });
