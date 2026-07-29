@@ -333,7 +333,23 @@ function canPieceMove(game, piece, dieValue) {
   if (game.winner) return false;
   if (Date.now() > game.turnDeadlineAt) return false;
 
-  if (piece.state === "yard") return dieValue === 6;
+if (piece.state === "yard") {
+  if (dieValue !== 6) return false;
+
+  // خانه شروع مخصوص رنگ این مهره
+  const sCell = layout.startCells[piece.color]; // S_R / S_B / S_G / S_Y
+
+  // فقط یک مهره هم‌رنگ می‌تواند در همان S باشد
+  const occupiedStart = game.pieces.some(
+    (p) =>
+      p.id !== piece.id &&
+      p.color === piece.color &&
+      p.state === "start" &&
+      layout.startCells[p.color] === sCell
+  );
+
+  return !occupiedStart;
+}
 
   if (piece.state === "start") {
     const entryIndex = layout.entryPathIndexes[piece.color];
