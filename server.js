@@ -224,7 +224,97 @@ app.get("/api/me/balance", authenticateHttp, async (req, res) => {
     return safeJsonError(res, 500, e.message || "خطای داخلی");
   }
 });
+/*
+|--------------------------------------------------------------------------
+| Admin HTTP routes (برای admin.html)
+|--------------------------------------------------------------------------
+*/
 
+// آپدیت موجودی
+app.post("/admin/update-balance-by-username", authenticateAdminSecret, async (req, res) => {
+  try {
+    const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
+    const amount = Number(req.body?.amount);
+    const note = typeof req.body?.note === "string" ? req.body.note.trim() : "";
+
+    if (!username) return safeJsonError(res, 400, "username لازم است.");
+    if (!Number.isFinite(amount)) return safeJsonError(res, 400, "amount باید عدد باشد.");
+    if (amount === 0) return safeJsonError(res, 400, "amount نباید صفر باشد.");
+
+    const user = await prisma.user.findUnique({
+      where: { username },
+      select: { id: true, coins: true },
+    });
+
+    if (!user) return safeJsonError(res, 404, "کاربر پیدا نشد.");
+
+    // اگر نمی‌خوای موجودی منفی بشه این چک رو نگه دار
+    if (user.coins + amount < 0) {
+      return safeJsonError(res, 400, "موجودی کافی نیست (عملیات باعث منفی شدن می‌شود).");
+    }
+
+    const updated = await prisma.user.update({
+      where: { username },
+      data: { coins: { increment: amount } },
+      select: { id: true, username: true, coins: true },
+    });
+
+    // اگر کاربر آنلاین بود، realtime اطلاع بده
+    const socketId = connectedUsers.get(String(updated.id));
+    if (socketId && io) {
+      io.to(socketId).emit("balanceChanged", {
+        newCoins: updated.coins,
+        message: "موجودی شما توسط ادمین به روزرسانی شد.",
+      });
+    }
+
+    return res.json({ success: true, username: updated.username, newCoins: updated.coins, note });
+  } catch (error) {
+    console.error("❌ خطا در آپدیت موجودی ادمین:", error);
+    return res.status(500).json({ success: false, message: "خطای سرور: " + (error?.message || String(error)) });
+  }
+});
+
+// دریافت موجودی با username
+app.get("/admin/user-balance/:username", authenticateAdminSecret, async (req, res) => {
+  try {
+    const username = String(req.params?.username || "").trim();
+    if (!username) return safeJsonError(res, 400, "نام کاربری وارد نشده است.");
+
+    const user = await prisma.user.findUnique({
+      where: { username },
+      select: { id: true, username: true, coins: true, role: true },
+    });
+
+    if (!user) return safeJsonError(res, 404, "کاربر پیدا نشد.");
+
+    return res.status(200).json({
+      success: true,
+      userId: user.id,
+      username: user.username,
+      coins: user.coins,
+      role: user.role,
+    });
+  } catch (error) {
+    console.error("[ADMIN BALANCE ERROR]", error);
+    return safeJsonError(res, 500, error?.message || "خطای داخلی سرور");
+  }
+});
+
+// گزارش خزانه (فعلاً حداقلی)
+app.get("/admin/treasury-report", authenticateAdminSecret, async (req, res) => {
+  try {
+    // اگر بعداً خواستی کاملش کنیم، همینجا بر اساس transaction ها گزارش بده
+    const range = String(req.query?.range || "week");
+    return res.status(200).json({
+      success: true,
+      range,
+      message: "treasury-report route فعال شد. (برای گزارش واقعی باید transaction جدولت هم پیاده شود.)"
+    });
+  } catch (error) {
+    return safeJsonError(res, 500, error?.message || "خطای داخلی سرور");
+  }
+});
 app.get("/health", async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
