@@ -229,7 +229,36 @@ app.get("/api/me/balance", authenticateHttp, async (req, res) => {
 | Admin HTTP routes (برای admin.html)
 |--------------------------------------------------------------------------
 */
+function getRangeBounds(range) {
+  const r = String(range || "day");
+  const now = new Date();
 
+  if (r === "day") {
+    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    return { from, to };
+  }
+
+  if (r === "week") {
+    const day = (now.getDay() + 6) % 7; // Monday=0
+    const from = new Date(now);
+    from.setDate(now.getDate() - day);
+    from.setHours(0, 0, 0, 0);
+
+    const to = new Date(from);
+    to.setDate(from.getDate() + 6);
+    to.setHours(23, 59, 59, 999);
+    return { from, to };
+  }
+
+  if (r === "month") {
+    const from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const to = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    return { from, to };
+  }
+
+  return null;
+}
 // آپدیت موجودی
 app.post("/admin/update-balance-by-username", authenticateAdminSecret, async (req, res) => {
   const maxAttempts = 3;
