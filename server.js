@@ -232,46 +232,64 @@ app.get("/api/me/balance", authenticateHttp, async (req, res) => {
 
 // آپدیت موجودی
 app.post("/admin/update-balance-by-username", authenticateAdminSecret, async (req, res) => {
-  try {
+  const maxAttempts = 3;
+
+  async function attemptOnce() {
     const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
     const amount = Number(req.body?.amount);
-    const note = typeof req.body?.note === "string" ? req.body.note.trim() : "";
 
     if (!username) return safeJsonError(res, 400, "username لازم است.");
     if (!Number.isFinite(amount)) return safeJsonError(res, 400, "amount باید عدد باشد.");
-    if (amount === 0) return safeJsonError(res, 400, "amount نباید صفر باشد.");
 
     const user = await prisma.user.findUnique({
       where: { username },
-      select: { id: true, coins: true },
+      select: { id: true, username: true, coins: true },
     });
+    if (!user) return res.json({ success: false, message: "کاربر با این نام کاربری یافت نشد!" });
 
-    if (!user) return safeJsonError(res, 404, "کاربر پیدا نشد.");
-
-    // اگر نمی‌خوای موجودی منفی بشه این چک رو نگه دار
+    // اگر می‌خوای موجودی منفی نشه
     if (user.coins + amount < 0) {
-      return safeJsonError(res, 400, "موجودی کافی نیست (عملیات باعث منفی شدن می‌شود).");
+      return res.json({ success: false, message: "موجودی کافی نیست." });
     }
 
-    const updated = await prisma.user.update({
+    const updatedUser = await prisma.user.update({
       where: { username },
       data: { coins: { increment: amount } },
       select: { id: true, username: true, coins: true },
     });
 
-    // اگر کاربر آنلاین بود، realtime اطلاع بده
-    const socketId = connectedUsers.get(String(updated.id));
-    if (socketId && io) {
-      io.to(socketId).emit("balanceChanged", {
-        newCoins: updated.coins,
+    const targetSocketId = connectedUsers.get(String(updatedUser.id));
+    if (targetSocketId && io) {
+      io.to(targetSocketId).emit("balanceChanged", {
+        newCoins: updatedUser.coins,
         message: "موجودی شما توسط ادمین به روزرسانی شد.",
       });
     }
 
-    return res.json({ success: true, username: updated.username, newCoins: updated.coins, note });
-  } catch (error) {
-    console.error("❌ خطا در آپدیت موجودی ادمین:", error);
-    return res.status(500).json({ success: false, message: "خطای سرور: " + (error?.message || String(error)) });
+    return res.json({ success: true, newCoins: updatedUser.coins });
+  }
+
+  for (let i = 1; i <= maxAttempts; i++) {
+    try {
+      return await attemptOnce();
+    } catch (e) {
+      const msg = String(e?.message || "");
+      const code = String(e?.code || "");
+
+      const transient =
+        msg.includes("EAI_AGAIN") ||
+        msg.includes("ETIMEDOUT") ||
+        msg.includes("ECONNRESET") ||
+        code === "P1001";
+
+      if (!transient || i === maxAttempts) {
+        console.error("❌ خطا در آپدیت موجودی ادمین:", e);
+        return res.status(500).json({ success: false, message: "خطای سرور: " + (e?.message || String(e)) });
+      }
+
+      // backoff ساده
+      await new Promise((r) => setTimeout(r, i * 300));
+    }
   }
 });
 
@@ -301,18 +319,37 @@ app.get("/admin/user-balance/:username", authenticateAdminSecret, async (req, re
   }
 });
 
-// گزارش خزانه (فعلاً حداقلی)
 app.get("/admin/treasury-report", authenticateAdminSecret, async (req, res) => {
   try {
-    // اگر بعداً خواستی کاملش کنیم، همینجا بر اساس transaction ها گزارش بده
-    const range = String(req.query?.range || "week");
+    const range = String(req.query?.range || "day");
+    const bounds = getRangeBounds(range);
+    if (!bounds) return safeJsonError(res, 400, "range فقط day/week/month باشد.");
+
+    const treasuryUser = await ensureTreasuryUser();
+
+    const items = await prisma.transaction.findMany({
+      where: {
+        userId: treasuryUser.id,
+        type: "TREASURY_CUT",
+        createdAt: { gte: bounds.from, lte: bounds.to },
+      },
+      select: { amount: true, createdAt: true, type: true, note: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const total = items.reduce((acc, x) => acc + Number(x.amount), 0);
+
     return res.status(200).json({
       success: true,
       range,
-      message: "treasury-report route فعال شد. (برای گزارش واقعی باید transaction جدولت هم پیاده شود.)"
+      from: bounds.from,
+      to: bounds.to,
+      total,
+      count: items.length,
+      items: items.slice(0, 200),
     });
-  } catch (error) {
-    return safeJsonError(res, 500, error?.message || "خطای داخلی سرور");
+  } catch (e) {
+    return safeJsonError(res, 500, e.message || "خطای داخلی");
   }
 });
 app.get("/health", async (req, res) => {
