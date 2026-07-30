@@ -648,91 +648,103 @@ function drawPieces(){
   const turnColor = (gameState.currentTurnColor ?? colorOrder?.[gameState.currentTurn]);
   const winner = gameState.winner;
 
-  const baseR = CELL * 0.30;   // اندازه مهره
-  const ringR = CELL * 0.38;   // اندازه دور/سایه نوبت
+  // اندازه‌ها طوری انتخاب شده که داخل خانه بماند
+  const r = CELL * 0.32;                 // بدنه مهره (کمی بزرگ‌تر از قبل)
+  const ringR = CELL * 0.39;            // فقط Glow/حلقه نوبت (کوچک‌تر از نصف خانه)
+  const maxRAllowed = CELL * 0.50 - 2;  // حاشیه امن (تقریبی)
 
-  // اگر COLORS مثل { red:"#ff0000", blue:"#00aaff" } هست:
   function getBaseHex(keyOrHex){
-    if (!keyOrHex) return "#ffffff";
-    return COLORS[keyOrHex] ?? keyOrHex; // اگر خودش hex بود هم جواب میده
+    return COLORS[keyOrHex] ?? keyOrHex;
   }
+
   function hexToRgb(hex){
     const h = String(hex).replace("#","");
-    const r = parseInt(h.slice(0,2),16);
-    const g = parseInt(h.slice(2,4),16);
-    const b = parseInt(h.slice(4,6),16);
-    return {r,g,b};
+    const rr = parseInt(h.slice(0,2),16);
+    const gg = parseInt(h.slice(2,4),16);
+    const bb = parseInt(h.slice(4,6),16);
+    return {r: rr, g: gg, b: bb};
   }
-  function rgba(hex, a){
+
+  function rgbaFromHex(hex, a){
     const {r,g,b} = hexToRgb(getBaseHex(hex));
     return `rgba(${r},${g},${b},${a})`;
   }
-
-  const t = performance.now() / 1000;         // ثانیه
-  const pulse = 0.55 + 0.45 * Math.sin(t * 6); // روشن-خاموش (6 رو کمتر/بیشتر کن)
 
   for (const piece of gameState.pieces){
     const pos = getPieceDrawPos(piece);
     if (!pos) continue;
 
-    const x = pos.x;
-    const y = pos.y;
-
+    const x = pos.x, y = pos.y;
     const baseHex = getBaseHex(piece.color);
     const isTurnPiece = (!winner && piece.color === turnColor);
 
-    // سایه خیلی کم زیر مهره (همیشه)
+    // اگر خواستی قاطعاً تضمین کنیم بیرون نزنه:
+    const safeRingR = Math.min(ringR, maxRAllowed);
+    const safeR = Math.min(r, maxRAllowed);
+
+    // سایه زیر مهره (ثابت)
     ctx.save();
     ctx.beginPath();
-    ctx.ellipse(x + 2, y + 4, CELL*0.18, CELL*0.12, 0, 0, Math.PI*2);
+    ctx.ellipse(x + 1.5, y + 4, CELL*0.17, CELL*0.11, 0, 0, Math.PI*2);
     ctx.fillStyle = "rgba(0,0,0,0.35)";
     ctx.fill();
     ctx.restore();
 
-    // بدنه مهره (خیلی واضح، بدون فلزی)
+    // بدنه مهره: رنگ پررنگ + برق (هایلایت شفاف)
     ctx.save();
     ctx.beginPath();
-    ctx.arc(x, y, baseR, 0, Math.PI*2);
+    ctx.arc(x, y, safeR, 0, Math.PI*2);
 
-    // گرادیان خیلی ملایم فقط برای “پر بودن” رنگ
-    const g = ctx.createRadialGradient(x - baseR*0.25, y - baseR*0.25, 0, x, y, baseR);
-    g.addColorStop(0.0, rgba(baseHex, 1.0));
-    g.addColorStop(0.6, rgba(baseHex, 0.98));
-    g.addColorStop(1.0, "rgba(0,0,0,0.20)");
-    ctx.fillStyle = g;
+    const grad = ctx.createRadialGradient(
+      x - safeR*0.35, y - safeR*0.35, safeR*0.05,
+      x, y, safeR
+    );
+
+    // پررنگ‌تر (alpha/stop ها بیشتر)
+    grad.addColorStop(0.00, rgbaFromHex(baseHex, 1.00));   // مرکز خیلی واضح
+    grad.addColorStop(0.55, rgbaFromHex(baseHex, 0.99));
+    grad.addColorStop(1.00, "rgba(0,0,0,0.20)");             // لبه کمی تیره برای فرم
+
+    ctx.fillStyle = grad;
     ctx.fill();
 
-    // حلقه خیلی نازک ثابت برای مشخص بودن
-    ctx.strokeStyle = "rgba(255,255,255,0.25)";
+    // برق شیشه‌ای/پلاستیکی
+    ctx.beginPath();
+    ctx.ellipse(x - safeR*0.28, y - safeR*0.28, safeR*0.60, safeR*0.32, -0.6, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.fill();
+
+    // Edge نازک برای شارپ بودن
     ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
     ctx.stroke();
-
-    // ✅ نوبت: دور مهره سایه‌ی روشن/خاموش
-    if (isTurnPiece){
-      const alpha = 0.15 + 0.55 * pulse; // شدت سایه
-      const blur = 8 + 20 * pulse;        // میزان تارشدگی
-      const ringAlpha = 0.25 + 0.45 * pulse;
-
-      ctx.shadowColor = rgba(baseHex, 1);
-      ctx.shadowBlur = blur;
-
-      // حلقه روشن
-      ctx.beginPath();
-      ctx.arc(x, y, ringR, 0, Math.PI*2);
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = rgba(baseHex, ringAlpha);
-      ctx.stroke();
-
-      // یک حلقه بیرونی نرم‌تر
-      ctx.shadowBlur = (blur * 0.65);
-      ctx.beginPath();
-      ctx.arc(x, y, ringR + 5, 0, Math.PI*2);
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = rgba(baseHex, alpha);
-      ctx.stroke();
-    }
-
     ctx.restore();
+
+    // ✅ دور نوبت: سایه سفید فقط (بدون چشمک)
+    if (isTurnPiece){
+      ctx.save();
+
+      // فقط glow سفید، بدون رنگ‌دهی غیر لازم
+      ctx.shadowColor = "rgba(255,255,255,0.95)";
+      ctx.shadowBlur = 12;
+
+      // حلقه اصلی
+      ctx.beginPath();
+      ctx.arc(x, y, safeRingR, 0, Math.PI*2);
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(255,255,255,0.65)";
+      ctx.stroke();
+
+      // حلقه بیرونی خیلی نازک‌تر و کم‌جان‌تر (برای ضخامت بیشتر ولی کنترل شده)
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.arc(x, y, safeRingR + 1.2, 0, Math.PI*2);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255,255,255,0.28)";
+      ctx.stroke();
+
+      ctx.restore();
+    }
   }
 }
 
