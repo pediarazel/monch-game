@@ -643,204 +643,210 @@
   }
 
 
+function drawPieces() {
+  if (!gameState || !Array.isArray(gameState.pieces) || !ctx) return;
 
-function drawPieces(){
-  if (!gameState || !Array.isArray(gameState.pieces)) return;
+  const turnColor =
+    (gameState.currentTurnColor ??
+      (typeof colorOrder !== "undefined" ? colorOrder?.[gameState.currentTurn] : null));
 
-  const turnColor = (gameState.currentTurnColor ?? colorOrder?.[gameState.currentTurn]);
   const winner = gameState.winner;
 
+  // اندازه‌ها (مطابق کدهای قبلی‌ات ممکنه لازم باشد تنظیم کنی)
   const rTurn = CELL * 0.32;
   const maxRAllowed = CELL * 0.50 - 2;
   const scaleOther = 1.08;
   const rOther = Math.min(rTurn * scaleOther, maxRAllowed);
 
-  function hexToRgb(hex){
-    const h = String(hex).replace("#","");
-    const rr = parseInt(h.slice(0,2),16);
-    const gg = parseInt(h.slice(2,4),16);
-    const bb = parseInt(h.slice(4,6),16);
-    return {r: rr, g: gg, b: bb};
+  function hexToRgb(hex) {
+    const h = String(hex).replace("#", "");
+    const rr = parseInt(h.slice(0, 2), 16);
+    const gg = parseInt(h.slice(2, 4), 16);
+    const bb = parseInt(h.slice(4, 6), 16);
+    return { r: rr, g: gg, b: bb };
   }
-  function getBaseHex(keyOrHex){ return COLORS[keyOrHex] ?? keyOrHex; }
+  function getBaseHex(keyOrHex) {
+    // اگر piece.color اسم رنگ است (مثل "red")، از COLORS می‌گیریم
+    return (typeof COLORS !== "undefined" && COLORS && COLORS[keyOrHex]) ? COLORS[keyOrHex] : keyOrHex;
+  }
 
-  // ---------- CRYSTAL GRADIENT (شیشه‌ای/کریستالی) ----------
-  function crystalGrad(x, y, r, baseHex){
-    const {r: br, g: bg, b: bb} = hexToRgb(getBaseHex(baseHex));
+  // ======== ALMAASI DIAMOND SHARP + TRANSPARENT ========
+  function crystalDiamondFill(x, y, r, baseHex) {
+    const { r: br, g: bg, b: bb } = hexToRgb(getBaseHex(baseHex));
 
-    const g = ctx.createRadialGradient(
-      x - r*0.35, y - r*0.35, r*0.05,
-      x, y, r
-    );
-
-    // هاله سفید خیلی زیاد (کریستال)
+    // بدنه شیشه‌ای/الماسی: گرادیان شعاعی خیلی شفاف
+    const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.35, r * 0.06, x, y, r);
     g.addColorStop(0.00, "rgba(255,255,255,0.98)");
-    // رنگ اصلی نیمه‌شفاف
-    g.addColorStop(0.10, `rgba(${br},${bg},${bb},0.82)`);
-    // بدنه
-    g.addColorStop(0.42, `rgba(${br},${bg},${bb},0.55)`);
-    // لبه کمی تیره‌تر
-    g.addColorStop(0.82, `rgba(${Math.round(br*0.35)},${Math.round(bg*0.35)},${Math.round(bb*0.35)},0.35)`);
-    g.addColorStop(1.00, "rgba(0,0,0,0.32)");
+    g.addColorStop(0.12, `rgba(${br},${bg},${bb},0.82)`);
+    g.addColorStop(0.48, `rgba(${br},${bg},${bb},0.52)`);
+    g.addColorStop(0.80, `rgba(${Math.round(br * 0.28)},${Math.round(bg * 0.28)},${Math.round(bb * 0.28)},0.30)`);
+    g.addColorStop(1.00, "rgba(0,0,0,0.28)");
+    ctx.fillStyle = g;
 
-    return g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.fill();
   }
 
-  // ---------- CRYSTAL FACETS (وجه‌های کریستالی/تیز) ----------
-  function drawCrystalFacets(x, y, r, baseHex){
-    const {r: br, g: bg, b: bb} = hexToRgb(getBaseHex(baseHex));
+  function drawDiamondFacets(x, y, r, baseHex) {
+    const { r: br, g: bg, b: bb } = hexToRgb(getBaseHex(baseHex));
 
     ctx.save();
 
-    // چند هایلایت تیز با خط‌های نازک
+    // هایلایت‌ها را “تیز” با خطوط چندوجهی
     ctx.globalCompositeOperation = "screen";
 
-    function addFacetArc(start, end, rrMul, lwMul, alpha){
-      const gg = ctx.createLinearGradient(x - r, y, x + r, y);
-      gg.addColorStop(0, `rgba(255,255,255,${alpha})`);
-      gg.addColorStop(0.45, `rgba(${br},${bg},${bb},${alpha*0.7})`);
-      gg.addColorStop(1, `rgba(255,255,255,0)`);
-      ctx.strokeStyle = gg;
-      ctx.lineWidth = Math.max(1.5, r * lwMul);
+    function facetArc(a0, a1, rrMul, lwMul, alpha) {
+      const grd = ctx.createLinearGradient(x - r, y, x + r, y);
+      grd.addColorStop(0, `rgba(255,255,255,${alpha})`);
+      grd.addColorStop(0.4, `rgba(${br},${bg},${bb},${alpha * 0.75})`);
+      grd.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.strokeStyle = grd;
+      ctx.lineWidth = Math.max(1.4, r * lwMul);
+
       ctx.beginPath();
-      ctx.arc(x, y, r * rrMul, start, end);
+      ctx.arc(x, y, r * rrMul, a0, a1);
       ctx.stroke();
     }
 
-    // وجه‌ها (چند قوس کوتاه و شارپ)
-    addFacetArc(-2.35, -1.70, 0.80, 0.10, 0.75);
-    addFacetArc(-2.00, -1.25, 0.62, 0.08, 0.55);
-    addFacetArc(-1.65, -1.05, 0.72, 0.07, 0.45);
+    // چند قوس/وجه تیز اطراف (الماسی)
+    facetArc(-2.25, -1.90, 0.80, 0.10, 0.70);
+    facetArc(-1.85, -1.45, 0.66, 0.085, 0.55);
+    facetArc(-1.35, -0.95, 0.76, 0.095, 0.50);
+    facetArc(-0.95, -0.50, 0.62, 0.085, 0.45);
 
-    // دو "تیغه" مورب
+    facetArc(0.10, 0.45, 0.78, 0.10, 0.55);
+    facetArc(0.45, 0.85, 0.66, 0.085, 0.45);
+    facetArc(0.85, 1.25, 0.76, 0.095, 0.48);
+    facetArc(1.25, 1.70, 0.63, 0.085, 0.42);
+
+    facetArc(2.00, 2.35, 0.78, 0.10, 0.55);
+
+    // چند خط تیز عمودی/قطری (facet واقعی‌تر)
     ctx.globalCompositeOperation = "lighter";
-    const lw = Math.max(1.5, r * 0.09);
-    ctx.lineWidth = lw;
+    const lw = Math.max(1.6, r * 0.05);
 
-    ctx.strokeStyle = `rgba(255,255,255,0.70)`;
-    ctx.beginPath();
-    ctx.moveTo(x - r*0.55, y - r*0.25);
-    ctx.lineTo(x - r*0.10, y - r*0.55);
-    ctx.stroke();
+    // خطوط از مرکز به سمت بیرون
+    const lines = [
+      { a: -0.85, alpha: 0.45 },
+      { a: -0.25, alpha: 0.35 },
+      { a: 0.35, alpha: 0.40 },
+      { a: 0.95, alpha: 0.35 },
+      { a: 1.55, alpha: 0.30 },
+    ];
 
-    ctx.strokeStyle = `rgba(255,255,255,0.45)`;
-    ctx.beginPath();
-    ctx.moveTo(x + r*0.15, y - r*0.40);
-    ctx.lineTo(x + r*0.55, y - r*0.10);
-    ctx.stroke();
+    for (const ln of lines) {
+      const x1 = x + Math.cos(ln.a) * r * 0.18;
+      const y1 = y + Math.sin(ln.a) * r * 0.18;
+      const x2 = x + Math.cos(ln.a) * r * 0.95;
+      const y2 = y + Math.sin(ln.a) * r * 0.95;
 
-    // نقطه خیلی تیز (spark)
-    ctx.globalCompositeOperation = "source-over";
-    ctx.fillStyle = "rgba(255,255,255,0.88)";
+      ctx.strokeStyle = `rgba(255,255,255,${ln.alpha})`;
+      ctx.lineWidth = lw;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+
+    // Spark کوچک
+    ctx.globalCompositeOperation = "screen";
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
     ctx.beginPath();
-    ctx.ellipse(x - r*0.22, y - r*0.22, r*0.14, r*0.08, -0.6, 0, Math.PI*2);
+    ctx.ellipse(x - r * 0.20, y - r * 0.22, r * 0.14, r * 0.08, -0.6, 0, Math.PI * 2);
     ctx.fill();
 
-    // لبه تیره خیلی تمیز
+    // لبه تیره شارپ
     ctx.globalCompositeOperation = "source-over";
     ctx.strokeStyle = "rgba(0,0,0,0.32)";
-    ctx.lineWidth = Math.max(1, r*0.06);
+    ctx.lineWidth = Math.max(1.2, r * 0.06);
     ctx.beginPath();
-    ctx.arc(x, y, r*0.98, 0, Math.PI*2);
+    ctx.arc(x, y, r * 0.98, 0, Math.PI * 2);
     ctx.stroke();
 
     ctx.restore();
   }
 
-  // ---------- MID SHADOW (سایه وسط ۲ برابر پررنگ‌تر) ----------
-  function drawMidShadow(x, y, r){
+  function drawMidShadow(x, y, r) {
+    // سایه وسط برای حجم (کمی)
+    ctx.save();
     ctx.beginPath();
-    ctx.ellipse(x, y, r*0.65, r*0.58, 0, 0, Math.PI*2);
-    // (قبلاً اگر ~0.18 بوده، این 2 برابرش میشه 0.36)
-    ctx.fillStyle = "rgba(0,0,0,0.36)";
+    ctx.ellipse(x, y, r * 0.65, r * 0.58, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
     ctx.fill();
+    ctx.restore();
   }
 
-  // ---------- TURN RING (دور مهره نوبت‌دار: سفید/مشکی سایه‌دار) ----------
-  function drawTurnRing(x, y, r, baseHex){
-    // سایه بیرونی تیره‌تر + glow
+  // ======== TURN OUTER RING (فقط دور بیرونی برای مشخص بودن نوبت) ========
+  function drawTurnOuterRing(x, y, r) {
+    // حلقه بیرونی به شکل سفید/مشکیِ سایه‌دار
+    const ringOuter = r * 1.28;
+    const ringMid = r * 1.16;
+    const ringInner = r * 1.10;
+
     ctx.save();
 
-    // حلقه سفید
-    ctx.shadowColor = "rgba(255,255,255,0.95)";
-    ctx.shadowBlur = Math.max(10, r * 0.45);
-
-    const ringOuter = r * 1.22;
-    const lwWhite = Math.max(10, r * 0.16);
-    const lwBlack = Math.max(6, r * 0.12);
+    // glow سفید بیرونی
+    ctx.shadowColor = "rgba(255,255,255,0.9)";
+    ctx.shadowBlur = Math.max(12, r * 0.45);
 
     ctx.beginPath();
-    ctx.arc(x, y, ringOuter, 0, Math.PI*2);
-    ctx.lineWidth = lwWhite;
-    ctx.strokeStyle = "rgba(255,255,255,0.92)";
+    ctx.arc(x, y, ringOuter, 0, Math.PI * 2);
+    ctx.lineWidth = Math.max(6, r * 0.14);
+    ctx.strokeStyle = "rgba(255,255,255,0.95)";
     ctx.stroke();
 
-    // حلقه مشکی برای کنتراست
+    // مشکی نزدیک‌تر برای کنتراست
     ctx.shadowBlur = 0;
     ctx.beginPath();
-    ctx.arc(x, y, ringOuter * 0.94, 0, Math.PI*2);
-    ctx.lineWidth = lwBlack;
-    ctx.strokeStyle = "rgba(0,0,0,0.65)";
+    ctx.arc(x, y, ringMid, 0, Math.PI * 2);
+    ctx.lineWidth = Math.max(4, r * 0.10);
+    ctx.strokeStyle = "rgba(0,0,0,0.70)";
     ctx.stroke();
 
-    // حلقه داخلی خیلی نازک سفید (برای شارپ بودن)
+    // خط سفید خیلی نازک برای شارپ شدن لبه
     ctx.beginPath();
-    ctx.arc(x, y, ringOuter * 0.88, 0, Math.PI*2);
-    ctx.lineWidth = Math.max(3, r * 0.06);
+    ctx.arc(x, y, (ringInner + ringMid) * 0.5, 0, Math.PI * 2);
+    ctx.lineWidth = Math.max(2, r * 0.05);
     ctx.strokeStyle = "rgba(255,255,255,0.72)";
     ctx.stroke();
 
     ctx.restore();
   }
 
-  // ---------- DRAW ALL PIECES ----------
-  for (const piece of gameState.pieces){
+  // ======== DRAW ALL PIECES ========
+  for (const piece of gameState.pieces) {
     const pos = getPieceDrawPos(piece);
     if (!pos) continue;
 
-    const x = pos.x, y = pos.y;
-    const baseHex = piece.color;
+    const x = pos.x;
+    const y = pos.y;
+
+    const baseHex = piece.color; // اگر رنگ کلمه‌ای است باید در COLORS تعریف شده باشد
 
     const isTurnPiece = (!winner && piece.color === turnColor);
-
     const safeR = Math.min(isTurnPiece ? rTurn : rOther, maxRAllowed);
 
-    // سایه زیر مهره (مثل قبل)
+    // سایه زیر مهره
     ctx.save();
     ctx.beginPath();
-    ctx.ellipse(x + 1.5, y + 4, CELL*0.17, CELL*0.11, 0, 0, Math.PI*2);
+    ctx.ellipse(x + 1.5, y + 4, CELL * 0.17, CELL * 0.11, 0, 0, Math.PI * 2);
     ctx.fillStyle = isTurnPiece ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.38)";
     ctx.fill();
     ctx.restore();
 
-    // بدنه کریستالی
+    // مهره الماسی تیز و شفاف (بدنه را تغییر نمی‌دهیم جز اینکه خودش همین استایل باشد)
     ctx.save();
-    ctx.beginPath();
-    ctx.arc(x, y, safeR, 0, Math.PI*2);
-    ctx.closePath();
-
-    ctx.fillStyle = crystalGrad(x, y, safeR, baseHex);
-    ctx.fill();
-
-    // هایلایت/سایه‌های داخل مهره
-    // هایلایت داخلی نرم
-    ctx.beginPath();
-    ctx.ellipse(x - safeR*0.18, y - safeR*0.20, safeR*0.60, safeR*0.28, -0.7, 0, Math.PI*2);
-    ctx.fillStyle = "rgba(255,255,255,0.22)";
-    ctx.fill();
-
-    // سایه وسط 2 برابر پررنگ‌تر
+    crystalDiamondFill(x, y, safeR, baseHex);
     drawMidShadow(x, y, safeR);
-
-    // وجه‌های کریستالی (تیز)
-    drawCrystalFacets(x, y, safeR, baseHex);
-
-    // ✅ دور نوبت‌دار
-    if (isTurnPiece){
-      drawTurnRing(x, y, safeR, baseHex);
-    }
-
+    drawDiamondFacets(x, y, safeR, baseHex);
     ctx.restore();
+
+    // فقط دور بیرونی برای نوبت‌دار
+    if (isTurnPiece) {
+      drawTurnOuterRing(x, y, safeR);
+    }
   }
 }
 
