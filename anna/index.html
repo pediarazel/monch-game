@@ -648,18 +648,14 @@ function drawPieces(){
   const turnColor = (gameState.currentTurnColor ?? colorOrder?.[gameState.currentTurn]);
   const winner = gameState.winner;
 
-  // اندازه پایه: برای مهره‌های نوبت‌دار (همان که گفتی خوبه)
-  const rTurn = CELL * 0.32;        // ✅ اندازه نوبتی: دست نزن (همون قبل)
-  const ringRTurn = CELL * 0.39;   // (اگر در کد جای دیگری استفاده می‌شود مهم است، اینجا برای کامل بودن می‌ماند)
-
+  // اندازه: نوبتی همان سایز خوب قبلی
+  const rTurn = CELL * 0.32; // ✅ نوبتی: ثابت
   const maxRAllowed = CELL * 0.50 - 2;
 
-  // برای بقیه مهره‌ها کمی بزرگ‌تر
-  const scaleOther = 1.08; // ✅ مقدار دلخواه: 1.06 تا 1.12 تست کن
+  // اگر هنوز هم دوست داری بقیه مهره‌ها هم کمی بزرگ‌تر باشند، این رو روشن کن:
+  // (ولی اگر می‌خوای فقط نوبت‌دار مشخص باشه و بقیه دقیقاً همون اندازه قبلی بمونن، scaleOther=1 بگذار)
+  const scaleOther = 1.08;
   const rOther = Math.min(rTurn * scaleOther, maxRAllowed);
-
-  // اگر ringR هم استفاده شود (فعلاً در این تابع برای حلقه/رینگ خود مهره کاربرد مستقیم ندارد)
-  const ringROther = Math.min(ringRTurn * scaleOther, maxRAllowed);
 
   function getBaseHex(keyOrHex){
     return COLORS[keyOrHex] ?? keyOrHex;
@@ -676,19 +672,40 @@ function drawPieces(){
     return `rgba(${r},${g},${b},${a})`;
   }
 
+  // برای فلزی کردن، به جای اینکه رنگ رو مخلوط “زیاد” کنیم،
+  // از چند لایه highlight + گرادیان متال استفاده می‌کنیم تا رنگ هنوز مشخص بمونه.
+  function metalGrad(x, y, r, baseHex){
+    const {r:br,g:bg,b:bb} = hexToRgb(getBaseHex(baseHex));
+
+    const g = ctx.createRadialGradient(
+      x - r*0.35, y - r*0.35, r*0.08,   // کانون روشن سمت بالا-چپ
+      x, y, r
+    );
+
+    // مرکز روشن (تقریباً آینه‌ای)
+    g.addColorStop(0.00, `rgba(255,255,255,0.95)`);
+    // گذر به رنگ خود مهره
+    g.addColorStop(0.10, `rgba(${br},${bg},${bb},0.98)`);
+    // بخش میانی فلزی
+    g.addColorStop(0.55, `rgba(${br},${bg},${bb},0.95)`);
+    // لبه تیره/سنگین (فلز)
+    g.addColorStop(0.88, `rgba(0,0,0,0.35)`);
+    g.addColorStop(1.00, `rgba(0,0,0,0.55)`);
+
+    return g;
+  }
+
   for (const piece of gameState.pieces){
     const pos = getPieceDrawPos(piece);
     if (!pos) continue;
 
     const x = pos.x, y = pos.y;
-    const baseHex = getBaseHex(piece.color);
-
+    const baseHex = piece.color;
     const isTurnPiece = (!winner && piece.color === turnColor);
 
-    // ✅ اندازه: نوبتی = ثابت، غیرنوبتی = کمی بزرگ‌تر
     const safeR = Math.min(isTurnPiece ? rTurn : rOther, maxRAllowed);
 
-    // سایه زیر مهره
+    // سایه زیر مهره (ثابت)
     ctx.save();
     ctx.beginPath();
     ctx.ellipse(x + 1.5, y + 4, CELL*0.17, CELL*0.11, 0, 0, Math.PI*2);
@@ -696,47 +713,63 @@ function drawPieces(){
     ctx.fill();
     ctx.restore();
 
-    // بدنه مهره
+    // بدنه فلزی
     ctx.save();
     ctx.beginPath();
     ctx.arc(x, y, safeR, 0, Math.PI * 2);
+    ctx.closePath();
 
-    const grad = ctx.createRadialGradient(
-      x - safeR*0.25, y - safeR*0.25, safeR*0.06,
-      x, y, safeR
-    );
-    grad.addColorStop(0.00, rgbaFromHex(baseHex, 1.00));
-    grad.addColorStop(0.60, rgbaFromHex(baseHex, 0.98));
-    grad.addColorStop(1.00, "rgba(0,0,0,0.42)");
-    ctx.fillStyle = grad;
+    // بدنه اصلی فلزی
+    ctx.fillStyle = metalGrad(x, y, safeR, baseHex);
     ctx.fill();
 
-    // Outline کم‌رنگ (همه مهره‌ها یکسان)
+    // خط لبه فلزی (outline چندلایه کم)
     ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgba(255,255,255,0.10)";
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
     ctx.stroke();
 
-    // هایلایت کم (همه مهره‌ها یکسان)
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.stroke();
+
+    // هایلایت نوار مثل فلز (این بخش باعث “فلزی بودن” میشه)
     ctx.beginPath();
-    ctx.ellipse(x - safeR*0.22, y - safeR*0.22, safeR*0.52, safeR*0.28, -0.6, 0, Math.PI*2);
-    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    ctx.ellipse(x - safeR*0.18, y - safeR*0.18, safeR*0.60, safeR*0.26, -0.7, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
     ctx.fill();
 
-    // ✅ فقط برای مهره‌های نوبتی: سایه مشکی دورش
+    // براقیت نقطه‌ای
+    ctx.beginPath();
+    ctx.arc(x - safeR*0.25, y - safeR*0.35, safeR*0.14, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    ctx.fill();
+
+    // ✅ مشخص کردن نوبت‌دارها (فقط glow/هاله، بدون تغییر گرافیک بدنه)
     if (isTurnPiece) {
+      // glow فلزی-سیاه/طوسی
       ctx.shadowColor = "rgba(0,0,0,0.95)";
-      ctx.shadowBlur = 26;
+      ctx.shadowBlur = 24;
 
       ctx.beginPath();
-      ctx.arc(x, y, safeR * 1.04, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(0,0,0,0.12)";
-      ctx.fill();
-
-      ctx.shadowBlur = 40;
-      ctx.beginPath();
-      ctx.arc(x, y, safeR * 1.10, 0, Math.PI * 2);
+      ctx.arc(x, y, safeR*1.05, 0, Math.PI*2);
       ctx.fillStyle = "rgba(0,0,0,0.06)";
       ctx.fill();
+
+      ctx.shadowBlur = 42;
+      ctx.beginPath();
+      ctx.arc(x, y, safeR*1.12, 0, Math.PI*2);
+      ctx.fillStyle = "rgba(0,0,0,0.04)";
+      ctx.fill();
+
+      // یک حلقه نازک طوسی برای تشخیص واضح
+      ctx.shadowBlur = 0;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(220,220,220,0.35)";
+      ctx.stroke();
+
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(0,0,0,0.35)";
+      ctx.stroke();
     }
 
     ctx.restore();
