@@ -758,17 +758,111 @@ function drawPieces(){
       ctx.shadowBlur = 42;
       ctx.beginPath();
       ctx.arc(x, y, safeR*1.12, 0, Math.PI*2);
-      ctx.fillStyle = "rgba(0,0,0,0.04)";
-      ctx.fill();
+function drawPieces(){
+  if (!gameState || !Array.isArray(gameState.pieces)) return;
 
-      // یک حلقه نازک طوسی برای تشخیص واضح
-      ctx.shadowBlur = 0;
+  const turnColor = (gameState.currentTurnColor ?? colorOrder?.[gameState.currentTurn]);
+  const winner = gameState.winner;
+
+  // ✅ اندازه نوبت‌دار همان چیزی که خوبه
+  const rTurn = CELL * 0.32;
+  const maxRAllowed = CELL * 0.50 - 2;
+
+  // بقیه مهره‌ها "یکم بزرگ‌تر" (اگر نمی‌خوای هیچ تغییری کنند scaleOther=1)
+  const scaleOther = 1.08;
+  const rOther = Math.min(rTurn * scaleOther, maxRAllowed);
+
+  function getBaseHex(keyOrHex){
+    return COLORS[keyOrHex] ?? keyOrHex;
+  }
+
+  function hexToRgb(hex){
+    const h = String(hex).replace("#","");
+    const rr = parseInt(h.slice(0,2),16);
+    const gg = parseInt(h.slice(2,4),16);
+    const bb = parseInt(h.slice(4,6),16);
+    return {r: rr, g: gg, b: bb};
+  }
+
+  function rgbaFromHex(hex, a){
+    const {r,g,b} = hexToRgb(getBaseHex(hex));
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  for (const piece of gameState.pieces){
+    const pos = getPieceDrawPos(piece);
+    if (!pos) continue;
+
+    const x = pos.x, y = pos.y;
+    const isTurnPiece = (!winner && piece.color === turnColor);
+
+    const safeR = Math.min(isTurnPiece ? rTurn : rOther, maxRAllowed);
+    const baseHex = piece.color;
+
+    // سایه زیر مهره
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(x + 1.5, y + 4, CELL*0.17, CELL*0.11, 0, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(0,0,0,0.38)";
+    ctx.fill();
+    ctx.restore();
+
+    // بدنه استیکری/سه‌بعدی
+    ctx.save();
+
+    // داخل (رنگ اصلی مشخص، کم‌گرادیان برای حس سه‌بعدی بسیار ملایم)
+    const g = ctx.createRadialGradient(
+      x - safeR*0.25, y - safeR*0.25, safeR*0.05,
+      x, y, safeR
+    );
+    g.addColorStop(0.00, rgbaFromHex(baseHex, 1.00));  // مرکز روشن
+    g.addColorStop(0.70, rgbaFromHex(baseHex, 0.98));  // بدنه
+    g.addColorStop(1.00, rgbaFromHex(baseHex, 0.88));  // لبه کمی تیره
+
+    ctx.beginPath();
+    ctx.arc(x, y, safeR, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    // لبه تیره (سایه بیرونی)
+    ctx.lineWidth = Math.max(2, safeR * 0.06);
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.stroke();
+
+    // لبه روشن (هایلایت دور)
+    ctx.lineWidth = Math.max(1, safeR * 0.03);
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.stroke();
+
+    // هایلایت داخلی (برای استیکر سه‌بعدی)
+    ctx.beginPath();
+    ctx.ellipse(
+      x - safeR*0.15, y - safeR*0.18,
+      safeR*0.55, safeR*0.26,
+      -0.7, 0, Math.PI*2
+    );
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.fill();
+
+    // ✅ فقط برای نوبتی‌ها: حلقه/Glow مشخص (بدون تغییر شکل بدنه)
+    if (isTurnPiece){
+      // هاله نرم
+      ctx.shadowColor = "rgba(0,0,0,0.85)";
+      ctx.shadowBlur = 22;
+
+      // حلقه بیرونی
+      ctx.beginPath();
+      ctx.arc(x, y, safeR * 1.06, 0, Math.PI*2);
+      ctx.strokeStyle = "rgba(210,210,210,0.55)";
       ctx.lineWidth = 3;
-      ctx.strokeStyle = "rgba(220,220,220,0.35)";
       ctx.stroke();
 
-      ctx.lineWidth = 1;
+      // حلقه دوم برای وضوح
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.arc(x, y, safeR * 1.02, 0, Math.PI*2);
       ctx.strokeStyle = "rgba(0,0,0,0.35)";
+      ctx.lineWidth = 2;
       ctx.stroke();
     }
 
