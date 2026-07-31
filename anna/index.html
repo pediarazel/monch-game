@@ -643,6 +643,7 @@
   }
 
 
+
 function drawPieces(){
   if (!gameState || !Array.isArray(gameState.pieces)) return;
 
@@ -655,10 +656,6 @@ function drawPieces(){
   const scaleOther = 1.08;
   const rOther = Math.min(rTurn * scaleOther, maxRAllowed);
 
-  function getBaseHex(keyOrHex){
-    return COLORS[keyOrHex] ?? keyOrHex;
-  }
-
   function hexToRgb(hex){
     const h = String(hex).replace("#","");
     const rr = parseInt(h.slice(0,2),16);
@@ -666,34 +663,37 @@ function drawPieces(){
     const bb = parseInt(h.slice(4,6),16);
     return {r: rr, g: gg, b: bb};
   }
-
+  function getBaseHex(keyOrHex){ return COLORS[keyOrHex] ?? keyOrHex; }
   function rgbaFromHex(hex, a){
     const {r,g,b} = hexToRgb(getBaseHex(hex));
     return `rgba(${r},${g},${b},${a})`;
   }
 
-  // “روشن‌تر کردن” رنگ خود مهره (برای حلقه به جای سفید کم‌رنگ)
-  function brightenHex(hex, amount=0.35){
+  // پررنگ‌تر کردن رنگ مهره برای همه
+  function boostColor(hex, boost=1.20){
     const {r,g,b} = hexToRgb(getBaseHex(hex));
-    const nr = Math.min(255, Math.round(r + (255 - r)*amount));
-    const ng = Math.min(255, Math.round(g + (255 - g)*amount));
-    const nb = Math.min(255, Math.round(b + (255 - b)*amount));
-    return `rgb(${nr},${ng},${nb})`;
+    const nr = Math.min(255, Math.round(r + (255 - r) * boost));
+    const ng = Math.min(255, Math.round(g + (255 - g) * boost));
+    const nb = Math.min(255, Math.round(b + (255 - b) * boost));
+    return {r: nr, g: ng, b: nb};
   }
 
   function metalGrad(x, y, r, baseHex){
-    const {r:br,g:bg,b:bb} = hexToRgb(getBaseHex(baseHex));
+    const c = boostColor(baseHex, 1.25);
+    const {r:br,g:bg,b:bb} = c;
 
     const g = ctx.createRadialGradient(
-      x - r*0.35, y - r*0.35, r*0.08,
+      x - r*0.35, y - r*0.35, r*0.05,
       x, y, r
     );
 
-    g.addColorStop(0.00, `rgba(255,255,255,0.95)`);
-    g.addColorStop(0.10, `rgba(${br},${bg},${bb},0.98)`);
-    g.addColorStop(0.55, `rgba(${br},${bg},${bb},0.95)`);
-    g.addColorStop(0.88, `rgba(0,0,0,0.35)`);
-    g.addColorStop(1.00, `rgba(0,0,0,0.55)`);
+    // هایلایت قوی‌تر
+    g.addColorStop(0.00, `rgba(255,255,255,0.98)`);
+    g.addColorStop(0.12, `rgba(${br},${bg},${bb},0.98)`);
+    g.addColorStop(0.55, `rgba(${br},${bg},${bb},0.98)`);
+    // سایه وسط/لبه قوی‌تر (کنتراست بیشتر)
+    g.addColorStop(0.84, `rgba(0,0,0,0.42)`);
+    g.addColorStop(1.00, `rgba(0,0,0,0.60)`);
 
     return g;
   }
@@ -712,72 +712,67 @@ function drawPieces(){
     ctx.save();
     ctx.beginPath();
     ctx.ellipse(x + 1.5, y + 4, CELL*0.17, CELL*0.11, 0, 0, Math.PI*2);
-    ctx.fillStyle = "rgba(0,0,0,0.38)";
+    ctx.fillStyle = isTurnPiece ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.38)";
     ctx.fill();
     ctx.restore();
 
-    // بدنه سه‌بعدی
+    // بدنه
     ctx.save();
     ctx.beginPath();
-    ctx.arc(x, y, safeR, 0, Math.PI * 2);
+    ctx.arc(x, y, safeR, 0, Math.PI*2);
     ctx.closePath();
 
     ctx.fillStyle = metalGrad(x, y, safeR, baseHex);
     ctx.fill();
 
-    // لبه فلزی
+    // لبه بدنه (همه پررنگ، نوبت هم فقط outline جدا می‌گیرد)
     ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgba(255,255,255,0.10)";
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
     ctx.stroke();
 
     ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.strokeStyle = "rgba(0,0,0,0.40)";
     ctx.stroke();
 
-    // هایلایت
+    // هایلایت داخلی قوی (همه)
     ctx.beginPath();
-    ctx.ellipse(x - safeR*0.18, y - safeR*0.18, safeR*0.60, safeR*0.26, -0.7, 0, Math.PI*2);
-    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.ellipse(x - safeR*0.18, y - safeR*0.20, safeR*0.60, safeR*0.28, -0.7, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(255,255,255,0.28)";
     ctx.fill();
 
+    // سایه وسط مهره (همه)
     ctx.beginPath();
-    ctx.arc(x - safeR*0.25, y - safeR*0.35, safeR*0.14, 0, Math.PI*2);
-    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    ctx.ellipse(x, y, safeR*0.65, safeR*0.58, 0, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
     ctx.fill();
 
-    // ✅ نوبت‌دار خیلی پررنگ‌تر
-    if (isTurnPiece) {
-      const bright = brightenHex(baseHex, 0.45); // رنگ همون مهره ولی روشن
+    // ✅ فقط فرق نوبت: دور مهره سفید/مشکی سایه‌دار (برای مشخص کردن نوبت)
+    if (isTurnPiece){
+      // سایه بیرونی تیره برای برجسته شدن دور حلقه
+      ctx.shadowColor = "rgba(0,0,0,0.70)";
+      ctx.shadowBlur = 14;
 
-      // Glow رنگی بزرگ
-      ctx.shadowColor = rgbaFromHex(baseHex, 0.95);
-      ctx.shadowBlur = 34;
-
-      // حلقه بیرونی خیلی ضخیم
+      // حلقه سفید
       ctx.beginPath();
-      ctx.arc(x, y, safeR * 1.22, 0, Math.PI * 2);
-      ctx.lineWidth = Math.max(6, safeR * 0.10); // ضخیم
-      ctx.strokeStyle = bright;
+      ctx.arc(x, y, safeR*1.22, 0, Math.PI*2);
+      ctx.lineWidth = Math.max(8, safeR*0.16);
+      ctx.strokeStyle = "rgba(255,255,255,0.92)";
       ctx.stroke();
 
-      // حلقه دوم برای “کنتراست”
+      // حلقه دوم مشکی برای کنتراست (نشانه‌گذاری واضح‌تر)
       ctx.shadowBlur = 0;
       ctx.beginPath();
-      ctx.arc(x, y, safeR * 1.14, 0, Math.PI * 2);
-      ctx.lineWidth = Math.max(3, safeR * 0.06);
-      ctx.strokeStyle = "rgba(255,255,255,0.70)"; // فقط برای لبه‌ی بیرونی، نه رقیق
+      ctx.arc(x, y, safeR*1.16, 0, Math.PI*2);
+      ctx.lineWidth = Math.max(5, safeR*0.10);
+      ctx.strokeStyle = "rgba(0,0,0,0.55)";
       ctx.stroke();
 
-      // سایه تیره زیر حلقه جهت برجسته شدن
-      ctx.shadowColor = "rgba(0,0,0,0.65)";
-      ctx.shadowBlur = 10;
+      // حلقه ریز سفید داخلِ مشکی (خوانایی خیلی بالا)
       ctx.beginPath();
-      ctx.arc(x, y, safeR * 1.10, 0, Math.PI * 2);
-      ctx.lineWidth = Math.max(2, safeR * 0.04);
-      ctx.strokeStyle = "rgba(0,0,0,0.25)";
+      ctx.arc(x, y, safeR*1.08, 0, Math.PI*2);
+      ctx.lineWidth = Math.max(3, safeR*0.06);
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
       ctx.stroke();
-
-      ctx.shadowBlur = 0;
     }
 
     ctx.restore();
