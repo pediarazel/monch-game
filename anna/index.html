@@ -642,20 +642,16 @@
     }
   }
 
-
-
 function drawPieces() {
   if (!gameState || !Array.isArray(gameState.pieces) || !ctx) return;
 
-  const turnColor = gameState.currentTurnColor ?? gameState.turnColor;
   const winner = gameState.winner;
+  const turnColor = gameState.currentTurnColor ?? gameState.turnColor;
 
   const rTurn = CELL * 0.32;
   const maxRAllowed = CELL * 0.50 - 2;
-  const scaleOther = 1.08;
-  const rOther = Math.min(rTurn * scaleOther, maxRAllowed);
+  const rOther = Math.min(rTurn * 1.08, maxRAllowed);
 
-  // اگر رنگ‌ها آبجکتی مثل "#ff00aa" یا کلمات (مثل "red") هستند
   function hexToRgb(hex) {
     const h = String(hex).replace("#", "");
     const rr = parseInt(h.slice(0, 2), 16);
@@ -663,32 +659,29 @@ function drawPieces() {
     const bb = parseInt(h.slice(4, 6), 16);
     return { r: rr, g: gg, b: bb };
   }
-  function getBaseColor(pieceColor) {
-    // اگر COLORS داری و piece.color کلید COLORS است:
-    // return COLORS[pieceColor] ?? pieceColor;
-    return (typeof COLORS !== "undefined" && COLORS && COLORS[pieceColor])
-      ? COLORS[pieceColor]
-      : pieceColor; // فرض: مستقیم hex است
+
+  function getBaseHex(colorVal) {
+    // اگر رنگ‌ها کلید داخل COLORS هستند:
+    if (typeof COLORS !== "undefined" && COLORS && COLORS[colorVal]) return COLORS[colorVal];
+    return colorVal; // فرض: hex
   }
 
-  function drawSphere(x, y, r, baseHex) {
-    const { r: br, g: bg, b: bb } = hexToRgb(getBaseColor(baseHex));
-
+  function drawSphereFill(x, y, r, baseHex) {
+    const { r: br, g: bg, b: bb } = hexToRgb(getBaseHex(baseHex));
     ctx.save();
 
-    // 1) گرادیان کروی (حس گوی)
-    // مرکز روشن را کمی چپ/بالا می‌بریم
+    // بدنه گوی: کره‌ای و نورخورده (نه الماسی، نه خطی)
     const grad = ctx.createRadialGradient(
       x - r * 0.35, y - r * 0.35, r * 0.05,
       x, y, r * 1.05
     );
 
-    // بیرون (لبه‌ها تیره‌تر)
-    grad.addColorStop(0.00, `rgba(255,255,255,0.95)`);
+    // روشنایی بالا-چپ
+    grad.addColorStop(0.00, "rgba(255,255,255,0.98)");
     grad.addColorStop(0.10, `rgba(${br},${bg},${bb},0.95)`);
-    grad.addColorStop(0.45, `rgba(${br},${bg},${bb},0.75)`);
-    grad.addColorStop(0.78, `rgba(${Math.round(br*0.55)},${Math.round(bg*0.55)},${Math.round(bb*0.55)},0.95)`);
-    grad.addColorStop(1.00, `rgba(0,0,0,0.35)`);
+    grad.addColorStop(0.55, `rgba(${br},${bg},${bb},0.75)`);
+    grad.addColorStop(0.80, `rgba(${Math.round(br*0.45)},${Math.round(bg*0.45)},${Math.round(bb*0.45)},0.75)`);
+    grad.addColorStop(1.00, "rgba(0,0,0,0.35)");
 
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -696,23 +689,22 @@ function drawPieces() {
     ctx.fillStyle = grad;
     ctx.fill();
 
-    // 2) هایلایت بیضی نرم (نور روی گوی)
+    // هایلایت بیضی نرم (روی گوی)
     ctx.globalCompositeOperation = "screen";
     const hl = ctx.createRadialGradient(
-      x - r * 0.38, y - r * 0.42, r * 0.05,
-      x - r * 0.34, y - r * 0.40, r * 0.55
+      x - r * 0.35, y - r * 0.42, r * 0.03,
+      x - r * 0.25, y - r * 0.35, r * 0.85
     );
     hl.addColorStop(0, "rgba(255,255,255,0.95)");
-    hl.addColorStop(0.25, `rgba(${br},${bg},${bb},0.30)`);
+    hl.addColorStop(0.25, `rgba(${br},${bg},${bb},0.25)`);
     hl.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = hl;
 
     ctx.beginPath();
     ctx.arc(x - r * 0.15, y - r * 0.18, r * 0.55, 0, Math.PI * 2);
-    ctx.closePath();
     ctx.fill();
 
-    // 3) کنتراست لبه (برای گرد بودن)
+    // لبه برای مشخص شدن فرم گوی
     ctx.globalCompositeOperation = "source-over";
     ctx.strokeStyle = "rgba(0,0,0,0.25)";
     ctx.lineWidth = Math.max(1.2, r * 0.06);
@@ -720,8 +712,8 @@ function drawPieces() {
     ctx.arc(x, y, r * 0.98, 0, Math.PI * 2);
     ctx.stroke();
 
-    // 4) سایه/حجم خیلی کم داخل
-    ctx.fillStyle = "rgba(0,0,0,0.10)";
+    // سایه خیلی کم برای عمق
+    ctx.fillStyle = "rgba(0,0,0,0.08)";
     ctx.beginPath();
     ctx.ellipse(x + r * 0.10, y + r * 0.20, r * 0.75, r * 0.65, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -729,15 +721,15 @@ function drawPieces() {
     ctx.restore();
   }
 
-  function drawTurnOuterRing(x, y, r) {
-    // فقط دور بیرونی برای مشخص شدن نوبت
+  function drawTurnRing(x, y, r, turnHex) {
+    const { r: tr, g: tg, b: tb } = hexToRgb(getBaseHex(turnHex));
+
     const ringOuter = r * 1.28;
-    const ringMid = r * 1.16;
-    const ringInner = r * 1.10;
+    const ringMid   = r * 1.16;
 
     ctx.save();
 
-    // glow سفید بیرونی
+    // دور سفید برای دیده شدن روی هر زمینه
     ctx.shadowColor = "rgba(255,255,255,0.95)";
     ctx.shadowBlur = Math.max(12, r * 0.45);
     ctx.strokeStyle = "rgba(255,255,255,0.95)";
@@ -746,19 +738,19 @@ function drawPieces() {
     ctx.arc(x, y, ringOuter, 0, Math.PI * 2);
     ctx.stroke();
 
-    // حلقه مشکی نزدیک
+    // حلقه رنگی نوبت (همون رنگ بازیکن)
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = "rgba(0,0,0,0.70)";
+    ctx.strokeStyle = `rgba(${tr},${tg},${tb},0.95)`;
     ctx.lineWidth = Math.max(4, r * 0.10);
     ctx.beginPath();
     ctx.arc(x, y, ringMid, 0, Math.PI * 2);
     ctx.stroke();
 
-    // خط سفید نازک داخل برای شارپ بودن
-    ctx.strokeStyle = "rgba(255,255,255,0.72)";
-    ctx.lineWidth = Math.max(2, r * 0.05);
+    // خط مشکی خیلی کم برای شارپ بودن
+    ctx.strokeStyle = "rgba(0,0,0,0.55)";
+    ctx.lineWidth = Math.max(2, r * 0.06);
     ctx.beginPath();
-    ctx.arc(x, y, (ringInner + ringMid) * 0.5, 0, Math.PI * 2);
+    ctx.arc(x, y, (ringMid + ringOuter) * 0.5, 0, Math.PI * 2);
     ctx.stroke();
 
     ctx.restore();
@@ -768,30 +760,20 @@ function drawPieces() {
     const pos = getPieceDrawPos(piece);
     if (!pos) continue;
 
-    const x = pos.x;
-    const y = pos.y;
+    const x = pos.x, y = pos.y;
 
     const isTurnPiece = (!winner && piece.color === turnColor);
-    const safeR = Math.min(isTurnPiece ? rTurn : rOther, maxRAllowed);
+    const r = isTurnPiece ? rTurn : rOther;
 
-    // سایه زیر مهره
-    ctx.save();
-    ctx.beginPath();
-    ctx.ellipse(x + 1.5, y + 4, CELL * 0.17, CELL * 0.11, 0, 0, Math.PI * 2);
-    ctx.fillStyle = isTurnPiece ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.38)";
-    ctx.fill();
-    ctx.restore();
+    // گوی داخل مهره (برای همه یکسان)
+    drawSphereFill(x, y, r, piece.color);
 
-    // گوی
-    drawSphere(x, y, safeR, piece.color);
-
-    // نوبت فقط حلقه بیرونی
+    // فقط دور بیرونی برای مشخص شدن نوبت
     if (isTurnPiece) {
-      drawTurnOuterRing(x, y, safeR);
+      drawTurnRing(x, y, r, turnColor);
     }
   }
 }
-
   function draw(){
     ctx.clearRect(0,0,SIZE,SIZE);
     ctx.fillStyle = COLORS.board;
