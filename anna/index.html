@@ -848,6 +848,7 @@ setMsg("بازی به پایان رسید." + reason);
 const canRoll = (myColor === turnColor) && !gameState.rolled && !gameState.winner;
     rollBtn.disabled = !canRoll;
     const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
+  // اگر myColor null شد، با صبر تا state جدید رنگت ست شود
     if (gameState.rolled && pendingDice.length > 0) {
         dice1El.textContent = (pendingDice[0] ?? "🎲");
         dice2El.textContent = (pendingDice[1] ?? "—");
