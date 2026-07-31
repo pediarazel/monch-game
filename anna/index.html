@@ -475,6 +475,7 @@
 
   let socket = null;
   let myColor = null;
+  let myUserId = null;
   let gameState = null;
   let currentMatchId = null;
 let joinedTier = (() => {
@@ -1198,14 +1199,18 @@ if (joinedTier) {
     socket.on("game:state", state => {
       gameState = state;
 
-      const payload = getTokenPayload();
-      const myUserId = getMyUserIdFromPayload(payload);
+// یک بار از توکن userId را بگیر و نگه دار
+if (myUserId == null) {
+  const payload = getTokenPayload();
+  myUserId = getMyUserIdFromPayload(payload);
+}
 
-      if (state?.playerColors && myUserId != null) {
-        myColor = colorOrder.find(color => String(state.playerColors[color]) === String(myUserId)) || null;
-      } else {
-        myColor = null;
-      }
+if (state?.playerColors && myUserId != null) {
+  const found =
+    colorOrder.find(color => String(state.playerColors[color]) === String(myUserId)) || null;
+  myColor = found;
+}
+// اگر state یا playerColors نیامده بود، myColor را دست نزن (null نکن!)
 
       if (state?.matchId) currentMatchId = String(state.matchId);
 
