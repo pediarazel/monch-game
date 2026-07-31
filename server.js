@@ -864,7 +864,12 @@ function createMatchFromLobby(lobby) {
     players: new Map(),
     playerColors: { ...lobby.playerColors },
 
-    playersStatus: { red: "active", green: "active", yellow: "active", blue: "active" },
+playersStatus: {
+  red: lobby.playerColors.red ? "active" : "inactive",
+  green: lobby.playerColors.green ? "active" : "inactive",
+  yellow: lobby.playerColors.yellow ? "active" : "inactive",
+  blue: lobby.playerColors.blue ? "active" : "inactive",
+},
     playerForfeitReasons: { red: null, green: null, yellow: null, blue: null },
 playerDisconnectedAt: { red: null, green: null, yellow: null, blue: null },
     game: null,
