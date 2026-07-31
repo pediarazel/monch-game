@@ -1226,11 +1226,11 @@ if (myUserId == null) {
 }
 
 if (state?.playerColors && myUserId != null) {
-  const found =
+  myColor =
     colorOrder.find(color => String(state.playerColors[color]) === String(myUserId)) || null;
-  myColor = found;
+} else {
+  myColor = null;
 }
-// اگر state یا playerColors نیامده بود، myColor را دست نزن (null نکن!)
 
       if (state?.matchId) currentMatchId = String(state.matchId);
 
