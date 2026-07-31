@@ -547,29 +547,37 @@ let joinedTier = (() => {
     lobbyCountdownInterval = setInterval(render, 500);
   }
 
-  function startTurnTimer() {
-    stopTurnTimer();
-    if (!gameState || !gameState.turnDeadlineAt || gameState.winner) return;
+function startTurnTimer() {
+  stopTurnTimer();
 
-    const renderCountdown = () => {
-      if (!gameState || !gameState.turnDeadlineAt || gameState.winner) {
-        stopTurnTimer();
-        return;
-      }
-      const secs = formatRemainingMs(gameState.turnDeadlineAt);
-      const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-      const myColorText = myColor ? colorLabel[myColor] : "تماشاچی";
-      const turnColorText = turnColor ? colorLabel[turnColor] : "نامشخص";
+  if (!gameState || gameState.winner) return;
 
-      turnInfo.innerHTML =
-        `نوبت: <span class="tag ${turnColor}">${turnColorText}</span> | ` +
-        `رنگ شما: <span class="tag ${myColor || "muted"}">${myColorText}</span> | ` +
-        `زمان باقی‌مانده: <b style="color:#ef4444; font-size:16px;">${secs !== null ? secs : "-"}</b> ثانیه`;
-    };
+  const renderCountdown = () => {
+    if (!gameState || gameState.winner) {
+      stopTurnTimer();
+      return;
+    }
 
-    renderCountdown();
-    turnTimerInterval = setInterval(renderCountdown, 500);
-  }
+    const secs = formatRemainingMs(gameState.turnDeadlineAt);
+    const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+    const myColorText = myColor ? colorLabel[myColor] : "تماشاچی";
+    const turnColorText = turnColor ? colorLabel[turnColor] : "نامشخص";
+
+    turnInfo.innerHTML =
+      `نوبت: <span class="tag ${turnColor}">${turnColorText}</span> | ` +
+      `رنگ شما: <span class="tag ${myColor || "muted"}">${myColorText}</span> | ` +
+      `زمان باقی‌مانده: <b style="color:#ef4444; font-size:16px;">${secs !== null ? secs : "-"}</b> ثانیه`;
+  };
+
+  // اول همیشه وضعیت نوبت را فوراً آپدیت کن
+  renderCountdown();
+
+  // اگر turnDeadlineAt نداریم، فقط همین یک‌بار رندر می‌کنیم
+  if (!gameState.turnDeadlineAt) return;
+
+  // اگر داشت، تایمر را هم روشن کن
+  turnTimerInterval = setInterval(renderCountdown, 500);
+}
 
   // انتخاب تاس
   let pickedDieValue = null;
