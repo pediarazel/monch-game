@@ -37,6 +37,7 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 
 const TURN_MS = 30000;
+const DISCONNECT_GRACE_MS = 120000; // 2 دقیقه
 
 // --------- تایمرهای match
 const matchTimers = new Map(); // matchId -> { timeout }
@@ -465,6 +466,7 @@ function cloneGameForClient(game) {
     pendingDice: Array.isArray(game.pendingDice) ? game.pendingDice.slice() : [],
     rolled: game.rolled,
     winner: game.winner,
+    winnerReason: game.winnerReason || null,
     turnDeadlineAt: game.turnDeadlineAt,
     turnMoved: game.turnMoved,
     pieces: game.pieces.map((p) => ({ ...p })),
@@ -625,6 +627,25 @@ function checkWinner(game) {
     if (homePieces.length === 4 && occupiedHomeIndexes.size === 4) return color;
   }
   return null;
+}
+function getActiveColors(match) {
+  return colorOrder.filter((c) => match.playersStatus?.[c] === "active");
+}
+
+function checkAndResolveWinnerByForfeit(match, reasonText) {
+  if (!match?.game) return false;
+  if (match.game.winner) return true;
+
+  const activeColors = getActiveColors(match);
+  if (activeColors.length !== 1) return false;
+
+  const winnerColor = activeColors[0];
+  match.game.winner = winnerColor;
+  match.game.winnerReason = reasonText || "forfeit";
+
+  broadcastState(match);
+  settleCoinsForMatch(match).catch((e) => console.error("settle error:", e));
+  return true;
 }
 
 /*
@@ -842,6 +863,10 @@ function createMatchFromLobby(lobby) {
     status: "waiting",
     players: new Map(),
     playerColors: { ...lobby.playerColors },
+
+    playersStatus: { red: "active", green: "active", yellow: "active", blue: "active" },
+    playerForfeitReasons: { red: null, green: null, yellow: null, blue: null },
+playerDisconnectedAt: { red: null, green: null, yellow: null, blue: null },
     game: null,
     turnDeadlineAt: 0,
     turnId: 0,
@@ -873,6 +898,7 @@ function resetMatchGame(match) {
     turnMoved: false,
     turnDeadlineAt: null,
     playerColors: { ...match.playerColors },
+    transitioning: false,
   };
 
   match.turnDeadlineAt = null;
@@ -910,13 +936,36 @@ function startTurnTimeout(match) {
 
   broadcastState(match);
 
-  match.pendingTurnTimer = setTimeout(() => {
-    const m = matches.get(match.matchId);
-    if (!m) return;
-    if (m.turnId !== myTurnId) return;
-    if (!m.game || m.game.winner) return;
-    nextTurn(m);
-  }, TURN_MS);
+match.pendingTurnTimer = setTimeout(() => {
+  const m = matches.get(match.matchId);
+  if (!m) return;
+  if (m.turnId !== myTurnId) return;
+  if (!m.game || m.game.winner) return;
+
+  const timeoutColor = colorOrder[m.game.currentTurn]; // رنگی که نوبتش بود
+
+  // اگر آن رنگ disconnected بود => forfeit و winner
+if (m.playersStatus?.[timeoutColor] === "disconnected") {
+  const disconnectedAt = m.playerDisconnectedAt?.[timeoutColor];
+
+  // اگر زمان disconnect ثبت نشده بود، مثل حالت فورفیت/یا فورس skip تصمیم بگیر
+  const elapsed = disconnectedAt ? (Date.now() - disconnectedAt) : Infinity;
+
+  if (elapsed >= DISCONNECT_GRACE_MS) {
+    m.playersStatus[timeoutColor] = "forfeit";
+    checkAndResolveWinnerByForfeit(
+      m,
+      `به دلیل عدم اتصال به مدت ۲ دقیقه (${timeoutColor})`
+    );
+    if (m.game.winner) return; // winner resolve شد، nextTurn نزن
+  } else {
+    // هنوز grace نگذشته => فقط نوبت رد بشه
+    // status forfeit نمی‌کنیم، فقط nextTurn
+  }
+}
+
+nextTurn(m);
+}, TURN_MS);
 }
 
 function nextTurn(match) {
@@ -926,7 +975,10 @@ function nextTurn(match) {
   do {
     match.game.currentTurn = (match.game.currentTurn + 1) % colorOrder.length;
     attempts++;
-  } while (attempts < colorOrder.length && match.playerColors[colorOrder[match.game.currentTurn]] == null);
+} while (
+  attempts < colorOrder.length &&
+  match.playersStatus?.[colorOrder[match.game.currentTurn]] !== "active"
+);
 
   match.game.dice = 0;
   match.game.dice1 = 0;
@@ -1229,7 +1281,7 @@ io.on("connection", (socket) => {
       assertValidTier(tier);
 
       const lobby = getTierLobby(tier);
-
+const match = matches.get(lobby.matchId);
       if (!lobby.playerUidsInOrder.includes(uid)) {
         if (lobby.status !== "lobby") {
           return callback?.({
@@ -1241,7 +1293,19 @@ io.on("connection", (socket) => {
       }
 
       await socket.join(`match:${lobby.matchId}`);
+if (match && match.status === "playing") {
+  let myColor = null;
+  for (const c of colorOrder) {
+    if (match.playerColors[c] === uid) { myColor = c; break; }
+  }
 
+  if (myColor) {
+    match.playersStatus[myColor] = "active";
+    match.playerDisconnectedAt[myColor] = null;
+    match.playerForfeitReasons[myColor] = null;
+    broadcastState(match);
+  }
+}
       const filled = lobby.playerUidsInOrder.length;
       lobby.lobbyPhase = getLobbyPhaseFromCount(filled);
 
@@ -1303,43 +1367,98 @@ io.on("connection", (socket) => {
       return callback?.({ success: false, message: e?.message || "خطای join" });
     }
   });
+socket.on("match:leave", (payload, callback) => {
+  try {
+    const matchId = String(payload?.matchId ?? "");
+    const m = matches.get(matchId);
+    if (!m || !m.game) return callback?.({ success: false, message: "match پیدا نشد." });
 
-  socket.on("disconnect", () => {
-    try {
-      for (const [tier, lobby] of tierLobbies.entries()) {
-        if (!lobby) continue;
+    const userId = Number(socket.user?.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return callback?.({ success: false, message: "userId نامعتبر است." });
+    }
 
-        const idx = lobby.playerUidsInOrder.indexOf(uid);
-        if (idx !== -1 && lobby.status === "lobby") {
-          lobby.playerUidsInOrder.splice(idx, 1);
+    // پیدا کردن رنگ بازیکن
+    let leftColor = null;
+    for (const color of colorOrder) {
+      if (m.playerColors[color] === userId) { leftColor = color; break; }
+    }
+    if (!leftColor) return callback?.({ success: false, message: "شما در این match نیستید." });
 
-          stopLobbyTimer(lobby);
+    if (m.game.winner) return callback?.({ success: false, message: "بازی تمام شده است." });
 
-          if (lobby.playerUidsInOrder.length < 2) {
-            lobby.lobbyPhase = 1;
-            emitLobbyStatus(lobby, {
-              phase: 1,
-              searchingFor: 3,
-              deadlineAt: null,
-              deadlineMs: null,
-              message: "منتظر نفر دوم...",
-              status: "WAIT_2",
-            });
-          } else if (lobby.playerUidsInOrder.length === 2) {
-            onLobbyPlayerJoined(tier).catch(() => {});
-          } else if (lobby.playerUidsInOrder.length === 3) {
-            onLobbyPlayerJoined(tier).catch(() => {});
-          }
+// همیشه اگر بازی شروع شده و winner تعیین نشده، ترک را فورفیت حساب کن
+if (!m.game?.winner) {
+  m.playersStatus[leftColor] = "forfeit";
+  m.playerForfeitReasons[leftColor] = "player_left";
+  m.playerDisconnectedAt[leftColor] = Date.now(); // اختیاری ولی مفید
+
+  checkAndResolveWinnerByForfeit(
+    m,
+    `به دلیل خروج شما (${leftColor})`
+  );
+  broadcastState(m);
+}
+
+    callback?.({ success: true });
+  } catch (e) {
+    callback?.({ success: false, message: e?.message || "leave error" });
+  }
+});
+socket.on("disconnect", () => {
+  try {
+    for (const [tier, lobby] of tierLobbies.entries()) {
+      if (!lobby) continue;
+
+      const idx = lobby.playerUidsInOrder.indexOf(uid);
+      if (idx === -1) continue;
+      if (lobby.status !== "lobby") continue;
+
+      lobby.playerUidsInOrder.splice(idx, 1);
+
+      stopLobbyTimer(lobby);
+
+      if (lobby.playerUidsInOrder.length < 2) {
+        lobby.lobbyPhase = 1;
+        emitLobbyStatus(lobby, {
+          phase: 1,
+          searchingFor: 3,
+          deadlineAt: null,
+          deadlineMs: null,
+          message: "منتظر نفر دوم...",
+          status: "WAIT_2",
+        });
+      } else if (lobby.playerUidsInOrder.length === 2) {
+        onLobbyPlayerJoined(tier).catch((e) =>
+          console.error("onLobbyPlayerJoined err:", e)
+        );
+      } else if (lobby.playerUidsInOrder.length === 3) {
+        onLobbyPlayerJoined(tier).catch((e) =>
+          console.error("onLobbyPlayerJoined err:", e)
+        );
+      }
+    }
+
+    if (connectedUsers.get(String(uid)) === socket.id) {
+      connectedUsers.delete(String(uid));
+    }
+
+    // ✅ mark disconnect in playing matches (forfeit happens on turn timeout)
+    for (const m of matches.values()) {
+      if (!m || m.status !== "playing" || !m.game) continue;
+
+      for (const color of colorOrder) {
+        if (m.playerColors[color] === uid && m.playersStatus?.[color] === "active") {
+          m.playersStatus[color] = "disconnected";
+          m.playerDisconnectedAt[color] = Date.now();
+          broadcastState(m);
         }
       }
-
-      if (connectedUsers.get(String(uid)) === socket.id) {
-        connectedUsers.delete(String(uid));
-      }
-    } catch (error) {
-      console.error("[DISCONNECT ERROR]", error);
     }
-  });
+  } catch (error) {
+    console.error("[DISCONNECT ERROR]", error);
+  }
+});
 
   // ---------------- Game: roll ----------------
   socket.on("game:roll", (payload, callback) => {
@@ -1349,6 +1468,10 @@ io.on("connection", (socket) => {
       if (!m || !m.game || !m.playerColors) {
         return callback?.({ success: false, message: "match پیدا نشد." });
       }
+if (m.game.transitioning) {
+  return callback?.({ success: false, message: "نوبت در حال پردازش است. لطفاً صبر کنید." });
+}
+m.game.transitioning = true;
 
       const userId = Number(socket.user?.userId);
       if (!Number.isInteger(userId) || userId <= 0) {
@@ -1358,20 +1481,24 @@ io.on("connection", (socket) => {
       const currentColor = colorOrder[m.game.currentTurn];
       const expectedUserId = m.playerColors[currentColor];
       if (expectedUserId == null || expectedUserId !== userId) {
+        m.game.transitioning = false;
         return callback?.({ success: false, message: "الان نوبت شما نیست." });
       }
 
-      if (m.game.winner) {
-        return callback?.({ success: false, message: "بازی تمام شده است." });
-      }
+if (m.game.winner) {
+  m.game.transitioning = false;
+  return callback?.({ success: false, message: "بازی تمام شده است." });
+}
 
-      if (!m.game.turnDeadlineAt || Date.now() > m.game.turnDeadlineAt) {
-        return callback?.({ success: false, message: "نوبت منقضی شده یا هنوز شروع نشده است." });
-      }
+if (!m.game.turnDeadlineAt || Date.now() > m.game.turnDeadlineAt) {
+  m.game.transitioning = false;
+  return callback?.({ success: false, message: "نوبت منقضی شده یا هنوز شروع نشده است." });
+}
 
-      if (m.game.rolled) {
-        return callback?.({ success: false, message: "قبلاً تاس ریختی." });
-      }
+if (m.game.rolled) {
+  m.game.transitioning = false;
+  return callback?.({ success: false, message: "قبلاً تاس ریختی." });
+}
 
       const d1 = getNextDiceValueFromMatch();
       const d2 = getNextDiceValueFromMatch();
@@ -1397,7 +1524,7 @@ io.on("connection", (socket) => {
         m.turnDeadlineAt = m.game.turnDeadlineAt;
 
         broadcastState(m);
-
+m.game.transitioning = false;
         return callback?.({
           success: true,
           dice1: 6,
@@ -1463,9 +1590,10 @@ io.on("connection", (socket) => {
         pendingDice: m.game.pendingDice.slice(),
         winnerColor: null,
       });
-    } catch (e) {
-      return callback?.({ success: false, message: e?.message || "roll error" });
-    }
+} catch (e) {
+  if (m?.game) m.game.transitioning = false;
+  return callback?.({ success: false, message: e?.message || "roll error" });
+}
   });
 
   // ---------------- Game: move ----------------

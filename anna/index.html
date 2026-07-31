@@ -477,7 +477,10 @@
   let myColor = null;
   let gameState = null;
   let currentMatchId = null;
-
+let joinedTier = (() => {
+  const t = Number(localStorage.getItem("joinedTier"));
+  return Number.isFinite(t) ? t : null;
+})();
   let turnTimerInterval = null;
   let lobbyCountdownInterval = null;
 
@@ -833,7 +836,8 @@ if (gameState.winner) {
   joinBtn.disabled = false; // ✅ فعال شدن دکمه ورود به اتاق جدید
   rollBtn.disabled = true;
   turnInfo.innerHTML = `برنده: <span class="tag ${gameState.winner}">${colorLabel[gameState.winner]}</span> 🎉`;
-  setMsg("بازی به پایان رسید.");
+const reason = gameState.winnerReason ? ` | دلیل: ${gameState.winnerReason}` : "";
+setMsg("بازی به پایان رسید." + reason);
   dice1El.textContent = "🎉";
   dice2El.textContent = "🎉";
   pickedDieValue = null;
@@ -1142,6 +1146,12 @@ if (gameState.winner) {
       await updateBalance().catch(()=>{});
     });
 
+if (joinedTier) {
+    socket.emit("room:join", { tier: joinedTier }, (resp) => {
+      setDebug(prev => ({ ...(prev && typeof prev === "object" ? prev : {}), roomJoinOnConnect: resp || null }));
+    });
+  }
+    
     socket.on("connect_error", error => {
       const message = error && error.message ? error.message : String(error || "خطای نامشخص");
       socketStatusEl.textContent = "❌ خطای اتصال سوکت: " + message;
@@ -1211,9 +1221,17 @@ if (gameState.winner) {
       socketStatusEl.textContent = `در حال تلاش مجدد برای اتصال (${attemptNumber})...`;
     });
 
-    socket.io.on("reconnect", () => {
-      socketStatusEl.textContent = `✅ اتصال مجدد برقرار شد`;
+socket.io.on("reconnect", () => {
+  socketStatusEl.textContent = `✅ اتصال مجدد برقرار شد`;
+
+  // اگر قبلاً join کرده‌ایم، دوباره درخواست join ارسال کن تا سرور active کند
+  if (joinedTier && socket && socket.connected) {
+    setMsg("✅ Reconnect: دوباره room:join می‌زنیم تا active برگردی...");
+    socket.emit("room:join", { tier: joinedTier }, (resp) => {
+      setDebug(prev => ({ ...(prev && typeof prev === "object" ? prev : {}), roomJoinAfterReconnect: resp || null }));
     });
+  }
+});
 
     socket.io.on("reconnect_failed", () => {
       socketStatusEl.textContent = "❌ تلاش‌های اتصال مجدد ناموفق بود.";
@@ -1224,11 +1242,16 @@ if (gameState.winner) {
   }
 
   logoutBtn.addEventListener("click", ()=>{
+if (socket && socket.connected && currentMatchId) {
+  try { socket.emit("match:leave", { matchId: currentMatchId }); } catch {}
+}
+    joinedTier = null;
     stopBalanceAutoRefresh();
     stopTurnTimer();
     stopLobbyCountdown();
 
     clearToken();
+    localStorage.removeItem("joinedTier");
     balanceValueEl.textContent = "0";
     setAuthResult("خروج شد. دوباره ورود کن.");
     serverMsgEl.textContent = "";
@@ -1307,7 +1330,8 @@ if (gameState.winner) {
     serverMsgEl.textContent = "در حال ورود به صف...";
 
     const joinPayload = { tier };
-
+joinedTier = tier;
+    localStorage.setItem("joinedTier", String(tier));
     s.emit("room:join", joinPayload, (resp)=>{
       console.log("ROOM JOIN RESP:", resp);
       setDebug(prev => ({ ...(prev && typeof prev === "object" ? prev : {}), roomJoinResponse: resp || null }));
