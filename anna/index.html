@@ -648,11 +648,18 @@ function drawPieces(){
   const turnColor = (gameState.currentTurnColor ?? colorOrder?.[gameState.currentTurn]);
   const winner = gameState.winner;
 
-  // ✅ اندازه‌ها بزرگ‌تر (۲ شماره بیشتر)
-  const r = CELL * 0.36;       // قبلاً 0.32
-  const ringR = CELL * 0.43;   // قبلاً 0.39
+  // اندازه پایه: برای مهره‌های نوبت‌دار (همان که گفتی خوبه)
+  const rTurn = CELL * 0.32;        // ✅ اندازه نوبتی: دست نزن (همون قبل)
+  const ringRTurn = CELL * 0.39;   // (اگر در کد جای دیگری استفاده می‌شود مهم است، اینجا برای کامل بودن می‌ماند)
+
   const maxRAllowed = CELL * 0.50 - 2;
-  const safeR = Math.min(r, maxRAllowed);
+
+  // برای بقیه مهره‌ها کمی بزرگ‌تر
+  const scaleOther = 1.08; // ✅ مقدار دلخواه: 1.06 تا 1.12 تست کن
+  const rOther = Math.min(rTurn * scaleOther, maxRAllowed);
+
+  // اگر ringR هم استفاده شود (فعلاً در این تابع برای حلقه/رینگ خود مهره کاربرد مستقیم ندارد)
+  const ringROther = Math.min(ringRTurn * scaleOther, maxRAllowed);
 
   function getBaseHex(keyOrHex){
     return COLORS[keyOrHex] ?? keyOrHex;
@@ -675,7 +682,11 @@ function drawPieces(){
 
     const x = pos.x, y = pos.y;
     const baseHex = getBaseHex(piece.color);
+
     const isTurnPiece = (!winner && piece.color === turnColor);
+
+    // ✅ اندازه: نوبتی = ثابت، غیرنوبتی = کمی بزرگ‌تر
+    const safeR = Math.min(isTurnPiece ? rTurn : rOther, maxRAllowed);
 
     // سایه زیر مهره
     ctx.save();
@@ -685,7 +696,7 @@ function drawPieces(){
     ctx.fill();
     ctx.restore();
 
-    // بدنه مهره: رنگ پررنگ‌تر + لبه تیره‌تر
+    // بدنه مهره
     ctx.save();
     ctx.beginPath();
     ctx.arc(x, y, safeR, 0, Math.PI * 2);
@@ -694,35 +705,33 @@ function drawPieces(){
       x - safeR*0.25, y - safeR*0.25, safeR*0.06,
       x, y, safeR
     );
-    grad.addColorStop(0.00, rgbaFromHex(baseHex, 1.00)); // مرکز واضح
-    grad.addColorStop(0.60, rgbaFromHex(baseHex, 0.98)); // بدنه اصلی
-    grad.addColorStop(1.00, "rgba(0,0,0,0.42)");        // لبه تیره
+    grad.addColorStop(0.00, rgbaFromHex(baseHex, 1.00));
+    grad.addColorStop(0.60, rgbaFromHex(baseHex, 0.98));
+    grad.addColorStop(1.00, "rgba(0,0,0,0.42)");
     ctx.fillStyle = grad;
     ctx.fill();
 
-    // Outline خیلی نازک (کم‌رنگ) برای شارپ شدن
+    // Outline کم‌رنگ (همه مهره‌ها یکسان)
     ctx.lineWidth = 2;
     ctx.strokeStyle = "rgba(255,255,255,0.10)";
     ctx.stroke();
 
-    // هایلایت کم (برای اینکه عجیب نشه)
+    // هایلایت کم (همه مهره‌ها یکسان)
     ctx.beginPath();
     ctx.ellipse(x - safeR*0.22, y - safeR*0.22, safeR*0.52, safeR*0.28, -0.6, 0, Math.PI*2);
     ctx.fillStyle = "rgba(255,255,255,0.05)";
     ctx.fill();
 
-    // ✅ دور نوبت: سایه مشکی پررنگ ولی بدون خطی شدن (فقط shadow)
+    // ✅ فقط برای مهره‌های نوبتی: سایه مشکی دورش
     if (isTurnPiece) {
       ctx.shadowColor = "rgba(0,0,0,0.95)";
       ctx.shadowBlur = 26;
 
-      // لایه اول برای هاله پررنگ
       ctx.beginPath();
       ctx.arc(x, y, safeR * 1.04, 0, Math.PI * 2);
       ctx.fillStyle = "rgba(0,0,0,0.12)";
       ctx.fill();
 
-      // لایه دوم برای غلظت بیشتر و نرم‌تر شدن
       ctx.shadowBlur = 40;
       ctx.beginPath();
       ctx.arc(x, y, safeR * 1.10, 0, Math.PI * 2);
