@@ -648,9 +648,9 @@ function drawPieces(){
   const turnColor = (gameState.currentTurnColor ?? colorOrder?.[gameState.currentTurn]);
   const winner = gameState.winner;
 
-  // اندازه‌ها (پررنگ‌تر و داخل خانه)
-  const r = CELL * 0.32;
-  const ringR = CELL * 0.39;
+  // ✅ اندازه‌ها بزرگ‌تر (۲ شماره بیشتر)
+  const r = CELL * 0.36;       // قبلاً 0.32
+  const ringR = CELL * 0.43;   // قبلاً 0.39
   const maxRAllowed = CELL * 0.50 - 2;
   const safeR = Math.min(r, maxRAllowed);
 
@@ -711,28 +711,23 @@ function drawPieces(){
     ctx.fillStyle = "rgba(255,255,255,0.05)";
     ctx.fill();
 
-    // ✅ دور نوبت: فقط سایه/هاله مشکی نرم (بدون خطی بودن)
+    // ✅ دور نوبت: سایه مشکی پررنگ ولی بدون خطی شدن (فقط shadow)
     if (isTurnPiece) {
-      ctx.save();
-
-      // هاله مشکی خیلی نرم با shadowBlur (بدون stroke)
       ctx.shadowColor = "rgba(0,0,0,0.95)";
-      ctx.shadowBlur = 18;
-
-      // یک لایه رنگی کوچک‌تر/بزرگ‌تر برای اینکه هاله دیده بشه
-      ctx.beginPath();
-      ctx.arc(x, y, safeR * 1.02, 0, Math.PI * 2);
-      ctx.fillStyle = rgbaFromHex(baseHex, 0.98);
-      ctx.fill();
-
-      // لایه تیره خیلی ملایم برای عمق
       ctx.shadowBlur = 26;
+
+      // لایه اول برای هاله پررنگ
       ctx.beginPath();
-      ctx.arc(x, y, safeR * 1.12, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(0,0,0,0.18)";
+      ctx.arc(x, y, safeR * 1.04, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0,0,0,0.12)";
       ctx.fill();
 
-      ctx.restore();
+      // لایه دوم برای غلظت بیشتر و نرم‌تر شدن
+      ctx.shadowBlur = 40;
+      ctx.beginPath();
+      ctx.arc(x, y, safeR * 1.10, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0,0,0,0.06)";
+      ctx.fill();
     }
 
     ctx.restore();
