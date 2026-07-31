@@ -845,7 +845,7 @@ setMsg("بازی به پایان رسید." + reason);
   return;
 }
     const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-    const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.rolled && !gameState.winner;
+const canRoll = (myColor === turnColor) && !gameState.rolled && !gameState.winner;
     rollBtn.disabled = !canRoll;
     const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
     if (gameState.rolled && pendingDice.length > 0) {
