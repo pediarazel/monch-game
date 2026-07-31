@@ -1570,6 +1570,7 @@ m.game.transitioning = false;
           if (!mm) return;
           if (mm.turnId !== myTurnId) return;
           nextTurn(mm);
+          broadcastState(mm);
         });
 
         return callback?.({
