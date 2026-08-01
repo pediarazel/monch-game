@@ -477,7 +477,8 @@
   let myColor = null;
   let gameState = null;
   let currentMatchId = null;
-
+let lastDice1 = 0;
+let lastDice2 = 0;
   let turnTimerInterval = null;
   let lobbyCountdownInterval = null;
 
@@ -843,17 +844,21 @@ if (gameState.winner) {
     const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
     const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.rolled && !gameState.winner;
     rollBtn.disabled = !canRoll;
-const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
+const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
 const d1 = Number(gameState.dice1 ?? 0);
 const d2 = Number(gameState.dice2 ?? 0);
 
-const showFromPending = gameState.rolled && pendingDice.length > 0;
-const showFromDice = !showFromPending && (d1 > 0 || d2 > 0);
+// اگر الان عدد جدید داشتیم، نگهش دار
+if (d1 > 0) lastDice1 = d1;
+if (d2 > 0) lastDice2 = d2;
 
-if (showFromPending || showFromDice) {
-  const show1 = showFromPending ? pendingDice[0] : d1;
-  const show2 = showFromPending ? pendingDice[1] : d2;
+// نمایش: اول pending، اگر خالی بود از آخرین تاس نگه‌داشته‌شده
+const show1 = pendingDice.length >= 1 ? pendingDice[0] : lastDice1;
+const show2 = pendingDice.length >= 2 ? pendingDice[1] : lastDice2;
 
+const shouldShowDice = (show1 > 0 || show2 > 0);
+
+if (shouldShowDice) {
   dice1El.textContent = (show1 > 0 ? String(show1) : "🎲");
   dice2El.textContent = (show2 > 0 ? String(show2) : "🎲");
 
@@ -877,6 +882,7 @@ if (showFromPending || showFromDice) {
   dice2El.textContent = "🎲";
   dice1El.style.pointerEvents = "none";
   dice2El.style.pointerEvents = "none";
+  dice1El.style.opacity = "0.5";
   dice2El.style.opacity = "0.5";
   pickedDieValue = null;
   clearDiePickUI();
@@ -1255,7 +1261,8 @@ if (showFromPending || showFromDice) {
     myColor = null;
     currentMatchId = null;
     pickedDieValue = null;
-
+lastDice1 = 0;
+lastDice2 = 0;
     stopLobbyCountdown();
     peopleNewsEl.textContent = "";
 
