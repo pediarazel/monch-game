@@ -1803,7 +1803,7 @@ socket.on("game:move", (payload, callback) => {
     }
   }
 });
-
+});
 
 // Start
 httpServer.listen(PORT, () => {
