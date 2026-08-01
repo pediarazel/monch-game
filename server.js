@@ -1536,7 +1536,10 @@ console.log("[NO_MOVES] callback return", {
       const matchId = String(payload?.matchId ?? "");
       const pieceId = String(payload?.pieceId ?? "");
       const dieValue = Number(payload?.dieValue);
-
+const dieIndex = Number(payload?.dieIndex);
+if (!Number.isInteger(dieIndex) || (dieIndex !== 0 && dieIndex !== 1)) {
+  return callback?.({ success: false, message: "dieIndex نامعتبر است." });
+}
       const m = matches.get(matchId);
       if (!m || !m.game) return callback?.({ success: false, message: "match پیدا نشد." });
 
@@ -1561,9 +1564,14 @@ console.log("[NO_MOVES] callback return", {
         return callback?.({ success: false, message: "dieValue نامعتبر است." });
       }
 
-      if (!m.game.pendingDice.includes(dieValue)) {
-        return callback?.({ success: false, message: "این تاس برای شما موجود نیست." });
-      }
+const pending = m.game.pendingDice;
+if (!Array.isArray(pending) || pending.length <= dieIndex) {
+  return callback?.({ success: false, message: "pendingDice نامعتبر است." });
+}
+const expectedDieValue = Number(pending[dieIndex]);
+if (expectedDieValue !== dieValue) {
+  return callback?.({ success: false, message: "dieValue با dieIndex هم‌خوانی ندارد." });
+}
 
       const piece = m.game.pieces.find((p) => p.id === pieceId);
       if (!piece) return callback?.({ success: false, message: "piece پیدا نشد." });
@@ -1574,9 +1582,20 @@ console.log("[NO_MOVES] callback return", {
 
       movePiece(m.game, piece, dieValue);
 
-      const idx = m.game.pendingDice.indexOf(dieValue);
-      if (idx !== -1) m.game.pendingDice.splice(idx, 1);
+// ✅ فقط تاس انتخاب‌شده (با index) مصرف شود
+if (Array.isArray(m.game.pendingDice)) {
+  if (m.game.pendingDice.length >= 2) {
+    m.game.pendingDice.splice(dieIndex, 1);
+  } else {
+    m.game.pendingDice = [];
+  }
+}
 
+// فقط همان dice مصرف‌شده صفر شود
+if (dieIndex === 0) m.game.dice1 = 0;
+if (dieIndex === 1) m.game.dice2 = 0;
+
+m.game.dice = (m.game.dice1 || 0) + (m.game.dice2 || 0);
       const winnerColor = checkWinner(m.game);
       m.game.winner = winnerColor || null;
 

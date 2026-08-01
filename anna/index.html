@@ -570,19 +570,22 @@ let lastDice2 = 0;
 
   // انتخاب تاس
   let pickedDieValue = null;
-
+let pickedDieIndex = null; // 0 برای تاس 1 ، 1 برای تاس 2
   function clearDiePickUI(){
     dice1El.classList.remove("selected");
     dice2El.classList.remove("selected");
   }
-  function syncDiePickUI(){
-    clearDiePickUI();
-    const d = pickedDieValue;
-    if (!gameState || !gameState.pendingDice || d == null) return;
+function syncDiePickUI(){
+  clearDiePickUI();
 
-    if (gameState.pendingDice[0] === d) dice1El.classList.add("selected");
-    else if (gameState.pendingDice[1] === d) dice2El.classList.add("selected");
-  }
+  if (pickedDieIndex == null) return;
+
+  const pending = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
+  if (pending.length <= pickedDieIndex) return;
+
+  if (pickedDieIndex === 0) dice1El.classList.add("selected");
+  if (pickedDieIndex === 1) dice2El.classList.add("selected");
+}
 
   function getPieceDrawPos(p){
     if (p.state === "yard") {
@@ -848,14 +851,10 @@ const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDic
 const d1 = Number(gameState.dice1 ?? 0);
 const d2 = Number(gameState.dice2 ?? 0);
 
-// اگر الان عدد جدید داشتیم، نگهش دار
-if (d1 > 0) lastDice1 = d1;
-if (d2 > 0) lastDice2 = d2;
+const show1 = pendingDice.length >= 1 ? pendingDice[0] : 0;
+const show2 = pendingDice.length >= 2 ? pendingDice[1] : 0;
 
-// نمایش: اول pending، اگر خالی بود از آخرین تاس نگه‌داشته‌شده
-const show1 = pendingDice.length >= 1 ? pendingDice[0] : lastDice1;
-const show2 = pendingDice.length >= 2 ? pendingDice[1] : lastDice2;
-
+// اگر pendingDice خالیه یعنی تاس‌های فعلی مصرف/تمام شدن
 const shouldShowDice = (show1 > 0 || show2 > 0);
 
 if (shouldShowDice) {
@@ -868,10 +867,14 @@ if (shouldShowDice) {
 
   dice1El.style.pointerEvents = (myColor === turnColor) ? "auto" : "none";
 
-  if (pickedDieValue != null && !pendingDice.includes(pickedDieValue)) {
+if (pickedDieIndex != null) {
+  const pendingLen = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice.length : 0;
+  if (pendingLen <= pickedDieIndex) {
     pickedDieValue = null;
+    pickedDieIndex = null;
     clearDiePickUI();
   }
+}
   syncDiePickUI();
 
   setMsg(myColor === turnColor
@@ -990,11 +993,12 @@ if (shouldShowDice) {
         pickedDieValue = null;
         clearDiePickUI();
 
-        socket.emit("game:move", {
-          matchId: currentMatchId,
-          pieceId: p.id,
-          dieValue: selectedDieValue
-        }, (response) => {
+socket.emit("game:move", {
+  matchId: currentMatchId,
+  pieceId: p.id,
+  dieValue: selectedDieValue,
+  dieIndex: pickedDieIndex
+}, (response) => {
           if (!response?.success) {
             pickedDieValue = selectedDieValue;
             syncDiePickUI();
@@ -1023,37 +1027,41 @@ if (shouldShowDice) {
     }
   }
 
-  function chooseDieValue(dv){
-    const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
-    if(pendingDice.length === 0) return;
-    if(!pendingDice.includes(dv)) return;
-    pickedDieValue = dv;
-    syncDiePickUI();
-    setMsg("تاس انتخاب شد. حالا یک مهره را بزن.");
-  }
+function chooseDieAtIndex(di){
+  const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
+  if (pendingDice.length === 0) return;
+  if (di !== 0 && di !== 1) return;
+  if (pendingDice.length <= di) return;
 
-  dice1El.addEventListener("click", ()=>{
-    if(!gameState || !gameState.rolled || gameState.winner) return;
-    const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
-    if(pendingDice.length === 0) return;
-    chooseDieValue(pendingDice[0]);
-  });
+  pickedDieIndex = di;
+  pickedDieValue = pendingDice[di]; // مقدار همان تاس
+  syncDiePickUI();
+  setMsg("تاس انتخاب شد. حالا یک مهره را بزن.");
+}
 
-  dice2El.addEventListener("click", ()=>{
-    if(!gameState || !gameState.rolled || gameState.winner) return;
-    const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
-    if(!pendingDice || pendingDice.length < 2) return;
-    chooseDieValue(pendingDice[1]);
-  });
+dice1El.addEventListener("click", ()=>{
+  if(!gameState || !gameState.rolled || gameState.winner) return;
+  const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
+  if(pendingDice.length === 0) return;
+  chooseDieAtIndex(0); // ✅ تاس 1
+});
+
+dice2El.addEventListener("click", ()=>{
+  if(!gameState || !gameState.rolled || gameState.winner) return;
+  const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
+  if(pendingDice.length < 2) return;
+  chooseDieAtIndex(1); // ✅ تاس 2
+});
 
   rollBtn.addEventListener("click", rollDice);
 
   resetBtn.addEventListener("click", ()=>{
     dice1El.textContent = "🎲";
     dice2El.textContent = "🎲";
-    pickedDieValue = null;
-    clearDiePickUI();
-    setMsg("ریست لوکال (کنترل اصلی با سرور است).");
+pickedDieValue = null;
+pickedDieIndex = null;
+clearDiePickUI();
+setMsg("ریست لوکال (کنترل اصلی با سرور است).");
   });
 
   canvas.addEventListener("click", onBoardClick);
