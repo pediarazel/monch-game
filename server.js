@@ -1491,25 +1491,10 @@ console.log("[NO_MOVES] before broadcastState", {
 });
         broadcastState(m);
 
-setImmediate(() => {
-  console.log("[NO_MOVES] setImmediate entered", {
-    matchId,
-    myTurnId,
-    turnIdNow: matches.get(matchId)?.turnId,
-    currentTurnNow: matches.get(matchId)?.game?.currentTurn,
-  });
-
-  const mm = matches.get(matchId);
-  if (!mm) return;
-  if (mm.turnId !== myTurnId) {
-    console.log("[NO_MOVES] turnId mismatch, nextTurn skipped", {
-      myTurnId,
-      turnIdNow: mm.turnId,
-    });
-    return;
-  }
+const mm = matches.get(matchId);
+if (mm && mm.turnId === myTurnId) {
   nextTurn(mm);
-});
+}
 console.log("[NO_MOVES] callback return", {
   matchId,
   turnSkipped: true,
@@ -1627,10 +1612,9 @@ console.log("[NO_MOVES] callback return", {
       m.game.pendingDice = [];
 
       const myTurnId = m.turnId;
-      broadcastState(m);
-
-      setImmediate(() => nextTurn(m));
-
+broadcastState(m);
+nextTurn(m);
+m.game.transitioning = false;
       return callback?.({
         success: true,
         bonusRoll: false,
