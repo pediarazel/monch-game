@@ -921,6 +921,12 @@ function startTurnTimeout(match) {
 }
 
 function nextTurn(match) {
+  console.log("[NEXT_TURN] start", {
+  matchId: match?.matchId,
+  turnId: match?.turnId,
+  currentTurnBefore: match?.game?.currentTurn,
+  currentTurnColorBefore: match?.game ? colorOrder[match.game.currentTurn] : null,
+});
   if (!match.game || match.game.winner) return;
 
   let attempts = 0;
@@ -937,7 +943,12 @@ function nextTurn(match) {
   match.game.turnMoved = false;
 
   match.turnId = (match.turnId || 0) + 1;
-
+console.log("[NEXT_TURN] after change", {
+  matchId: match?.matchId,
+  turnId: match?.turnId,
+  currentTurnAfter: match?.game?.currentTurn,
+  currentTurnColorAfter: match?.game ? colorOrder[match.game.currentTurn] : null,
+});
   startTurnTimeout(match);
 }
 
