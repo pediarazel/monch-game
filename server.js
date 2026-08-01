@@ -1533,208 +1533,277 @@ console.log("[NO_MOVES] callback return", {
   });
 
   // ---------------- Game: move ----------------
-  socket.on("game:move", (payload, callback) => {
-    let m;
-    try {
-      const matchId = String(payload?.matchId ?? "");
-      const pieceId = String(payload?.pieceId ?? "");
-      const dieValue = Number(payload?.dieValue);
-const dieIndex = Number(payload?.dieIndex);
-console.log("[MOVE_REQ]", {
-  matchId,
-  pieceId,
-  dieValue,
-  dieIndex,
-  turnId: payload?.turnId,
-  serverTurnId: matches.get(matchId)?.turnId,
-  pendingDice: matches.get(matchId)?.game?.pendingDice
-});
+socket.on("game:move", (payload, callback) => {
+  let m;
+  try {
+    const matchId = String(payload?.matchId ?? "");
+    const pieceId = String(payload?.pieceId ?? "");
+    const dieValue = Number(payload?.dieValue);
+    const dieIndex = Number(payload?.dieIndex);
 
-if (!Number.isInteger(dieIndex) || (dieIndex !== 0 && dieIndex !== 1)) {
-  return callback?.({ success: false, message: "dieIndex نامعتبر است." });
-}
-      const m = matches.get(matchId);
-      if (!m || !m.game) return callback?.({ success: false, message: "match پیدا نشد." });
-      const moveTurnId = Number(payload?.turnId);
-if (!Number.isInteger(moveTurnId) || moveTurnId !== m.turnId) {
-  console.log("[MOVE_REJECT] turnId mismatch", { moveTurnId, serverTurnId: m.turnId });
-  return callback?.({
-    success: false,
-    message: "این حرکت مربوط به نوبت قدیمی است. دوباره state را بگیر و حرکت کن.",
-  });
-}
-if (m.game.transitioning) {
-  console.log("[MOVE_REJECT] transitioning=true", { matchId });
-  return callback?.({
-    success: false,
-    message: "نوبت در حال پردازش است. لطفاً صبر کنید."
-  });
-}
+    console.log("[MOVE_REQ]", {
+      matchId,
+      pieceId,
+      dieValue,
+      dieIndex,
+      turnId: payload?.turnId,
+      serverTurnId: matches.get(matchId)?.turnId,
+      pendingDice: matches.get(matchId)?.game?.pendingDice
+    });
 
-m.game.transitioning = true;
-      const userId = Number(socket.user?.userId);
-      if (!Number.isInteger(userId) || userId <= 0) {
-        return callback?.({ success: false, message: "userId نامعتبر است." });
-      }
+    if (!Number.isInteger(dieIndex) || (dieIndex !== 0 && dieIndex !== 1)) {
+      return callback?.({ success: false, message: "dieIndex نامعتبر است." });
+    }
 
-      const currentColor = colorOrder[m.game.currentTurn];
-      const expectedUserId = m.playerColors[currentColor];
-if (expectedUserId == null || expectedUserId !== userId) {
-  console.log("[MOVE_REJECT] wrong turn user", {
-    matchId,
-    userId,
-    expectedUserId,
-    currentColor,
-    currentTurn: m.game.currentTurn
-  });
+    // انتساب به متغیر بیرونی m بدون تعریف مجدد با const برای جلوگیری از خطای سینتکس
+    m = matches.get(matchId);
+    if (!m || !m.game) {
+      return callback?.({ success: false, message: "مسابقه پیدا نشد." });
+    }
 
-  return callback?.({
-    success: false,
-    message: "الان نوبت شما نیست."
-  });
-}
+    const moveTurnId = Number(payload?.turnId);
+    if (!Number.isInteger(moveTurnId) || moveTurnId !== m.turnId) {
+      console.log("[MOVE_REJECT] turnId mismatch", {
+        moveTurnId,
+        serverTurnId: m.turnId
+      });
+      return callback?.({
+        success: false,
+        message: "این حرکت مربوط به نوبت قدیمی است. دوباره state را دریافت کنید.",
+      });
+    }
 
+    if (m.game.transitioning) {
+      console.log("[MOVE_REJECT] transitioning=true", { matchId });
+      return callback?.({
+        success: false,
+        message: "نوبت در حال پردازش است. لطفاً صبر کنید."
+      });
+    }
 
-      if (m.game.winner) return callback?.({ success: false, message: "بازی تمام شده است." });
+    // قفل کردن روند حرکت بازی
+    m.game.transitioning = true;
 
-if (
-  !m.game.rolled ||
-  !Array.isArray(m.game.pendingDice) ||
-  m.game.pendingDice.length === 0
-) {
-  console.log("[MOVE_REJECT] not rolled or empty pendingDice", {
-    matchId,
-    rolled: m.game.rolled,
-    pendingDice: m.game.pendingDice
-  });
+    const userId = Number(socket.user?.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      console.log("[MOVE_REJECT] invalid userId", { userId });
+      m.game.transitioning = false;
+      return callback?.({ success: false, message: "userId نامعتبر است." });
+    }
 
-  return callback?.({
-    success: false,
-    message: "اول باید تاس ریخته شود."
-  });
-}
+    const currentColor = colorOrder[m.game.currentTurn];
+    const expectedUserId = m.playerColors[currentColor];
 
+    if (expectedUserId == null || expectedUserId !== userId) {
+      console.log("[MOVE_REJECT] wrong turn user", {
+        matchId,
+        userId,
+        expectedUserId,
+        currentColor,
+        currentTurn: m.game.currentTurn
+      });
+      m.game.transitioning = false;
+      return callback?.({ success: false, message: "الان نوبت شما نیست." });
+    }
 
-      if (!Number.isFinite(dieValue) || dieValue < 1 || dieValue > 6) {
-        return callback?.({ success: false, message: "dieValue نامعتبر است." });
-      }
+    if (m.game.winner) {
+      console.log("[MOVE_REJECT] game already won", { matchId });
+      m.game.transitioning = false;
+      return callback?.({ success: false, message: "بازی تمام شده است." });
+    }
 
-const pending = m.game.pendingDice;
-if (!Array.isArray(pending) || pending.length <= dieIndex) {
-  return callback?.({ success: false, message: "pendingDice نامعتبر است." });
-}
-const expectedDieValue = Number(pending[dieIndex]);
-if (expectedDieValue !== dieValue) {
-  console.log("[MOVE_REJECT] die mismatch", {
-    matchId,
-    dieValue,
-    expectedDieValue,
-    dieIndex,
-    pendingDice: pending
-  });
+    if (
+      !m.game.rolled ||
+      !Array.isArray(m.game.pendingDice) ||
+      m.game.pendingDice.length === 0
+    ) {
+      console.log("[MOVE_REJECT] not rolled or empty pendingDice", {
+        matchId,
+        rolled: m.game.rolled,
+        pendingDice: m.game.pendingDice
+      });
+      m.game.transitioning = false;
+      return callback?.({ success: false, message: "ابتدا باید تاس بیندازید." });
+    }
 
-  return callback?.({
-    success: false,
-    message: "dieValue با dieIndex هم‌خوانی ندارد."
-  });
-}
+    if (!Number.isInteger(dieValue) || dieValue < 1 || dieValue > 6) {
+      console.log("[MOVE_REJECT] invalid dieValue", { matchId, dieValue });
+      m.game.transitioning = false;
+      return callback?.({ success: false, message: "مقدار تاس نامعتبر است." });
+    }
 
+    const pending = m.game.pendingDice;
+    if (pending.length <= dieIndex) {
+      console.log("[MOVE_REJECT] dieIndex out of bounds", {
+        matchId,
+        dieIndex,
+        pendingLength: pending.length
+      });
+      m.game.transitioning = false;
+      return callback?.({ success: false, message: "تاس انتخاب شده وجود ندارد." });
+    }
 
-      const piece = m.game.pieces.find((p) => p.id === pieceId);
-if (!piece) {
-  console.log("[MOVE_REJECT] piece not found", { matchId, pieceId });
-  return callback?.({ success: false, message: "piece پیدا نشد." });
-}
+    const expectedDieValue = Number(pending[dieIndex]);
+    if (expectedDieValue !== dieValue) {
+      console.log("[MOVE_REJECT] die mismatch", {
+        matchId,
+        dieValue,
+        expectedDieValue,
+        dieIndex,
+        pendingDice: pending
+      });
+      m.game.transitioning = false;
+      return callback?.({
+        success: false,
+        message: "تاس انتخاب شده با مقدار ارسالی مطابقت ندارد."
+      });
+    }
 
-if (!canPieceMove(m.game, piece, dieValue)) {
-  console.log("[MOVE_REJECT] canPieceMove=false", {
-    matchId,
-    pieceId,
-    dieValue,
-    piece
-  });
+    const pieces = m.game.pieces[currentColor];
+    const piece = pieces.find((p) => p.id === pieceId);
 
-  return callback?.({ success: false, message: "حرکت مجاز نیست." });
-}
+    if (!piece) {
+      console.log("[MOVE_REJECT] piece not found", { matchId, pieceId });
+      m.game.transitioning = false;
+      return callback?.({ success: false, message: "مهره پیدا نشد." });
+    }
 
+    if (!canPieceMove(m.game, piece, dieValue)) {
+      console.log("[MOVE_REJECT] canPieceMove=false", {
+        matchId,
+        pieceId,
+        dieValue,
+        piece
+      });
+      m.game.transitioning = false;
+      return callback?.({ success: false, message: "حرکت مجاز نیست." });
+    }
 
-      movePiece(m.game, piece, dieValue);
+    // انجام حرکت مهره
+    movePiece(m.game, piece, dieValue);
 
-// ✅ کد اصلاح‌شده سرور: حذف تاس بازی شده و بازسازی متغیرهای کمکی بر اساس آرایه واقعی
-if (Array.isArray(m.game.pendingDice)) {
-  m.game.pendingDice.splice(dieIndex, 1);
-} else {
-  m.game.pendingDice = [];
-}
+    // حذف تاس استفاده شده
+    if (Array.isArray(m.game.pendingDice)) {
+      m.game.pendingDice.splice(dieIndex, 1);
+    } else {
+      m.game.pendingDice = [];
+    }
 
-// مقداردهی مجدد dice1 و dice2 بر اساس اعضای باقی‌مانده آرایه
-m.game.dice1 = m.game.pendingDice[0] ? Number(m.game.pendingDice[0]) : 0;
-m.game.dice2 = m.game.pendingDice[1] ? Number(m.game.pendingDice[1]) : 0;
-m.game.dice = m.game.dice1 + m.game.dice2;
+    // بازسازی مقادیر تاس‌ها پس از مصرف
+    m.game.dice1 = m.game.pendingDice[0] ? Number(m.game.pendingDice[0]) : 0;
+    m.game.dice2 = m.game.pendingDice[1] ? Number(m.game.pendingDice[1]) : 0;
+    m.game.dice = m.game.dice1 + m.game.dice2;
 
-console.log("[MOVE_AFTER_CONSUME]", {
-  matchId,
-  pendingDice: m.game.pendingDice,
-  dice1: m.game.dice1,
-  dice2: m.game.dice2,
-  diceSum: m.game.dice
-});
-      const winnerColor = checkWinner(m.game);
-      m.game.winner = winnerColor || null;
+    console.log("[MOVE_AFTER_CONSUME]", {
+      matchId,
+      pendingDice: m.game.pendingDice,
+      dice1: m.game.dice1,
+      dice2: m.game.dice2,
+      diceSum: m.game.dice
+    });
 
-      if (m.game.winner) {
-        broadcastState(m);
-        settleCoinsForMatch(m).catch((e) => console.error("settle error:", e));
+    // بررسی برد
+    const hasWon = checkWinner(m.game, currentColor);
+    if (hasWon) {
+      m.game.winner = currentColor;
+      m.game.rolled = false;
+      m.game.pendingDice = [];
+      broadcastState(m);
 
-        return callback?.({
-          success: true,
-          winnerColor: m.game.winner,
-          bonusRoll: false,
-          pendingDice: m.game.pendingDice,
-        });
-      }
+      m.game.transitioning = false;
 
-      // اگر هنوز تاس باقیه => ادامه نوبت
-if (m.game.pendingDice.length > 0) {
-  m.game.turnMoved = true;
-  broadcastState(m);
+      // پردازش مالی مسابقه
+      (async () => {
+        try {
+          await db.match.update({
+            where: { id: matchId },
+            data: {
+              status: "FINISHED",
+              winnerColor: currentColor,
+              finishedAt: new Date(),
+            },
+          });
 
-  m.game.transitioning = false; // ✅ این خط را قبل از return بذار
+          const winnerUserId = m.playerColors[currentColor];
+          const betAmount = m.betAmount;
+          const totalPrize = Math.floor(betAmount * 2 * 0.9);
 
-  return callback?.({
-    success: true,
-    bonusRoll: false,
-    pendingDice: m.game.pendingDice.slice(),
-    turnSkipped: false,
-    winnerColor: null,
-  });
-}
+          await db.$transaction([
+            db.user.update({
+              where: { id: winnerUserId },
+              data: { balance: { increment: totalPrize } },
+            }),
+            db.transaction.create({
+              data: {
+                userId: winnerUserId,
+                amount: totalPrize,
+                type: "WIN",
+                description: `برد در مسابقه منچ ${matchId}`,
+              },
+            }),
+          ]);
 
-// اگر تاس تموم شد => نوبت بعد
-m.game.turnMoved = true;
-m.game.rolled = false;
-m.game.pendingDice = [];
+          console.log("[MATCH_FINALIZE_SUCCESS]", { matchId, winnerUserId, totalPrize });
+        } catch (dbErr) {
+          console.error("[MATCH_FINALIZE_ERROR]", dbErr);
+        }
+      })();
 
-broadcastState(m);
-nextTurn(m);
+      return callback?.({
+        success: true,
+        bonusRoll: false,
+        pendingDice: [],
+        turnSkipped: false,
+        winnerColor: currentColor,
+      });
+    }
 
-// مهم: transitioning را بعد از تغییر نوبت و قبل از برگشت به کلاینت آزاد کن
-m.game.transitioning = false;
+    // اگر هنوز تاسی باقی مانده باشد، نوبت عوض نمی‌شود
+    if (m.game.pendingDice.length > 0) {
+      m.game.turnMoved = true;
+      broadcastState(m);
 
-return callback?.({
-  success: true,
-  bonusRoll: false,
-  pendingDice: [],
-  turnSkipped: false,
-  winnerColor: null,
-});
-} catch (e) {
-    return callback?.({ success: false, message: e?.message || "move error" });
+      m.game.transitioning = false; // آزاد کردن قفل
+
+      return callback?.({
+        success: true,
+        bonusRoll: false,
+        pendingDice: m.game.pendingDice.slice(),
+        turnSkipped: false,
+        winnerColor: null,
+      });
+    }
+
+    // اگر همه تاس‌ها مصرف شده باشند
+    m.game.turnMoved = true;
+    m.game.rolled = false;
+    m.game.pendingDice = [];
+    broadcastState(m);
+
+    m.game.transitioning = false; // آزاد کردن قفل قبل از فرآیند تغییر نوبت بعدی
+    nextTurn(m);
+
+    return callback?.({
+      success: true,
+      bonusRoll: false,
+      pendingDice: [],
+      turnSkipped: false,
+      winnerColor: null,
+    });
+
+  } catch (e) {
+    console.error("Error in game:move:", e);
+    return callback?.({
+      success: false,
+      message: e?.message || "move error"
+    });
   } finally {
-    if (m?.game) m.game.transitioning = false;
+    if (m?.game) {
+      m.game.transitioning = false; // اطمینان نهایی از آزاد بودن قفل در صورت بروز خطای پیش‌بینی نشده
+    }
   }
 });
-});
+
 
 // Start
 httpServer.listen(PORT, () => {
