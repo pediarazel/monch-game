@@ -843,30 +843,45 @@ if (gameState.winner) {
     const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
     const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.rolled && !gameState.winner;
     rollBtn.disabled = !canRoll;
-    const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
-    if (gameState.rolled && pendingDice.length > 0) {
-        dice1El.textContent = (pendingDice[0] ?? "🎲");
-        dice2El.textContent = (pendingDice[1] ?? "—");
-        const isDice2Available = pendingDice.length > 1;
-        dice2El.style.pointerEvents = isDice2Available ? "auto" : "none";
-        dice2El.style.opacity = isDice2Available ? "1" : "0.5";
-        dice1El.style.pointerEvents = (myColor === turnColor) ? "auto" : "none";
-        if (pickedDieValue != null && !pendingDice.includes(pickedDieValue)) {
-            pickedDieValue = null;
-            clearDiePickUI();
-        }
-        syncDiePickUI();
-        setMsg(myColor === turnColor ? (pickedDieValue == null ? "تاس خودت را انتخاب کن." : "حالا یک مهره را بزن.") : "هنوز نوبت شما نیست.");
-    } else {
-        dice1El.textContent = "🎲";
-        dice2El.textContent = "🎲";
-        dice1El.style.pointerEvents = "none";
-        dice2El.style.pointerEvents = "none";
-        dice2El.style.opacity = "0.5";
-        pickedDieValue = null;
-        clearDiePickUI();
-        setMsg(myColor === turnColor ? "تاس بیندازید." : "هنوز نوبت شما نیست.");
-    }
+const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
+const d1 = Number(gameState.dice1 ?? 0);
+const d2 = Number(gameState.dice2 ?? 0);
+
+const showFromPending = gameState.rolled && pendingDice.length > 0;
+const showFromDice = !showFromPending && (d1 > 0 || d2 > 0);
+
+if (showFromPending || showFromDice) {
+  const show1 = showFromPending ? pendingDice[0] : d1;
+  const show2 = showFromPending ? pendingDice[1] : d2;
+
+  dice1El.textContent = (show1 > 0 ? String(show1) : "🎲");
+  dice2El.textContent = (show2 > 0 ? String(show2) : "🎲");
+
+  const isDice2Available = show2 > 0;
+  dice2El.style.pointerEvents = isDice2Available ? "auto" : "none";
+  dice2El.style.opacity = isDice2Available ? "1" : "0.5";
+
+  dice1El.style.pointerEvents = (myColor === turnColor) ? "auto" : "none";
+
+  if (pickedDieValue != null && !pendingDice.includes(pickedDieValue)) {
+    pickedDieValue = null;
+    clearDiePickUI();
+  }
+  syncDiePickUI();
+
+  setMsg(myColor === turnColor
+    ? (pickedDieValue == null ? "تاس خودت را انتخاب کن." : "حالا یک مهره را بزن.")
+    : "هنوز نوبت شما نیست.");
+} else {
+  dice1El.textContent = "🎲";
+  dice2El.textContent = "🎲";
+  dice1El.style.pointerEvents = "none";
+  dice2El.style.pointerEvents = "none";
+  dice2El.style.opacity = "0.5";
+  pickedDieValue = null;
+  clearDiePickUI();
+  setMsg(myColor === turnColor ? "تاس بیندازید." : "هنوز نوبت شما نیست.");
+}
 }
 
   // آپدیت UI

@@ -881,6 +881,21 @@ function resetMatchGame(match) {
 }
 
 function broadcastState(match) {
+  console.log("[BROADCAST_STATE]", {
+  matchId: match.matchId,
+  currentTurn: match.game.currentTurn,
+  activeColor: colorOrder[match.game.currentTurn],
+  dice1: match.game.dice1,
+  dice2: match.game.dice2,
+  dice: match.game.dice,
+  pendingDice: match.game.pendingDice,
+  rolled: match.game.rolled,
+});
+  console.log("[BROADCAST_STATE]", {
+  matchId: match.matchId,
+  currentTurn: match.game.currentTurn,
+  dice: match.game.dice,
+});
   if (!match.game) return;
 
   const activeColor = colorOrder[match.game.currentTurn];
@@ -1399,6 +1414,14 @@ if (m.game.rolled) {
       m.game.dice1 = d1;
       m.game.dice2 = d2;
       m.game.dice = d1 + d2;
+      console.log("[ROLL_RESULT]", {
+  matchId: m.matchId,
+  currentTurn: m.game.currentTurn,
+  activeColor: colorOrder[m.game.currentTurn],
+  dice1: d1,
+  dice2: d2,
+  diceSum: d1 + d2,
+});
 
       const isBonusSix = d1 === 6 && d2 === 6;
 
@@ -1415,7 +1438,14 @@ if (m.game.rolled) {
         // deadline رو تمدید کن تا کاربر فرصت کلیک roll داشته باشه
         m.game.turnDeadlineAt = Date.now() + TURN_MS;
         m.turnDeadlineAt = m.game.turnDeadlineAt;
-
+console.log("[BONUS_6]", {
+  matchId: m.matchId,
+  activeColor: colorOrder[m.game.currentTurn],
+  dice1: m.game.dice1,
+  dice2: m.game.dice2,
+  diceSum: m.game.dice,
+  pendingDice: m.game.pendingDice,
+});
         broadcastState(m);
 m.game.transitioning = false;
         return callback?.({
