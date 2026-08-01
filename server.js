@@ -905,6 +905,7 @@ function broadcastState(match) {
     matchId: match.matchId,
     status: match.status,
     tier: match.tier,
+    turnId: match.turnId,
     turnDeadlineAt: match.turnDeadlineAt || match.game.turnDeadlineAt || null,
     playerColors: match.playerColors,
     activeColor,
@@ -931,6 +932,7 @@ function startTurnTimeout(match) {
     if (!m) return;
     if (m.turnId !== myTurnId) return;
     if (!m.game || m.game.winner) return;
+    if (m.game?.transitioning) return;
     nextTurn(m);
   }, TURN_MS);
 }
@@ -1549,7 +1551,17 @@ if (!Number.isInteger(dieIndex) || (dieIndex !== 0 && dieIndex !== 1)) {
 }
       const m = matches.get(matchId);
       if (!m || !m.game) return callback?.({ success: false, message: "match پیدا نشد." });
-
+      const moveTurnId = Number(payload?.turnId);
+if (!Number.isInteger(moveTurnId) || moveTurnId !== m.turnId) {
+  return callback?.({
+    success: false,
+    message: "این حرکت مربوط به نوبت قدیمی است. دوباره state را بگیر و حرکت کن.",
+  });
+}
+if (m.game.transitioning) {
+  return callback?.({ success: false, message: "نوبت در حال پردازش است. لطفاً صبر کنید." });
+}
+m.game.transitioning = true;
       const userId = Number(socket.user?.userId);
       if (!Number.isInteger(userId) || userId <= 0) {
         return callback?.({ success: false, message: "userId نامعتبر است." });
@@ -1626,35 +1638,39 @@ console.log("[MOVE_AFTER_CONSUME]", {
       }
 
       // اگر هنوز تاس باقیه => ادامه نوبت
-      if (m.game.pendingDice.length > 0) {
-        m.game.turnMoved = true;
-        broadcastState(m);
+if (m.game.pendingDice.length > 0) {
+  m.game.turnMoved = true;
+  broadcastState(m);
 
-        return callback?.({
-          success: true,
-          bonusRoll: false,
-          pendingDice: m.game.pendingDice.slice(),
-          turnSkipped: false,
-          winnerColor: null,
-        });
-      }
+  m.game.transitioning = false; // ✅ این خط را قبل از return بذار
 
-      // اگر تاس تموم شد => نوبت بعد
-      m.game.turnMoved = true;
-      m.game.rolled = false;
-      m.game.pendingDice = [];
+  return callback?.({
+    success: true,
+    bonusRoll: false,
+    pendingDice: m.game.pendingDice.slice(),
+    turnSkipped: false,
+    winnerColor: null,
+  });
+}
 
-      const myTurnId = m.turnId;
+// اگر تاس تموم شد => نوبت بعد
+m.game.turnMoved = true;
+m.game.rolled = false;
+m.game.pendingDice = [];
+
 broadcastState(m);
 nextTurn(m);
+
+// مهم: transitioning را بعد از تغییر نوبت و قبل از برگشت به کلاینت آزاد کن
 m.game.transitioning = false;
-      return callback?.({
-        success: true,
-        bonusRoll: false,
-        pendingDice: [],
-        turnSkipped: false,
-        winnerColor: null,
-      });
+
+return callback?.({
+  success: true,
+  bonusRoll: false,
+  pendingDice: [],
+  turnSkipped: false,
+  winnerColor: null,
+});
     } catch (e) {
       return callback?.({ success: false, message: e?.message || "move error" });
     }

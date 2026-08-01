@@ -477,6 +477,7 @@
   let myColor = null;
   let gameState = null;
   let currentMatchId = null;
+  let currentTurnId = null; // ✅ اضافه کن
 let lastDice1 = 0;
 let lastDice2 = 0;
   let turnTimerInterval = null;
@@ -966,7 +967,10 @@ if (pickedDieIndex != null) {
 
   function onBoardClick(e){
     if(!socket || !gameState || !gameState.rolled || gameState.winner) return;
-
+if (currentTurnId == null) {
+    setMsg("هنوز نوبت کامل برای حرکت مشخص نشده؛ چند لحظه صبر کن.");
+    return;
+  }
     const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
     if(myColor !== turnColor) return;
 
@@ -995,6 +999,7 @@ if (pickedDieIndex != null) {
 
 socket.emit("game:move", {
   matchId: currentMatchId,
+  turnId: currentTurnId,
   pieceId: p.id,
   dieValue: selectedDieValue,
   dieIndex: pickedDieIndex
@@ -1226,7 +1231,8 @@ setMsg("ریست لوکال (کنترل اصلی با سرور است).");
       }
 
       if (state?.matchId) currentMatchId = String(state.matchId);
-
+if (state?.turnId != null) currentTurnId = Number(state.turnId);
+else currentTurnId = null;
       stopLobbyCountdown();
       joinStatusEl.textContent = "✅ وضعیت بازی دریافت شد";
       serverMsgEl.textContent = "✅ state بازی دریافت شد.";
