@@ -966,71 +966,78 @@ if (pickedDieIndex != null) {
   }
 
   function onBoardClick(e){
-    if(!socket || !gameState || !gameState.rolled || gameState.winner) return;
-if (currentTurnId == null) {
-    setMsg("هنوز نوبت کامل برای حرکت مشخص نشده؛ چند لحظه صبر کن.");
-    return;
-  }
+    if (!socket || !gameState || !gameState.rolled || gameState.winner) return;
+    if (currentTurnId == null) {
+        setMsg("هنوز نوبت کامل برای حرکت مشخص نشده؛ چند لحظه صبر کن.");
+        return;
+    }
     const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-    if(myColor !== turnColor) return;
+    if (myColor !== turnColor) return;
 
     const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
-    if(pendingDice.length === 0) return;
-
-    // ✅ بررسی اینکه بازیکن حتما تاس و ایندکس معتبری را انتخاب کرده باشد
-    if (pickedDieIndex === null || pickedDieValue === null) {
-      setMsg("اول یکی از تاس‌ها را انتخاب کن.");
-      return;
-    }
+    if (pendingDice.length === 0) return; // اگر تاسی ریخته نشده، کاری نکن
 
     const rect = canvas.getBoundingClientRect();
     const scale = canvas.width / rect.width;
     const x = (e.clientX - rect.left) * scale;
     const y = (e.clientY - rect.top) * scale;
 
+    let clickedPiece = null;
     const movablePieces = gameState.pieces || [];
     for (const p of movablePieces){
       const pos = getPieceDrawPos(p);
       if(!pos) continue;
       if (Math.hypot(x-pos.x, y-pos.y) <= CELL*0.6){
-        const selectedDieValue = pickedDieValue;
-        const selectedDieIndex = pickedDieIndex;
-
-        socket.emit("game:move", {
-          matchId: currentMatchId,
-          turnId: currentTurnId,
-          pieceId: p.id,
-          dieValue: Number(selectedDieValue),
-          dieIndex: Number(selectedDieIndex)
-        }, (response) => {
-          if (!response?.success) {
-            setMsg(response?.message || "حرکت مجاز نیست.");
-            return;
-          }
-
-          // ✅ ریست کردن انتخاب‌ها فقط بعد از موفقیت‌آمیز بودن حرکت در سرور
-          pickedDieValue = null;
-          pickedDieIndex = null;
-          clearDiePickUI();
-
-          if (response.noLegalMoves || response.turnSkipped) {
-            setMsg("حرکت انجام شد؛ نوبت تمام شد.");
-          } else if (response.winnerColor) {
-            setMsg("بازی تمام شد.");
-          } else if (response.bonusRoll) {
-            setMsg("جفت ۶! دوباره تاس بینداز.");
-          } else if (Array.isArray(response.pendingDice) && response.pendingDice.length > 0) {
-            setMsg("تاس بعدی را انتخاب کن.");
-          } else {
-            setMsg("حرکت انجام شد.");
-          }
-        });
-
-        return;
+        clickedPiece = p;
+        break; // مهره پیدا شد
       }
     }
 
+    if (!clickedPiece) return; // روی مهره‌ای کلیک نشده
+
+    // ✅ منطق جدید:
+    if (pickedDieIndex == null) { // تاسی هنوز انتخاب نشده
+      setMsg("لطفاً اول یکی از تاس‌ها را انتخاب کن.");
+      // شما نیاز به یک تابع برای "انتخاب مهره" دارید که آن را هایلایت کند
+      // و سپس منتظر کلیک روی تاس بماند. فعلا این بخش را نادیده می‌گیریم.
+      return; // منتظر می‌مانیم تا تاس انتخاب شود
+
+    } else { // یک تاس از قبل انتخاب شده است (pickedDieIndex != null)
+      // حرکت را ارسال کن
+      socket.emit("game:move", {
+        matchId: currentMatchId,
+        turnId: currentTurnId,
+        pieceId: clickedPiece.id,
+        dieValue: Number(pickedDieValue),
+        dieIndex: Number(pickedDieIndex)
+      }, (response) => {
+        if (!response?.success) {
+          setMsg(response?.message || "حرکت مجاز نیست.");
+          // ✅ مهم: اگر حرکت ناموفق بود، انتخاب تاس را ریست نکن
+          return;
+        }
+
+        // ✅ موفقیت: ریست کردن انتخاب‌ها
+        pickedDieValue = null;
+        pickedDieIndex = null;
+        clearDiePickUI(); // این تابع را در مرحله ۱ پاک نکردیم و هنوز لازم است
+
+        // ... (بقیه کد مربوط به نمایش پیام‌ها و وضعیت بازی) ...
+        if (response.noLegalMoves || response.turnSkipped) {
+          setMsg("حرکت انجام شد؛ نوبت تمام شد.");
+        } else if (response.winnerColor) {
+          setMsg("بازی تمام شد.");
+        } else if (response.bonusRoll) {
+          setMsg("جفت ۶! دوباره تاس بینداز.");
+        } else if (Array.isArray(response.pendingDice) && response.pendingDice.length > 0) {
+          setMsg("تاس بعدی را انتخاب کن.");
+        } else {
+          setMsg("حرکت انجام شد.");
+        }
+      });
+    }
   }
+
 
 function chooseDieAtIndex(di){
   const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
