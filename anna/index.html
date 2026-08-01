@@ -977,7 +977,8 @@ if (currentTurnId == null) {
     const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
     if(pendingDice.length === 0) return;
 
-    if (pickedDieValue == null) {
+    // ✅ بررسی اینکه بازیکن حتما تاس و ایندکس معتبری را انتخاب کرده باشد
+    if (pickedDieIndex === null || pickedDieValue === null) {
       setMsg("اول یکی از تاس‌ها را انتخاب کن.");
       return;
     }
@@ -993,25 +994,23 @@ if (currentTurnId == null) {
       if(!pos) continue;
       if (Math.hypot(x-pos.x, y-pos.y) <= CELL*0.6){
         const selectedDieValue = pickedDieValue;
+        const selectedDieIndex = pickedDieIndex;
 
-        pickedDieValue = null;
-        clearDiePickUI();
-
-socket.emit("game:move", {
-  matchId: currentMatchId,
-  turnId: currentTurnId,
-  pieceId: p.id,
-  dieValue: selectedDieValue,
-  dieIndex: pickedDieIndex
-}, (response) => {
+        socket.emit("game:move", {
+          matchId: currentMatchId,
+          turnId: currentTurnId,
+          pieceId: p.id,
+          dieValue: Number(selectedDieValue),
+          dieIndex: Number(selectedDieIndex)
+        }, (response) => {
           if (!response?.success) {
-            pickedDieValue = selectedDieValue;
-            syncDiePickUI();
             setMsg(response?.message || "حرکت مجاز نیست.");
             return;
           }
 
+          // ✅ ریست کردن انتخاب‌ها فقط بعد از موفقیت‌آمیز بودن حرکت در سرور
           pickedDieValue = null;
+          pickedDieIndex = null;
           clearDiePickUI();
 
           if (response.noLegalMoves || response.turnSkipped) {
@@ -1030,6 +1029,7 @@ socket.emit("game:move", {
         return;
       }
     }
+
   }
 
 function chooseDieAtIndex(di){
@@ -1231,8 +1231,14 @@ setMsg("ریست لوکال (کنترل اصلی با سرور است).");
       }
 
       if (state?.matchId) currentMatchId = String(state.matchId);
-if (state?.turnId != null) currentTurnId = Number(state.turnId);
-else currentTurnId = null;
+      if (state?.turnId != null) currentTurnId = Number(state.turnId);
+      else currentTurnId = null;
+
+      // ✅ ریست کردن انتخاب تاس پس از دریافت هر استیت جدید از سرور
+      pickedDieIndex = null;
+      pickedDieValue = null;
+      clearDiePickUI();
+
       stopLobbyCountdown();
       joinStatusEl.textContent = "✅ وضعیت بازی دریافت شد";
       serverMsgEl.textContent = "✅ state بازی دریافت شد.";
@@ -1241,6 +1247,7 @@ else currentTurnId = null;
       draw();
       startTurnTimer();
     });
+
 
     socket.io.on("reconnect_attempt", attemptNumber => {
       socketStatusEl.textContent = `در حال تلاش مجدد برای اتصال (${attemptNumber})...`;

@@ -1534,6 +1534,7 @@ console.log("[NO_MOVES] callback return", {
 
   // ---------------- Game: move ----------------
   socket.on("game:move", (payload, callback) => {
+    let m;
     try {
       const matchId = String(payload?.matchId ?? "");
       const pieceId = String(payload?.pieceId ?? "");
@@ -1553,6 +1554,7 @@ if (!Number.isInteger(dieIndex) || (dieIndex !== 0 && dieIndex !== 1)) {
       if (!m || !m.game) return callback?.({ success: false, message: "match پیدا نشد." });
       const moveTurnId = Number(payload?.turnId);
 if (!Number.isInteger(moveTurnId) || moveTurnId !== m.turnId) {
+  console.log("[MOVE_REJECT] turnId mismatch", { moveTurnId, serverTurnId: m.turnId });
   return callback?.({
     success: false,
     message: "این حرکت مربوط به نوبت قدیمی است. دوباره state را بگیر و حرکت کن.",
@@ -1601,20 +1603,18 @@ if (expectedDieValue !== dieValue) {
 
       movePiece(m.game, piece, dieValue);
 
-// ✅ فقط تاس انتخاب‌شده (با index) مصرف شود
+// ✅ کد اصلاح‌شده سرور: حذف تاس بازی شده و بازسازی متغیرهای کمکی بر اساس آرایه واقعی
 if (Array.isArray(m.game.pendingDice)) {
-  if (m.game.pendingDice.length >= 2) {
-    m.game.pendingDice.splice(dieIndex, 1);
-  } else {
-    m.game.pendingDice = [];
-  }
+  m.game.pendingDice.splice(dieIndex, 1);
+} else {
+  m.game.pendingDice = [];
 }
 
-// فقط همان dice مصرف‌شده صفر شود
-if (dieIndex === 0) m.game.dice1 = 0;
-if (dieIndex === 1) m.game.dice2 = 0;
+// مقداردهی مجدد dice1 و dice2 بر اساس اعضای باقی‌مانده آرایه
+m.game.dice1 = m.game.pendingDice[0] ? Number(m.game.pendingDice[0]) : 0;
+m.game.dice2 = m.game.pendingDice[1] ? Number(m.game.pendingDice[1]) : 0;
+m.game.dice = m.game.dice1 + m.game.dice2;
 
-m.game.dice = (m.game.dice1 || 0) + (m.game.dice2 || 0);
 console.log("[MOVE_AFTER_CONSUME]", {
   matchId,
   pendingDice: m.game.pendingDice,
@@ -1671,10 +1671,12 @@ return callback?.({
   turnSkipped: false,
   winnerColor: null,
 });
-    } catch (e) {
-      return callback?.({ success: false, message: e?.message || "move error" });
-    }
-  });
+} catch (e) {
+    return callback?.({ success: false, message: e?.message || "move error" });
+  } finally {
+    if (m?.game) m.game.transitioning = false;
+  }
+});
 });
 
 // Start
