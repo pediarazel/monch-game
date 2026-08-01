@@ -1429,6 +1429,7 @@ m.game.transitioning = false;
       const noLegalMoves = !canMove1 && !canMove2;
 
       if (noLegalMoves) {
+        m.game.transitioning = false;
         // ✅ skip: نوبت عوض میشه
         const myTurnId = m.turnId;
 
@@ -1437,18 +1438,43 @@ m.game.transitioning = false;
         m.game.dice2 = 0;
         m.game.dice = 0;
 
-        m.game.rolled = false;
-        m.game.turnMoved = true;
 
+        m.game.turnMoved = true;
+console.log("[NO_MOVES] before broadcastState", {
+  matchId,
+  myTurnId,
+  currentTurn: m.game.currentTurn,
+  currentTurnColor: colorOrder[m.game.currentTurn],
+  rolled: m.game.rolled,
+  pendingDice: m.game.pendingDice
+});
         broadcastState(m);
 
-        setImmediate(() => {
-          const mm = matches.get(matchId);
-          if (!mm) return;
-          if (mm.turnId !== myTurnId) return;
-          nextTurn(mm);
-        });
+setImmediate(() => {
+  console.log("[NO_MOVES] setImmediate entered", {
+    matchId,
+    myTurnId,
+    turnIdNow: matches.get(matchId)?.turnId,
+    currentTurnNow: matches.get(matchId)?.game?.currentTurn,
+  });
 
+  const mm = matches.get(matchId);
+  if (!mm) return;
+  if (mm.turnId !== myTurnId) {
+    console.log("[NO_MOVES] turnId mismatch, nextTurn skipped", {
+      myTurnId,
+      turnIdNow: mm.turnId,
+    });
+    return;
+  }
+  nextTurn(mm);
+});
+console.log("[NO_MOVES] callback return", {
+  matchId,
+  turnSkipped: true,
+  dice: { d1, d2 },
+  time: Date.now(),
+});
         return callback?.({
           success: true,
           dice1: d1,
