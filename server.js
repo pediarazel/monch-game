@@ -1659,25 +1659,43 @@ socket.on("game:move", (payload, callback) => {
       });
     }
 
-    const pieces = m.game.pieces[currentColor];
-    const piece = pieces.find((p) => p.id === pieceId);
+const piece = m.game.pieces.find(
+  (p) => p.id === pieceId && p.color === currentColor
+);
 
-    if (!piece) {
-      console.log("[MOVE_REJECT] piece not found", { matchId, pieceId });
-      m.game.transitioning = false;
-      return callback?.({ success: false, message: "مهره پیدا نشد." });
-    }
 
-    if (!canPieceMove(m.game, piece, dieValue)) {
-      console.log("[MOVE_REJECT] canPieceMove=false", {
-        matchId,
-        pieceId,
-        dieValue,
-        piece
-      });
-      m.game.transitioning = false;
-      return callback?.({ success: false, message: "حرکت مجاز نیست." });
-    }
+if (!piece) {
+  console.log("[MOVE_REJECT] piece not found", {
+    matchId,
+    pieceId,
+    currentColor,
+    piecesIsArray: Array.isArray(m.game.pieces),
+  });
+
+  m.game.transitioning = false;
+
+  return callback?.({
+    success: false,
+    message: "مهره پیدا نشد.",
+  });
+}
+
+if (!canPieceMove(m.game, piece, dieValue)) {
+  console.log("[MOVE_REJECT] canPieceMove=false", {
+    matchId,
+    pieceId,
+    dieValue,
+    piece,
+  });
+
+  m.game.transitioning = false;
+
+  return callback?.({
+    success: false,
+    message: "حرکت مجاز نیست.",
+  });
+}
+
 
     // انجام حرکت مهره
     movePiece(m.game, piece, dieValue);
