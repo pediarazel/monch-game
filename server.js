@@ -1537,6 +1537,13 @@ console.log("[NO_MOVES] callback return", {
       const pieceId = String(payload?.pieceId ?? "");
       const dieValue = Number(payload?.dieValue);
 const dieIndex = Number(payload?.dieIndex);
+console.log("[MOVE_REQ]", {
+  matchId,
+  pieceId,
+  dieValue,
+  dieIndex,
+  pendingDice: matches.get(matchId)?.game?.pendingDice
+});
 if (!Number.isInteger(dieIndex) || (dieIndex !== 0 && dieIndex !== 1)) {
   return callback?.({ success: false, message: "dieIndex نامعتبر است." });
 }
@@ -1596,6 +1603,13 @@ if (dieIndex === 0) m.game.dice1 = 0;
 if (dieIndex === 1) m.game.dice2 = 0;
 
 m.game.dice = (m.game.dice1 || 0) + (m.game.dice2 || 0);
+console.log("[MOVE_AFTER_CONSUME]", {
+  matchId,
+  pendingDice: m.game.pendingDice,
+  dice1: m.game.dice1,
+  dice2: m.game.dice2,
+  diceSum: m.game.dice
+});
       const winnerColor = checkWinner(m.game);
       m.game.winner = winnerColor || null;
 
