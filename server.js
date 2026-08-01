@@ -1535,6 +1535,8 @@ console.log("[NO_MOVES] callback return", {
   // ---------------- Game: move ----------------
 socket.on("game:move", (payload, callback) => {
   let m;
+  let isTransitioningSet = false; // یک پرچم برای پیگیری فعال شدن قفل
+
   try {
     const matchId = String(payload?.matchId ?? "");
     const pieceId = String(payload?.pieceId ?? "");
@@ -1551,43 +1553,49 @@ socket.on("game:move", (payload, callback) => {
       pendingDice: matches.get(matchId)?.game?.pendingDice
     });
 
-    if (!Number.isInteger(dieIndex) || (dieIndex !== 0 && dieIndex !== 1)) {
-      return callback?.({ success: false, message: "dieIndex نامعتبر است." });
-    }
-
-    // انتساب به متغیر بیرونی m بدون تعریف مجدد با const برای جلوگیری از خطای سینتکس
     m = matches.get(matchId);
     if (!m || !m.game) {
+      // اگر مسابقه پیدا نشد، قفلی فعال نبوده که بخواهیم ریست کنیم.
       return callback?.({ success: false, message: "مسابقه پیدا نشد." });
     }
 
+    // بررسی‌هایی که قبل از فعال شدن قفل انجام می‌شوند
     const moveTurnId = Number(payload?.turnId);
     if (!Number.isInteger(moveTurnId) || moveTurnId !== m.turnId) {
       console.log("[MOVE_REJECT] turnId mismatch", {
         moveTurnId,
         serverTurnId: m.turnId
       });
+      // اینجا قفل فعال نشده، پس نیازی به ریست کردنش نیست.
       return callback?.({
         success: false,
         message: "این حرکت مربوط به نوبت قدیمی است. دوباره state را دریافت کنید.",
       });
     }
 
+    // *** این شرط اصلی است که MOVE_REJECT با transitioning=true را نشان می‌دهد ***
     if (m.game.transitioning) {
       console.log("[MOVE_REJECT] transitioning=true", { matchId });
+      // اینجا هم قفل فعال نشده است.
       return callback?.({
         success: false,
         message: "نوبت در حال پردازش است. لطفاً صبر کنید."
       });
     }
 
-    // قفل کردن روند حرکت بازی
+    // --- از اینجا به بعد، قفل را فعال می‌کنیم ---
     m.game.transitioning = true;
+    isTransitioningSet = true; // پرچم را فعال می‌کنیم
+
+    // بقیه بررسی‌ها که اگر رد شوند، باید قفل را غیرفعال کنند
+    if (!Number.isInteger(dieIndex) || (dieIndex !== 0 && dieIndex !== 1)) {
+      // نیازی به m.game.transitioning = false; اینجا نیست چون در finally مدیریت می‌شود.
+      return callback?.({ success: false, message: "dieIndex نامعتبر است." });
+    }
 
     const userId = Number(socket.user?.userId);
     if (!Number.isInteger(userId) || userId <= 0) {
       console.log("[MOVE_REJECT] invalid userId", { userId });
-      m.game.transitioning = false;
       return callback?.({ success: false, message: "userId نامعتبر است." });
     }
 
@@ -1602,13 +1610,11 @@ socket.on("game:move", (payload, callback) => {
         currentColor,
         currentTurn: m.game.currentTurn
       });
-      m.game.transitioning = false;
       return callback?.({ success: false, message: "الان نوبت شما نیست." });
     }
 
     if (m.game.winner) {
       console.log("[MOVE_REJECT] game already won", { matchId });
-      m.game.transitioning = false;
       return callback?.({ success: false, message: "بازی تمام شده است." });
     }
 
@@ -1622,13 +1628,11 @@ socket.on("game:move", (payload, callback) => {
         rolled: m.game.rolled,
         pendingDice: m.game.pendingDice
       });
-      m.game.transitioning = false;
       return callback?.({ success: false, message: "ابتدا باید تاس بیندازید." });
     }
 
     if (!Number.isInteger(dieValue) || dieValue < 1 || dieValue > 6) {
       console.log("[MOVE_REJECT] invalid dieValue", { matchId, dieValue });
-      m.game.transitioning = false;
       return callback?.({ success: false, message: "مقدار تاس نامعتبر است." });
     }
 
@@ -1639,7 +1643,6 @@ socket.on("game:move", (payload, callback) => {
         dieIndex,
         pendingLength: pending.length
       });
-      m.game.transitioning = false;
       return callback?.({ success: false, message: "تاس انتخاب شده وجود ندارد." });
     }
 
@@ -1652,62 +1655,49 @@ socket.on("game:move", (payload, callback) => {
         dieIndex,
         pendingDice: pending
       });
-      m.game.transitioning = false;
       return callback?.({
         success: false,
         message: "تاس انتخاب شده با مقدار ارسالی مطابقت ندارد."
       });
     }
 
-const piece = m.game.pieces.find(
-  (p) => p.id === pieceId && p.color === currentColor
-);
+    const piece = m.game.pieces.find(
+      (p) => p.id === pieceId && p.color === currentColor
+    );
 
+    if (!piece) {
+      console.log("[MOVE_REJECT] piece not found", {
+        matchId,
+        pieceId,
+        currentColor,
+        piecesIsArray: Array.isArray(m.game.pieces),
+      });
+      return callback?.({
+        success: false,
+        message: "مهره پیدا نشد.",
+      });
+    }
 
-if (!piece) {
-  console.log("[MOVE_REJECT] piece not found", {
-    matchId,
-    pieceId,
-    currentColor,
-    piecesIsArray: Array.isArray(m.game.pieces),
-  });
+    if (!canPieceMove(m.game, piece, dieValue)) {
+      console.log("[MOVE_REJECT] canPieceMove=false", {
+        matchId,
+        pieceId,
+        dieValue,
+        piece,
+      });
+      return callback?.({
+        success: false,
+        message: "حرکت مجاز نیست.",
+      });
+    }
 
-  m.game.transitioning = false;
-
-  return callback?.({
-    success: false,
-    message: "مهره پیدا نشد.",
-  });
-}
-
-if (!canPieceMove(m.game, piece, dieValue)) {
-  console.log("[MOVE_REJECT] canPieceMove=false", {
-    matchId,
-    pieceId,
-    dieValue,
-    piece,
-  });
-
-  m.game.transitioning = false;
-
-  return callback?.({
-    success: false,
-    message: "حرکت مجاز نیست.",
-  });
-}
-
-
-    // انجام حرکت مهره
+    // --- انجام حرکت و پردازش‌های بعدی ---
     movePiece(m.game, piece, dieValue);
-
-    // حذف تاس استفاده شده
     if (Array.isArray(m.game.pendingDice)) {
       m.game.pendingDice.splice(dieIndex, 1);
     } else {
       m.game.pendingDice = [];
     }
-
-    // بازسازی مقادیر تاس‌ها پس از مصرف
     m.game.dice1 = m.game.pendingDice[0] ? Number(m.game.pendingDice[0]) : 0;
     m.game.dice2 = m.game.pendingDice[1] ? Number(m.game.pendingDice[1]) : 0;
     m.game.dice = m.game.dice1 + m.game.dice2;
@@ -1720,15 +1710,12 @@ if (!canPieceMove(m.game, piece, dieValue)) {
       diceSum: m.game.dice
     });
 
-    // بررسی برد
     const hasWon = checkWinner(m.game, currentColor);
     if (hasWon) {
       m.game.winner = currentColor;
       m.game.rolled = false;
       m.game.pendingDice = [];
       broadcastState(m);
-
-      m.game.transitioning = false;
 
       // پردازش مالی مسابقه
       (async () => {
@@ -1741,32 +1728,20 @@ if (!canPieceMove(m.game, piece, dieValue)) {
               finishedAt: new Date(),
             },
           });
-
           const winnerUserId = m.playerColors[currentColor];
           const betAmount = m.betAmount;
           const totalPrize = Math.floor(betAmount * 2 * 0.9);
-
           await db.$transaction([
-            db.user.update({
-              where: { id: winnerUserId },
-              data: { balance: { increment: totalPrize } },
-            }),
-            db.transaction.create({
-              data: {
-                userId: winnerUserId,
-                amount: totalPrize,
-                type: "WIN",
-                description: `برد در مسابقه منچ ${matchId}`,
-              },
-            }),
+            db.user.update({ where: { id: winnerUserId }, data: { balance: { increment: totalPrize } } }),
+            db.transaction.create({ data: { userId: winnerUserId, amount: totalPrize, type: "WIN", description: `برد در مسابقه منچ ${matchId}` } }),
           ]);
-
           console.log("[MATCH_FINALIZE_SUCCESS]", { matchId, winnerUserId, totalPrize });
         } catch (dbErr) {
           console.error("[MATCH_FINALIZE_ERROR]", dbErr);
         }
       })();
 
+      // مهم: اینجا return می‌کنیم، پس finally اجرا خواهد شد.
       return callback?.({
         success: true,
         bonusRoll: false,
@@ -1776,13 +1751,11 @@ if (!canPieceMove(m.game, piece, dieValue)) {
       });
     }
 
-    // اگر هنوز تاسی باقی مانده باشد، نوبت عوض نمی‌شود
+    // اگر هنوز تاسی باقی مانده باشد
     if (m.game.pendingDice.length > 0) {
       m.game.turnMoved = true;
       broadcastState(m);
-
-      m.game.transitioning = false; // آزاد کردن قفل
-
+      // مهم: اینجا return می‌کنیم، پس finally اجرا خواهد شد.
       return callback?.({
         success: true,
         bonusRoll: false,
@@ -1797,10 +1770,9 @@ if (!canPieceMove(m.game, piece, dieValue)) {
     m.game.rolled = false;
     m.game.pendingDice = [];
     broadcastState(m);
+    nextTurn(m); // nextTurn داخل خودش transition را مدیریت می‌کند یا باید اینجا مدیریت شود؟
 
-    m.game.transitioning = false; // آزاد کردن قفل قبل از فرآیند تغییر نوبت بعدی
-    nextTurn(m);
-
+    // مهم: اینجا return می‌کنیم، پس finally اجرا خواهد شد.
     return callback?.({
       success: true,
       bonusRoll: false,
@@ -1811,16 +1783,20 @@ if (!canPieceMove(m.game, piece, dieValue)) {
 
   } catch (e) {
     console.error("Error in game:move:", e);
+    // catch هم اگر به return برسد، finally اجرا می‌شود.
     return callback?.({
       success: false,
       message: e?.message || "move error"
     });
   } finally {
-    if (m?.game) {
-      m.game.transitioning = false; // اطمینان نهایی از آزاد بودن قفل در صورت بروز خطای پیش‌بینی نشده
+    // اگر قفل فعال شده بود، آن را غیرفعال کن.
+    if (isTransitioningSet && m?.game) {
+      m.game.transitioning = false;
+      console.log(`[FINALLY_RESET] transitioning=false for match ${m.id}`);
     }
   }
 });
+
 });
 
 // Start
