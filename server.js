@@ -1734,6 +1734,10 @@ socket.on("game:move", (payload, callback) => {
           // تبدیل شناسه به عدد در صورتی که دیتابیس به شناسه عددی نیاز دارد
           const parsedMatchId = isNaN(Number(matchId)) ? matchId : Number(matchId);
 
+          // --- شروع لاگ‌های دیباگ قبل از عملیات اصلی ---
+          console.log("[DEBUG_MATCH_ID]", { parsedMatchId, currentColor }); // برای اطمینان از matchId و رنگ
+          console.log("[DEBUG_PLAYER_COLORS]", { playerColors: m.playerColors }); // برای اطمینان از map رنگ‌ها
+
           await prisma.match.update({
             where: { id: parsedMatchId },
             data: {
@@ -1742,26 +1746,23 @@ socket.on("game:move", (payload, callback) => {
               finishedAt: new Date(),
             },
           });
-    console.log("[DEBUG_PLAYER_COLORS]", { currentColor, playerColors: m.playerColors });
+          // --- پایان عملیات اصلی match update ---
 
+          // --- دریافت اطلاعات مربوط به شرط و جایزه ---
           const winnerUserId = m.playerColors[currentColor];
-          
-          // دریافت شرط بازی؛ اگر ثبت نشده بود از مقدار پیش‌فرض استفاده می‌شود
-          const betAmount = Number(m.betAmount || 0); 
-                  console.log("[DEBUG_BET_AMOUNT]", { betAmount: Number(m.betAmount || 0) });
+          const betAmount = Number(m.betAmount || 0);
+          console.log("[DEBUG_BET_AMOUNT]", { betAmount: Number(m.betAmount || 0) });
 
           const totalPrize = Math.floor(betAmount * 2 * 0.9);
-                  console.log("[DEBUG_PRIZE_CALCULATION]", { totalPrize });
-        console.log("[DEBUG_WINNER_INFO]", { winnerUserId, currentColor, playerColors: m.playerColors });
+          console.log("[DEBUG_PRIZE_CALCULATION]", { totalPrize });
+          console.log("[DEBUG_WINNER_INFO]", { winnerUserId, currentColor, playerColors: m.playerColors }); // بررسی winnerUserId
 
-
+          // --- شروع تراکنش برای به‌روزرسانی موجودی و ثبت تراکنش ---
           await prisma.$transaction([
-            // به‌روزرسانی موجودی کاربر با فیلد درست (coins)
             prisma.user.update({
               where: { id: winnerUserId },
               data: { coins: { increment: totalPrize } },
             }),
-            // ثبت تراکنش مالی برد
             prisma.transaction.create({
               data: {
                 userId: winnerUserId,
@@ -1771,17 +1772,19 @@ socket.on("game:move", (payload, callback) => {
               },
             }),
           ]);
+          // --- پایان تراکنش ---
 
-          console.log("[MATCH_FINALIZE_SUCCESS]", { 
-            matchId: parsedMatchId, 
-            winnerUserId, 
-            betAmount, 
-            totalPrize 
+          console.log("[MATCH_FINALIZE_SUCCESS]", { // <-- این لاگ باید بعد از موفقیت تراکنش باشد
+            matchId: parsedMatchId,
+            winnerUserId,
+            betAmount,
+            totalPrize
           });
         } catch (dbErr) {
-          console.error("[MATCH_FINALIZE_ERROR]", dbErr);
+          console.error("[MATCH_FINALIZE_ERROR]", dbErr); // <-- و خطا اینجا لاگ می‌شود
         }
       })();
+
 
 
       // مهم: اینجا return می‌کنیم، پس finally اجرا خواهد شد.
