@@ -1731,26 +1731,52 @@ socket.on("game:move", (payload, callback) => {
       // پردازش مالی مسابقه
       (async () => {
         try {
-          await db.match.update({
-            where: { id: matchId },
+          // تبدیل شناسه به عدد در صورتی که دیتابیس به شناسه عددی نیاز دارد
+          const parsedMatchId = isNaN(Number(matchId)) ? matchId : Number(matchId);
+
+          await prisma.match.update({
+            where: { id: parsedMatchId },
             data: {
               status: "FINISHED",
               winnerColor: currentColor,
               finishedAt: new Date(),
             },
           });
+
           const winnerUserId = m.playerColors[currentColor];
-          const betAmount = m.betAmount;
+          
+          // دریافت شرط بازی؛ اگر ثبت نشده بود از مقدار پیش‌فرض استفاده می‌شود
+          const betAmount = Number(m.betAmount || 0); 
           const totalPrize = Math.floor(betAmount * 2 * 0.9);
-          await db.$transaction([
-            db.user.update({ where: { id: winnerUserId }, data: { balance: { increment: totalPrize } } }),
-            db.transaction.create({ data: { userId: winnerUserId, amount: totalPrize, type: "WIN", description: `برد در مسابقه منچ ${matchId}` } }),
+
+          await prisma.$transaction([
+            // به‌روزرسانی موجودی کاربر با فیلد درست (coins)
+            prisma.user.update({
+              where: { id: winnerUserId },
+              data: { coins: { increment: totalPrize } },
+            }),
+            // ثبت تراکنش مالی برد
+            prisma.transaction.create({
+              data: {
+                userId: winnerUserId,
+                amount: totalPrize,
+                type: "WIN",
+                description: `برد در مسابقه منچ ${matchId}`,
+              },
+            }),
           ]);
-          console.log("[MATCH_FINALIZE_SUCCESS]", { matchId, winnerUserId, totalPrize });
+
+          console.log("[MATCH_FINALIZE_SUCCESS]", { 
+            matchId: parsedMatchId, 
+            winnerUserId, 
+            betAmount, 
+            totalPrize 
+          });
         } catch (dbErr) {
           console.error("[MATCH_FINALIZE_ERROR]", dbErr);
         }
       })();
+
 
       // مهم: اینجا return می‌کنیم، پس finally اجرا خواهد شد.
       return callback?.({
