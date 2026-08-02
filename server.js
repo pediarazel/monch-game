@@ -1391,22 +1391,22 @@ m.game.transitioning = true;
       const currentColor = colorOrder[m.game.currentTurn];
       const expectedUserId = m.playerColors[currentColor];
       if (expectedUserId == null || expectedUserId !== userId) {
-        m.game.transitioning = false;
+        
         return callback?.({ success: false, message: "الان نوبت شما نیست." });
       }
 
 if (m.game.winner) {
-  m.game.transitioning = false;
+  
   return callback?.({ success: false, message: "بازی تمام شده است." });
 }
 
 if (!m.game.turnDeadlineAt || Date.now() > m.game.turnDeadlineAt) {
-  m.game.transitioning = false;
+  
   return callback?.({ success: false, message: "نوبت منقضی شده یا هنوز شروع نشده است." });
 }
 
 if (m.game.rolled) {
-  m.game.transitioning = false;
+  
   return callback?.({ success: false, message: "قبلاً تاس ریختی." });
 }
 
@@ -1449,7 +1449,7 @@ console.log("[BONUS_6]", {
   pendingDice: m.game.pendingDice,
 });
         broadcastState(m);
-m.game.transitioning = false;
+
         return callback?.({
           success: true,
           dice1: 6,
@@ -1472,7 +1472,7 @@ m.game.transitioning = false;
       const noLegalMoves = !canMove1 && !canMove2;
 
       if (noLegalMoves) {
-        m.game.transitioning = false;
+        
         // ✅ skip: نوبت عوض میشه
         const myTurnId = m.turnId;
 
@@ -1514,6 +1514,8 @@ console.log("[NO_MOVES] callback return", {
         });
       }
 
+      m.game.transitioning = false;
+
       broadcastState(m);
 
       return callback?.({
@@ -1526,8 +1528,9 @@ console.log("[NO_MOVES] callback return", {
         pendingDice: m.game.pendingDice.slice(),
         winnerColor: null,
       });
+
 } catch (e) {
-  if (m?.game) m.game.transitioning = false;
+  if (m?.game) 
   return callback?.({ success: false, message: e?.message || "roll error" });
 }
   });
@@ -1589,7 +1592,7 @@ socket.on("game:move", (payload, callback) => {
 
     // بقیه بررسی‌ها که اگر رد شوند، باید قفل را غیرفعال کنند
     if (!Number.isInteger(dieIndex) || (dieIndex !== 0 && dieIndex !== 1)) {
-      // نیازی به m.game.transitioning = false; اینجا نیست چون در finally مدیریت می‌شود.
+      // نیازی به  اینجا نیست چون در finally مدیریت می‌شود.
       return callback?.({ success: false, message: "dieIndex نامعتبر است." });
     }
 
@@ -1791,7 +1794,7 @@ socket.on("game:move", (payload, callback) => {
   } finally {
     // اگر قفل فعال شده بود، آن را غیرفعال کن.
     if (isTransitioningSet && m?.game) {
-      m.game.transitioning = false;
+      
       console.log(`[FINALLY_RESET] transitioning=false for match ${m.id}`);
     }
   }
