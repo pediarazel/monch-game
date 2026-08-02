@@ -1742,6 +1742,7 @@ socket.on("game:move", (payload, callback) => {
               finishedAt: new Date(),
             },
           });
+    console.log("[DEBUG_PLAYER_COLORS]", { currentColor, playerColors: m.playerColors });
 
           const winnerUserId = m.playerColors[currentColor];
           
