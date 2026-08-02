@@ -1747,7 +1747,12 @@ socket.on("game:move", (payload, callback) => {
           
           // دریافت شرط بازی؛ اگر ثبت نشده بود از مقدار پیش‌فرض استفاده می‌شود
           const betAmount = Number(m.betAmount || 0); 
+                  console.log("[DEBUG_BET_AMOUNT]", { betAmount: Number(m.betAmount || 0) });
+
           const totalPrize = Math.floor(betAmount * 2 * 0.9);
+                  console.log("[DEBUG_PRIZE_CALCULATION]", { totalPrize });
+        console.log("[DEBUG_WINNER_INFO]", { winnerUserId, currentColor, playerColors: m.playerColors });
+
 
           await prisma.$transaction([
             // به‌روزرسانی موجودی کاربر با فیلد درست (coins)
