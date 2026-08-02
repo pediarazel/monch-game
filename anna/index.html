@@ -889,9 +889,11 @@ if (pickedDieIndex != null) {
   dice1El.style.opacity = "0.5";
   dice2El.style.opacity = "0.5";
   pickedDieValue = null;
+  pickedDieIndex = null;
   clearDiePickUI();
   setMsg(myColor === turnColor ? "تاس بیندازید." : "هنوز نوبت شما نیست.");
 }
+
 }
 
   // آپدیت UI
@@ -925,7 +927,9 @@ if (pickedDieIndex != null) {
 
     rollBtn.disabled = true;
     pickedDieValue = null;
+    pickedDieIndex = null;
     clearDiePickUI();
+
 
     let animationCount = 0;
 
@@ -950,7 +954,9 @@ if (pickedDieIndex != null) {
         dice2El.textContent = String(response.dice2 ?? "🎲");
 
         pickedDieValue = null;
+        pickedDieIndex = null;
         clearDiePickUI();
+
 
         if (response.noLegalMoves || response.turnSkipped) {
           setMsg("هیچ حرکت مجازی برای این دو تاس وجود نداشت.");
@@ -1241,10 +1247,16 @@ setMsg("ریست لوکال (کنترل اصلی با سرور است).");
       if (state?.turnId != null) currentTurnId = Number(state.turnId);
       else currentTurnId = null;
 
-      // ✅ ریست کردن انتخاب تاس پس از دریافت هر استیت جدید از سرور
-      pickedDieIndex = null;
-      pickedDieValue = null;
-      clearDiePickUI();
+      const pendingDice = Array.isArray(state?.pendingDice) ? state.pendingDice : [];
+
+      if (!state?.rolled || pendingDice.length === 0 || pickedDieIndex == null || pendingDice.length <= pickedDieIndex) {
+        pickedDieIndex = null;
+        pickedDieValue = null;
+        clearDiePickUI();
+      } else {
+        pickedDieValue = pendingDice[pickedDieIndex];
+      }
+
 
       stopLobbyCountdown();
       joinStatusEl.textContent = "✅ وضعیت بازی دریافت شد";
@@ -1289,8 +1301,10 @@ setMsg("ریست لوکال (کنترل اصلی با سرور است).");
     myColor = null;
     currentMatchId = null;
     pickedDieValue = null;
-lastDice1 = 0;
-lastDice2 = 0;
+    pickedDieIndex = null;
+    lastDice1 = 0;
+    lastDice2 = 0;
+
     stopLobbyCountdown();
     peopleNewsEl.textContent = "";
 
