@@ -92,6 +92,25 @@
       white-space:pre-wrap;
       word-break:break-word;
     }
+    /* یکدست و سفید کردن هر دو تاس */
+#dice1, #dice2, .die, .dice {
+  color: #ffffff !important;
+  opacity: 1 !important;
+  filter: none !important;
+  background-color: #252525 !important;
+  border: 2px solid #ffffff !important;
+  text-shadow: 0 0 5px rgba(255, 255, 255, 0.8) !important;
+}
+
+#dice1:disabled, #dice2:disabled,
+#dice1.selected, #dice2.selected,
+#dice1.used, #dice2.used,
+#dice1.picked, #dice2.picked {
+  color: #ffffff !important;
+  opacity: 1 !important;
+  filter: none !important;
+}
+
   </style>
 </head>
 <body>
@@ -572,6 +591,8 @@ let lastDice2 = 0;
   // انتخاب تاس
   let pickedDieValue = null;
 let pickedDieIndex = null; // 0 برای تاس 1 ، 1 برای تاس 2
+let moveInFlight = false;
+
   function clearDiePickUI(){
     dice1El.classList.remove("selected");
     dice2El.classList.remove("selected");
@@ -910,6 +931,13 @@ if (pickedDieIndex != null) {
   }
 
   function rollDice() {
+    console.log("[ROLL_CLICK]", {
+  connected: socket?.connected,
+  currentMatchId,
+  canRoll: canRollLocal(),
+  rolled: gameState?.rolled
+});
+
     if (!socket || !socket.connected) {
       setMsg("اتصال به سرور برقرار نیست.");
       return;
@@ -926,6 +954,7 @@ if (pickedDieIndex != null) {
     }
 
     rollBtn.disabled = true;
+    moveInFlight = false;
     pickedDieValue = null;
     pickedDieIndex = null;
     clearDiePickUI();
@@ -944,6 +973,8 @@ if (pickedDieIndex != null) {
     }, 70);
 
     socket.emit("game:roll", { matchId: currentMatchId }, (response) => {
+   console.log("[ROLL_RESPONSE]", response);
+   
       clearInterval(animation);
 
       dice1El.classList.remove("rolling");
@@ -1008,40 +1039,89 @@ if (pickedDieIndex != null) {
       // و سپس منتظر کلیک روی تاس بماند. فعلا این بخش را نادیده می‌گیریم.
       return; // منتظر می‌مانیم تا تاس انتخاب شود
 
-    } else { // یک تاس از قبل انتخاب شده است (pickedDieIndex != null)
-      // حرکت را ارسال کن
+    } else {
+      // تا وقتی پاسخ حرکت قبلی نیامده، حرکت دیگری ارسال نشود
+      if (moveInFlight) {
+        return;
+      }
+
+      // قبل از پاک‌کردن انتخاب، مقدار تاس را نگه می‌داریم
+      const selectedDieValue = Number(pickedDieValue);
+      const selectedDieIndex = Number(pickedDieIndex);
+
+      if (
+        !Number.isInteger(selectedDieValue) ||
+        selectedDieValue < 1 ||
+        selectedDieValue > 6
+      ) {
+        setMsg("تاس انتخاب‌شده معتبر نیست.");
+        return;
+      }
+
+      if (
+        !Number.isInteger(selectedDieIndex) ||
+        selectedDieIndex < 0
+      ) {
+        setMsg("ابتدا یکی از تاس‌ها را انتخاب کن.");
+        return;
+      }
+
+      // قفل حرکت فعال می‌شود
+      moveInFlight = true;
+
+      // انتخاب قبلی فوراً پاک می‌شود
+      pickedDieValue = null;
+      pickedDieIndex = null;
+      clearDiePickUI();
+
       socket.emit("game:move", {
         matchId: currentMatchId,
         turnId: currentTurnId,
         pieceId: clickedPiece.id,
-        dieValue: Number(pickedDieValue),
-        dieIndex: Number(pickedDieIndex)
+        dieValue: selectedDieValue,
+        dieIndex: selectedDieIndex
       }, (response) => {
+        // پاسخ سرور رسید؛ قفل باز می‌شود
+        moveInFlight = false;
+
         if (!response?.success) {
           setMsg(response?.message || "حرکت مجاز نیست.");
-          // ✅ مهم: اگر حرکت ناموفق بود، انتخاب تاس را ریست نکن
+
+          // اگر حرکت رد شد و همان تاس هنوز موجود بود،
+          // دوباره آن تاس را انتخاب می‌کنیم
+          const pending = Array.isArray(gameState?.pendingDice)
+            ? gameState.pendingDice
+            : [];
+
+          if (
+            gameState?.rolled &&
+            pending[selectedDieIndex] === selectedDieValue
+          ) {
+            pickedDieIndex = selectedDieIndex;
+            pickedDieValue = selectedDieValue;
+            syncDiePickUI();
+          }
+
           return;
         }
 
-        // ✅ موفقیت: ریست کردن انتخاب‌ها
-        pickedDieValue = null;
-        pickedDieIndex = null;
-        clearDiePickUI(); // این تابع را در مرحله ۱ پاک نکردیم و هنوز لازم است
-
-        // ... (بقیه کد مربوط به نمایش پیام‌ها و وضعیت بازی) ...
         if (response.noLegalMoves || response.turnSkipped) {
           setMsg("حرکت انجام شد؛ نوبت تمام شد.");
         } else if (response.winnerColor) {
           setMsg("بازی تمام شد.");
         } else if (response.bonusRoll) {
           setMsg("جفت ۶! دوباره تاس بینداز.");
-        } else if (Array.isArray(response.pendingDice) && response.pendingDice.length > 0) {
+        } else if (
+          Array.isArray(response.pendingDice) &&
+          response.pendingDice.length > 0
+        ) {
           setMsg("تاس بعدی را انتخاب کن.");
         } else {
           setMsg("حرکت انجام شد.");
         }
       });
     }
+
   }
 
 
