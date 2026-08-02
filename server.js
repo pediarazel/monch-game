@@ -1372,43 +1372,46 @@ io.on("connection", (socket) => {
 
   // ---------------- Game: roll ----------------
   socket.on("game:roll", (payload, callback) => {
+    let m;
     try {
       const matchId = String(payload?.matchId ?? "");
-      const m = matches.get(matchId);
+      m = matches.get(matchId);
       if (!m || !m.game || !m.playerColors) {
         return callback?.({ success: false, message: "match پیدا نشد." });
       }
-if (m.game.transitioning) {
-  return callback?.({ success: false, message: "نوبت در حال پردازش است. لطفاً صبر کنید." });
-}
-m.game.transitioning = true;
+
+      if (m.game.transitioning) {
+        return callback?.({ success: false, message: "نوبت در حال پردازش است. لطفاً صبر کنید." });
+      }
+      m.game.transitioning = true;
 
       const userId = Number(socket.user?.userId);
       if (!Number.isInteger(userId) || userId <= 0) {
+        m.game.transitioning = false;
         return callback?.({ success: false, message: "userId نامعتبر است." });
       }
 
       const currentColor = colorOrder[m.game.currentTurn];
       const expectedUserId = m.playerColors[currentColor];
       if (expectedUserId == null || expectedUserId !== userId) {
-        
+        m.game.transitioning = false;
         return callback?.({ success: false, message: "الان نوبت شما نیست." });
       }
 
-if (m.game.winner) {
-  
-  return callback?.({ success: false, message: "بازی تمام شده است." });
-}
+      if (m.game.winner) {
+        m.game.transitioning = false;
+        return callback?.({ success: false, message: "بازی تمام شده است." });
+      }
 
-if (!m.game.turnDeadlineAt || Date.now() > m.game.turnDeadlineAt) {
-  
-  return callback?.({ success: false, message: "نوبت منقضی شده یا هنوز شروع نشده است." });
-}
+      if (!m.game.turnDeadlineAt || Date.now() > m.game.turnDeadlineAt) {
+        m.game.transitioning = false;
+        return callback?.({ success: false, message: "نوبت منقضی شده یا هنوز شروع نشده است." });
+      }
 
-if (m.game.rolled) {
-  
-  return callback?.({ success: false, message: "قبلاً تاس ریختی." });
-}
+      if (m.game.rolled) {
+        m.game.transitioning = false;
+        return callback?.({ success: false, message: "قبلاً تاس ریختی." });
+      }
 
       const d1 = getNextDiceValueFromMatch();
       const d2 = getNextDiceValueFromMatch();
@@ -1416,38 +1419,40 @@ if (m.game.rolled) {
       m.game.dice1 = d1;
       m.game.dice2 = d2;
       m.game.dice = d1 + d2;
+
       console.log("[ROLL_RESULT]", {
-  matchId: m.matchId,
-  currentTurn: m.game.currentTurn,
-  activeColor: colorOrder[m.game.currentTurn],
-  dice1: d1,
-  dice2: d2,
-  diceSum: d1 + d2,
-});
+        matchId: m.matchId,
+        currentTurn: m.game.currentTurn,
+        activeColor: colorOrder[m.game.currentTurn],
+        dice1: d1,
+        dice2: d2,
+        diceSum: d1 + d2,
+      });
 
       const isBonusSix = d1 === 6 && d2 === 6;
 
       if (isBonusSix) {
-        // ✅ bonus: نوبت عوض نشه، رول مجدد مجاز باشه
         m.game.dice1 = 6;
         m.game.dice2 = 6;
         m.game.dice = 12;
 
-        m.game.pendingDice = []; // چون حرکت نمی‌خوایم اینجا انجام بدیم
-        m.game.rolled = false;    // اجازه roll دوباره
+        m.game.pendingDice = [];
+        m.game.rolled = false;
         m.game.turnMoved = false;
 
-        // deadline رو تمدید کن تا کاربر فرصت کلیک roll داشته باشه
         m.game.turnDeadlineAt = Date.now() + TURN_MS;
         m.turnDeadlineAt = m.game.turnDeadlineAt;
-console.log("[BONUS_6]", {
-  matchId: m.matchId,
-  activeColor: colorOrder[m.game.currentTurn],
-  dice1: m.game.dice1,
-  dice2: m.game.dice2,
-  diceSum: m.game.dice,
-  pendingDice: m.game.pendingDice,
-});
+
+        console.log("[BONUS_6]", {
+          matchId: m.matchId,
+          activeColor: colorOrder[m.game.currentTurn],
+          dice1: m.game.dice1,
+          dice2: m.game.dice2,
+          diceSum: m.game.dice,
+          pendingDice: m.game.pendingDice,
+        });
+
+        m.game.transitioning = false;
         broadcastState(m);
 
         return callback?.({
@@ -1462,7 +1467,6 @@ console.log("[BONUS_6]", {
         });
       }
 
-      // حالت عادی/اسکیپ:
       m.game.pendingDice = [d1, d2];
       m.game.rolled = true;
       m.game.turnMoved = false;
@@ -1472,37 +1476,38 @@ console.log("[BONUS_6]", {
       const noLegalMoves = !canMove1 && !canMove2;
 
       if (noLegalMoves) {
-        
-        // ✅ skip: نوبت عوض میشه
         const myTurnId = m.turnId;
 
         m.game.pendingDice = [];
         m.game.dice1 = 0;
         m.game.dice2 = 0;
         m.game.dice = 0;
-
-
         m.game.turnMoved = true;
-console.log("[NO_MOVES] before broadcastState", {
-  matchId,
-  myTurnId,
-  currentTurn: m.game.currentTurn,
-  currentTurnColor: colorOrder[m.game.currentTurn],
-  rolled: m.game.rolled,
-  pendingDice: m.game.pendingDice
-});
+
+        console.log("[NO_MOVES] before broadcastState", {
+          matchId,
+          myTurnId,
+          currentTurn: m.game.currentTurn,
+          currentTurnColor: colorOrder[m.game.currentTurn],
+          rolled: m.game.rolled,
+          pendingDice: m.game.pendingDice
+        });
+
+        m.game.transitioning = false;
         broadcastState(m);
 
-const mm = matches.get(matchId);
-if (mm && mm.turnId === myTurnId) {
-  nextTurn(mm);
-}
-console.log("[NO_MOVES] callback return", {
-  matchId,
-  turnSkipped: true,
-  dice: { d1, d2 },
-  time: Date.now(),
-});
+        const mm = matches.get(matchId);
+        if (mm && mm.turnId === myTurnId) {
+          nextTurn(mm);
+        }
+
+        console.log("[NO_MOVES] callback return", {
+          matchId,
+          turnSkipped: true,
+          dice: { d1, d2 },
+          time: Date.now(),
+        });
+
         return callback?.({
           success: true,
           dice1: d1,
@@ -1515,7 +1520,6 @@ console.log("[NO_MOVES] callback return", {
       }
 
       m.game.transitioning = false;
-
       broadcastState(m);
 
       return callback?.({
@@ -1529,11 +1533,15 @@ console.log("[NO_MOVES] callback return", {
         winnerColor: null,
       });
 
-} catch (e) {
-  if (m?.game) 
-  return callback?.({ success: false, message: e?.message || "roll error" });
-}
+    } catch (e) {
+      if (m?.game) {
+        m.game.transitioning = false;
+      }
+      console.error("Error in game:roll:", e);
+      return callback?.({ success: false, message: e?.message || "roll error" });
+    }
   });
+
 
   // ---------------- Game: move ----------------
 socket.on("game:move", (payload, callback) => {
@@ -1794,10 +1802,11 @@ socket.on("game:move", (payload, callback) => {
   } finally {
     // اگر قفل فعال شده بود، آن را غیرفعال کن.
     if (isTransitioningSet && m?.game) {
-      
-      console.log(`[FINALLY_RESET] transitioning=false for match ${m.id}`);
+      m.game.transitioning = false;
+      console.log(`[FINALLY_RESET] transitioning=false for match ${m.matchId}`);
     }
   }
+
 });
 
 });
