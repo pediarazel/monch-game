@@ -1732,22 +1732,33 @@ socket.on("game:move", async (payload, callback) => {
       // پردازش مالی مسابقه
       (async () => {
         try {
-          // تبدیل شناسه به عدد در صورتی که دیتابیس به شناسه عددی نیاز دارد
-          const parsedMatchId = isNaN(Number(matchId)) ? matchId : Number(matchId);
+// شناسه Match در Prisma از نوع String است؛ آن را همیشه رشته نگه می‌داریم.
+const dbMatchId = String(matchId);
 
-          // --- شروع لاگ‌های دیباگ قبل از عملیات اصلی ---
-          console.log("[DEBUG_MATCH_ID]", { parsedMatchId, currentColor }); // برای اطمینان از matchId و رنگ
-          console.log("[DEBUG_PLAYER_COLORS]", { playerColors: m.playerColors }); // برای اطمینان از map رنگ‌ها
+// --- شروع لاگ‌های دیباگ قبل از عملیات اصلی ---
+console.log("[DEBUG_MATCH_ID]", { dbMatchId, currentColor });
+console.log("[DEBUG_PLAYER_COLORS]", { playerColors: m.playerColors });
 
-          await prisma.match.update({
-            where: { id: parsedMatchId },
-            data: {
-              status: "FINISHED",
-              winnerColor: currentColor,
-              finishedAt: new Date(),
-            },
-          });
-          // --- پایان عملیات اصلی match update ---
+// اگر Match از قبل ساخته شده باشد پایان آن ثبت می‌شود.
+// اگر به هر دلیلی رکورد آن وجود نداشته باشد، ساخته می‌شود تا خطای P2025 رخ ندهد.
+await prisma.match.upsert({
+  where: { id: dbMatchId },
+  update: {
+    status: "FINISHED",
+    winnerColor: currentColor,
+    finishedAt: new Date(),
+  },
+  create: {
+    id: dbMatchId,
+    status: "FINISHED",
+    winnerColor: currentColor,
+    finishedAt: new Date(),
+    playerColors: m.playerColors || {},
+    betAmount: String(m.betAmount || 0),
+  },
+});
+// --- پایان عملیات اصلی Match upsert ---
+
 
           // --- دریافت اطلاعات مربوط به شرط و جایزه ---
           const winnerUserId = m.playerColors[currentColor];
@@ -1777,7 +1788,8 @@ note: `برد در مسابقه منچ ${matchId}`,
           // --- پایان تراکنش ---
 
           console.log("[MATCH_FINALIZE_SUCCESS]", { // <-- این لاگ باید بعد از موفقیت تراکنش باشد
-            matchId: parsedMatchId,
+matchId: dbMatchId,
+
             winnerUserId,
             betAmount,
             totalPrize

@@ -869,51 +869,74 @@ if (gameState.winner) {
     const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
     const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.rolled && !gameState.winner;
     rollBtn.disabled = !canRoll;
-const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
-const d1 = Number(gameState.dice1 ?? 0);
-const d2 = Number(gameState.dice2 ?? 0);
+  const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
+  const d1 = Number(gameState.dice1 ?? 0);
+  const d2 = Number(gameState.dice2 ?? 0);
 
-const show1 = pendingDice.length >= 1 ? pendingDice[0] : 0;
-const show2 = pendingDice.length >= 2 ? pendingDice[1] : 0;
+  // تاس قابل حرکت فقط از pendingDice خوانده می‌شود.
+  // در جفت 6، pendingDice خالی است اما dice1 و dice2 باید نمایش داده شوند.
+  const hasPendingDice = pendingDice.length > 0;
+  const hasResultDice = d1 > 0 || d2 > 0;
 
-// اگر pendingDice خالیه یعنی تاس‌های فعلی مصرف/تمام شدن
-const shouldShowDice = (show1 > 0 || show2 > 0);
+  const show1 = hasPendingDice ? Number(pendingDice[0] ?? 0) : d1;
+  const show2 = hasPendingDice ? Number(pendingDice[1] ?? 0) : d2;
 
-if (shouldShowDice) {
-  dice1El.textContent = (show1 > 0 ? String(show1) : "🎲");
-  dice2El.textContent = (show2 > 0 ? String(show2) : "🎲");
+  const canPickDice =
+    myColor === turnColor &&
+    gameState.rolled === true &&
+    hasPendingDice;
 
-  const isDice2Available = show2 > 0;
-  dice2El.style.pointerEvents = isDice2Available ? "auto" : "none";
-  dice2El.style.opacity = isDice2Available ? "1" : "0.5";
+  if (hasPendingDice || hasResultDice) {
+    dice1El.textContent = show1 > 0 ? String(show1) : "🎲";
+    dice2El.textContent = show2 > 0 ? String(show2) : "🎲";
 
-  dice1El.style.pointerEvents = (myColor === turnColor) ? "auto" : "none";
+    const isDice1Available = canPickDice && show1 > 0;
+    const isDice2Available = canPickDice && show2 > 0;
 
-if (pickedDieIndex != null) {
-  const pendingLen = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice.length : 0;
-  if (pendingLen <= pickedDieIndex) {
+    dice1El.style.pointerEvents = isDice1Available ? "auto" : "none";
+    dice1El.style.opacity = isDice1Available ? "1" : "0.5";
+
+    dice2El.style.pointerEvents = isDice2Available ? "auto" : "none";
+    dice2El.style.opacity = isDice2Available ? "1" : "0.5";
+
+    if (pickedDieIndex != null) {
+      const pendingLen = pendingDice.length;
+
+      if (!canPickDice || pendingLen <= pickedDieIndex) {
+        pickedDieValue = null;
+        pickedDieIndex = null;
+        clearDiePickUI();
+      }
+    }
+
+    syncDiePickUI();
+
+    if (canPickDice) {
+      setMsg(
+        pickedDieValue == null
+          ? "تاس خودت را انتخاب کن."
+          : "حالا یک مهره را بزن."
+      );
+    } else if (d1 === 6 && d2 === 6 && !gameState.rolled) {
+      setMsg("جفت ۶ آمد. تاس جایزه داری.");
+    } else if (myColor !== turnColor) {
+      setMsg("هنوز نوبت شما نیست.");
+    } else {
+      setMsg("تاس بیندازید.");
+    }
+  } else {
+    dice1El.textContent = "🎲";
+    dice2El.textContent = "🎲";
+    dice1El.style.pointerEvents = "none";
+    dice1El.style.opacity = "0.5";
+    dice2El.style.pointerEvents = "none";
+    dice2El.style.opacity = "0.5";
     pickedDieValue = null;
     pickedDieIndex = null;
     clearDiePickUI();
+    setMsg(myColor === turnColor ? "تاس بیندازید." : "هنوز نوبت شما نیست.");
   }
-}
-  syncDiePickUI();
 
-  setMsg(myColor === turnColor
-    ? (pickedDieValue == null ? "تاس خودت را انتخاب کن." : "حالا یک مهره را بزن.")
-    : "هنوز نوبت شما نیست.");
-} else {
-  dice1El.textContent = "🎲";
-  dice2El.textContent = "🎲";
-  dice1El.style.pointerEvents = "none";
-  dice2El.style.pointerEvents = "none";
-  dice1El.style.opacity = "0.5";
-  dice2El.style.opacity = "0.5";
-  pickedDieValue = null;
-  pickedDieIndex = null;
-  clearDiePickUI();
-  setMsg(myColor === turnColor ? "تاس بیندازید." : "هنوز نوبت شما نیست.");
-}
 
 }
 
