@@ -1416,108 +1416,72 @@ io.on("connection", (socket) => {
       const d1 = getNextDiceValueFromMatch();
       const d2 = getNextDiceValueFromMatch();
 
-      m.game.dice1 = d1;
-      m.game.dice2 = d2;
-      m.game.dice = d1 + d2;
+        m.game.dice1 = d1;
+        m.game.dice2 = d2;
+        m.game.dice = d1 + d2;
 
-      console.log("[ROLL_RESULT]", {
-        matchId: m.matchId,
-        currentTurn: m.game.currentTurn,
-        activeColor: colorOrder[m.game.currentTurn],
-        dice1: d1,
-        dice2: d2,
-        diceSum: d1 + d2,
-      });
-
-      const isBonusSix = d1 === 6 && d2 === 6;
-
-      if (isBonusSix) {
-        m.game.dice1 = 6;
-        m.game.dice2 = 6;
-        m.game.dice = 12;
-
-        m.game.pendingDice = [];
-        m.game.rolled = false;
-        m.game.turnMoved = false;
-
-        m.game.turnDeadlineAt = Date.now() + TURN_MS;
-        m.turnDeadlineAt = m.game.turnDeadlineAt;
-
-        console.log("[BONUS_6]", {
+        console.log("[ROLL_RESULT]", {
           matchId: m.matchId,
-          activeColor: colorOrder[m.game.currentTurn],
-          dice1: m.game.dice1,
-          dice2: m.game.dice2,
-          diceSum: m.game.dice,
-          pendingDice: m.game.pendingDice,
-        });
-
-        m.game.transitioning = false;
-        broadcastState(m);
-
-        return callback?.({
-          success: true,
-          dice1: 6,
-          dice2: 6,
-          bonusRoll: true,
-          pendingDice: [],
-          noLegalMoves: false,
-          turnSkipped: false,
-          winnerColor: null,
-        });
-      }
-
-      m.game.pendingDice = [d1, d2];
-      m.game.rolled = true;
-      m.game.turnMoved = false;
-
-      const canMove1 = hasLegalMoveForDie(m.game, d1);
-      const canMove2 = hasLegalMoveForDie(m.game, d2);
-      const noLegalMoves = !canMove1 && !canMove2;
-
-      if (noLegalMoves) {
-        const myTurnId = m.turnId;
-
-        m.game.pendingDice = [];
-        m.game.dice1 = 0;
-        m.game.dice2 = 0;
-        m.game.dice = 0;
-        m.game.turnMoved = true;
-
-        console.log("[NO_MOVES] before broadcastState", {
-          matchId,
-          myTurnId,
           currentTurn: m.game.currentTurn,
-          currentTurnColor: colorOrder[m.game.currentTurn],
-          rolled: m.game.rolled,
-          pendingDice: m.game.pendingDice
-        });
-
-        m.game.transitioning = false;
-        broadcastState(m);
-
-        const mm = matches.get(matchId);
-        if (mm && mm.turnId === myTurnId) {
-          nextTurn(mm);
-        }
-
-        console.log("[NO_MOVES] callback return", {
-          matchId,
-          turnSkipped: true,
-          dice: { d1, d2 },
-          time: Date.now(),
-        });
-
-        return callback?.({
-          success: true,
+          activeColor: colorOrder[m.game.currentTurn],
           dice1: d1,
           dice2: d2,
-          noLegalMoves: true,
-          turnSkipped: true,
-          bonusRoll: false,
-          pendingDice: [],
+          diceSum: d1 + d2,
         });
-      }
+
+        // هر دو تاس، از جمله جفت ۶، برای انتخاب و حرکت نگه داشته می‌شوند.
+        m.game.pendingDice = [d1, d2];
+        m.game.rolled = true;
+        m.game.turnMoved = false;
+
+        const canMove1 = hasLegalMoveForDie(m.game, d1);
+        const canMove2 = hasLegalMoveForDie(m.game, d2);
+        const noLegalMoves = !canMove1 && !canMove2;
+
+        if (noLegalMoves) {
+          const myTurnId = m.turnId;
+
+          m.game.pendingDice = [];
+          m.game.dice1 = 0;
+          m.game.dice2 = 0;
+          m.game.dice = 0;
+          m.game.turnMoved = true;
+
+          console.log("[NO_MOVES] before broadcastState", {
+            matchId,
+            myTurnId,
+            currentTurn: m.game.currentTurn,
+            currentTurnColor: colorOrder[m.game.currentTurn],
+            rolled: m.game.rolled,
+            pendingDice: m.game.pendingDice
+          });
+
+          m.game.transitioning = false;
+          broadcastState(m);
+
+          const mm = matches.get(matchId);
+          if (mm && mm.turnId === myTurnId) {
+            nextTurn(mm);
+          }
+
+          console.log("[NO_MOVES] callback return", {
+            matchId,
+            turnSkipped: true,
+            dice: { d1, d2 },
+            time: Date.now(),
+          });
+
+          return callback?.({
+            success: true,
+            dice1: d1,
+            dice2: d2,
+            noLegalMoves: true,
+            turnSkipped: true,
+            bonusRoll: false,
+            pendingDice: [],
+          });
+        }
+
 
       m.game.transitioning = false;
       broadcastState(m);
@@ -1729,75 +1693,58 @@ socket.on("game:move", async (payload, callback) => {
       m.game.pendingDice = [];
       broadcastState(m);
 
-      // پردازش مالی مسابقه
+      // ثبت نتیجه مسابقه و تسویه صحیح سکه‌ها.
+      // مبلغ ورود بازی در m.tier نگهداری می‌شود، نه m.betAmount.
       (async () => {
         try {
-// شناسه Match در Prisma از نوع String است؛ آن را همیشه رشته نگه می‌داریم.
-const dbMatchId = String(matchId);
+          const dbMatchId = String(matchId);
 
-// --- شروع لاگ‌های دیباگ قبل از عملیات اصلی ---
-console.log("[DEBUG_MATCH_ID]", { dbMatchId, currentColor });
-console.log("[DEBUG_PLAYER_COLORS]", { playerColors: m.playerColors });
+          console.log("[DEBUG_MATCH_ID]", {
+            dbMatchId,
+            currentColor,
+            tier: m.tier,
+          });
 
-// اگر Match از قبل ساخته شده باشد پایان آن ثبت می‌شود.
-// اگر به هر دلیلی رکورد آن وجود نداشته باشد، ساخته می‌شود تا خطای P2025 رخ ندهد.
-await prisma.match.upsert({
-  where: { id: dbMatchId },
-  update: {
-    status: "FINISHED",
-    winnerColor: currentColor,
-    finishedAt: new Date(),
-  },
-  create: {
-    id: dbMatchId,
-    status: "FINISHED",
-    winnerColor: currentColor,
-    finishedAt: new Date(),
-    playerColors: m.playerColors || {},
-    betAmount: String(m.betAmount || 0),
-  },
-});
-// --- پایان عملیات اصلی Match upsert ---
+          console.log("[DEBUG_PLAYER_COLORS]", {
+            playerColors: m.playerColors,
+          });
 
+          // نتیجه بازی را در دیتابیس ثبت می‌کنیم.
+          // اگر رکورد قبلاً وجود نداشته باشد، ایجاد می‌شود.
+          await prisma.match.upsert({
+            where: { id: dbMatchId },
+            update: {
+              status: "FINISHED",
+              winnerColor: currentColor,
+              finishedAt: new Date(),
+            },
+            create: {
+              id: dbMatchId,
+              status: "FINISHED",
+              winnerColor: currentColor,
+              finishedAt: new Date(),
+              playerColors: m.playerColors || {},
+              betAmount: String(m.tier || 0),
+            },
+          });
 
-          // --- دریافت اطلاعات مربوط به شرط و جایزه ---
-          const winnerUserId = m.playerColors[currentColor];
-          const betAmount = Number(m.betAmount || 0);
-          console.log("[DEBUG_BET_AMOUNT]", { betAmount: Number(m.betAmount || 0) });
+          // تابع اصلی تسویه:
+          // - مقدار را از m.tier می‌خواند
+          // - ۹۰٪ کل استخر را به برنده می‌دهد
+          // - ۱۰٪ را برای ترژری ثبت می‌کند
+          // - موجودی جدید را برای کلاینت ارسال می‌کند
+          await settleCoinsForMatch(m);
 
-          const totalPrize = Math.floor(betAmount * 2 * 0.9);
-          console.log("[DEBUG_PRIZE_CALCULATION]", { totalPrize });
-          console.log("[DEBUG_WINNER_INFO]", { winnerUserId, currentColor, playerColors: m.playerColors }); // بررسی winnerUserId
-
-          // --- شروع تراکنش برای به‌روزرسانی موجودی و ثبت تراکنش ---
-          await prisma.$transaction([
-            prisma.user.update({
-              where: { id: winnerUserId },
-              data: { coins: { increment: totalPrize } },
-            }),
-            prisma.transaction.create({
-              data: {
-                userId: winnerUserId,
-                amount: totalPrize,
-                type: "WIN",
-note: `برد در مسابقه منچ ${matchId}`,
-
-              },
-            }),
-          ]);
-          // --- پایان تراکنش ---
-
-          console.log("[MATCH_FINALIZE_SUCCESS]", { // <-- این لاگ باید بعد از موفقیت تراکنش باشد
-matchId: dbMatchId,
-
-            winnerUserId,
-            betAmount,
-            totalPrize
+          console.log("[MATCH_FINALIZE_SUCCESS]", {
+            matchId: dbMatchId,
+            winnerUserId: m.playerColors[currentColor],
+            tier: m.tier,
           });
         } catch (dbErr) {
-          console.error("[MATCH_FINALIZE_ERROR]", dbErr); // <-- و خطا اینجا لاگ می‌شود
+          console.error("[MATCH_FINALIZE_ERROR]", dbErr);
         }
       })();
+
 
 
 
@@ -1811,10 +1758,54 @@ matchId: dbMatchId,
       });
     }
 
-    // اگر هنوز تاسی باقی مانده باشد
+    // اگر هنوز تاسی باقی مانده باشد، بررسی کن آیا با تاس‌های باقی‌مانده
+    // اصلاً حرکت قانونی وجود دارد یا نه.
     if (m.game.pendingDice.length > 0) {
       m.game.turnMoved = true;
+
+      const remainingDice = m.game.pendingDice.slice();
+      const hasAnyLegalMove = remainingDice.some((dieValue) =>
+        hasLegalMoveForDie(m.game, Number(dieValue))
+      );
+
+      console.log("[MOVE_REMAINING_DICE_CHECK]", {
+        matchId,
+        remainingDice,
+        currentTurn: m.game.currentTurn,
+        currentColor,
+        hasAnyLegalMove,
+      });
+
+      // اگر هیچ حرکت قانونی برای تاس‌های باقی‌مانده وجود ندارد،
+      // نوبت باید خودکار به بازیکن بعدی برود.
+      if (!hasAnyLegalMove) {
+        m.game.rolled = false;
+        m.game.pendingDice = [];
+        m.game.dice1 = 0;
+        m.game.dice2 = 0;
+        m.game.dice = 0;
+
+        console.log("[MOVE_AUTO_SKIP_NO_LEGAL_REMAINING_DICE]", {
+          matchId,
+          currentColor,
+          remainingDice,
+        });
+
+        nextTurn(m);
+        broadcastState(m);
+
+        return callback?.({
+          success: true,
+          bonusRoll: false,
+          pendingDice: [],
+          turnSkipped: true,
+          winnerColor: null,
+          noLegalMovesAfterConsume: true,
+        });
+      }
+
       broadcastState(m);
+
       // مهم: اینجا return می‌کنیم، پس finally اجرا خواهد شد.
       return callback?.({
         success: true,
@@ -1825,7 +1816,6 @@ matchId: dbMatchId,
       });
     }
 
-    // اگر همه تاس‌ها مصرف شده باشند
 m.game.turnMoved = true;
 
 // nextTurn خودش تاس‌ها، pendingDice و rolled را ریست می‌کند.
