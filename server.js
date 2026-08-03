@@ -1544,7 +1544,8 @@ io.on("connection", (socket) => {
 
 
   // ---------------- Game: move ----------------
-socket.on("game:move", (payload, callback) => {
+socket.on("game:move", async (payload, callback) => {
+
   let m;
   let isTransitioningSet = false; // یک پرچم برای پیگیری فعال شدن قفل
 
@@ -1768,7 +1769,8 @@ socket.on("game:move", (payload, callback) => {
                 userId: winnerUserId,
                 amount: totalPrize,
                 type: "WIN",
-                description: `برد در مسابقه منچ ${matchId}`,
+note: `برد در مسابقه منچ ${matchId}`,
+
               },
             }),
           ]);
@@ -1812,11 +1814,14 @@ socket.on("game:move", (payload, callback) => {
     }
 
     // اگر همه تاس‌ها مصرف شده باشند
-    m.game.turnMoved = true;
-    m.game.rolled = false;
-    m.game.pendingDice = [];
-    broadcastState(m);
-    nextTurn(m); // nextTurn داخل خودش transition را مدیریت می‌کند یا باید اینجا مدیریت شود؟
+m.game.turnMoved = true;
+
+// nextTurn خودش تاس‌ها، pendingDice و rolled را ریست می‌کند.
+nextTurn(m);
+
+// مهم: state نوبت جدید را بعد از تغییر نوبت بفرست.
+broadcastState(m);
+ // nextTurn داخل خودش transition را مدیریت می‌کند یا باید اینجا مدیریت شود؟
 
     // مهم: اینجا return می‌کنیم، پس finally اجرا خواهد شد.
     return callback?.({

@@ -4,6 +4,8 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // مطمئن شوید که DATABASE_URL در متغیرهای محیطی شما تنظیم شده است
+  // connection_string = env("DATABASE_URL") // اگر میخواهید مستقیم در اینجا تنظیم کنید
 }
 
 model User {
@@ -27,4 +29,14 @@ model Transaction {
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])
+}
+
+// --- مدل Match اضافه شده است ---
+model Match {
+  id           String    @id
+  status       String
+  winnerColor  String?
+  finishedAt   DateTime?
+  playerColors Json
+  betAmount    String
 }
