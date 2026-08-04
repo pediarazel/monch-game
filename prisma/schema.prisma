@@ -1,42 +1,53 @@
 generator client {
-  provider = "prisma-client-js"
-}
+      provider = "prisma-client-js"
+    }
 
-datasource db {
-  provider = "postgresql"
-  // مطمئن شوید که DATABASE_URL در متغیرهای محیطی شما تنظیم شده است
-  // connection_string = env("DATABASE_URL") // اگر میخواهید مستقیم در اینجا تنظیم کنید
-}
+    datasource db {
+      provider = "postgresql"
+      // مطمئن شوید که DATABASE_URL در متغیرهای محیطی شما تنظیم شده است
+      // connection_string = env("DATABASE_URL") // اگر میخواهید مستقیم در اینجا تنظیم کنید
+    }
 
-model User {
-  id           Int           @id @default(autoincrement())
-  username     String        @unique
-  password     String
-  coins        Int           @default(0)
-  createdAt    DateTime      @default(now())
-  role         String        @default("USER")
-  transactions Transaction[]
-}
+    model User {
+      id           Int           @id @default(autoincrement())
+      username     String        @unique
+      password     String
+      coins        Int           @default(0)
+      createdAt    DateTime      @default(now())
+      role         String        @default("USER")
+      transactions Transaction[]
+    }
 
-model Transaction {
-  id     Int  @id @default(autoincrement())
-  userId Int
-  user   User @relation(fields: [userId], references: [id])
+    model Transaction {
+      id            String   @id @default(cuid())
+      userId        Int   // <-- تغییر از String به Int
+      matchId       String? // nullable because some transactions might not be tied to a match (e.g., initial coin grants)
+      idempotencyKey String? @unique // Added for idempotency
+      amount        Int
+      type          String
+      note          String?
+      createdAt     DateTime @default(now())
 
-  amount    Int
-  type      String
-  note      String?
-  createdAt DateTime @default(now())
+      user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId, createdAt])
-}
+      @@index([userId, createdAt])
+      @@index([matchId]) // Added index for matchId for faster querying of match-related transactions
+    }
 
-// --- مدل Match اضافه شده است ---
-model Match {
-  id           String    @id
-  status       String
-  winnerColor  String?
-  finishedAt   DateTime?
-  playerColors Json
-  betAmount    String
-}
+    model Match {
+      id            String @id
+      status        String
+      winnerColor   String?
+      finishedAt    DateTime?
+      entryChargedAt DateTime? // Added: Timestamp when entry fee was charged
+      settledAt     DateTime? // Added: Timestamp when the match settlement was completed
+      playerColors  Json
+      betAmount     String
+
+      // Relationships would typically go here if needed, e.g., players
+
+      @@index([status]) // Added index for status
+      @@index([finishedAt]) // Added index for finishedAt
+      @@index([entryChargedAt]) // Added index for entryChargedAt
+      @@index([settledAt]) // Added index for settledAt
+    }

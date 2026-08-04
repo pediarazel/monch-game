@@ -842,6 +842,48 @@ function drawPieces() {
       });
     }
     drawPieces();
+        // تابع کمکی برای رسم وضعیت بازیکن
+    function drawPlayerStatus() {
+      if (!gameState || !gameState.players) return;
+
+      for (const player of gameState.players) {
+        const piece = gameState.pieces.find(p => p.color === player.color);
+        if (!piece) continue;
+
+        const pos = getPieceDrawPos(piece);
+        if (!pos) continue;
+
+        const { x, y } = pos;
+
+        ctx.save();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        // اگر بازیکن قطع شده باشد
+        if (!player.isConnected) {
+          ctx.fillStyle = "rgba(150, 150, 150, 0.8)"; // رنگ خاکستری برای وضعیت قطع شده
+          ctx.font = `bold ${Math.max(12, CELL * 0.4)}px sans-serif`;
+          ctx.fillText("●", x, y); // یک دایره توپر خاکستری
+
+          // اگر بازیکن فورفیت شده باشد، علامت X قرمز را هم رسم کن
+          if (player.forfeited) {
+            ctx.fillStyle = "rgba(255, 0, 0, 0.9)"; // رنگ قرمز برای فورفیت
+            ctx.font = `bold ${Math.max(10, CELL * 0.3)}px sans-serif`;
+            ctx.fillText("X", x, y); // علامت X قرمز روی دایره خاکستری
+          }
+        }
+        // اگر بازیکن فورفیت شده باشد (و به هر دلیلی isConnected هنوز true است، که بعید است)
+        else if (player.forfeited) {
+           ctx.fillStyle = "rgba(255, 0, 0, 0.9)"; // رنگ قرمز برای فورفیت
+           ctx.font = `bold ${Math.max(10, CELL * 0.3)}px sans-serif`;
+           ctx.fillText("X", x, y);
+        }
+
+        ctx.restore();
+      }
+    }
+    drawPlayerStatus(); // فراخوانی تابع برای نمایش وضعیت
+
   }
 
 function updateUI() {
@@ -1507,6 +1549,49 @@ setMsg("ریست لوکال (کنترل اصلی با سرور است).");
         joinBtn.disabled = false;
       }, 500);
     });
+    // listener برای زمانی که بازیکنی قطع می شود
+    socket.on("player:disconnected", ({ userId, matchId, forfeitReason }) => {
+      console.log(`Player disconnected: ${userId}, Match: ${matchId}, Reason: ${forfeitReason}`);
+      setMsg(`بازیکن ${userId} قطع شد. ${forfeitReason ? `دلیل: ${forfeitReason}` : ''}`);
+      // بروزرسانی UI برای نشان دادن وضعیت بازیکن قطع شده
+      if (gameState && gameState.players) {
+        gameState.players = gameState.players.map(p =>
+          p.userId === userId ? { ...p, isConnected: false, forfeited: !!forfeitReason } : p
+        );
+      }
+      updateUI(); // بروزرسانی UI برای نمایش وضعیت جدید
+    });
+
+    // listener برای زمانی که بازیکنی دوباره وصل می شود
+    socket.on("player:reconnected", ({ userId, matchId }) => {
+      console.log(`Player reconnected: ${userId}, Match: ${matchId}`);
+      setMsg(`بازیکن ${userId} دوباره وصل شد.`);
+      // بروزرسانی UI برای نشان دادن وضعیت بازیکن متصل شده
+      if (gameState && gameState.players) {
+        gameState.players = gameState.players.map(p =>
+          p.userId === userId ? { ...p, isConnected: true, forfeited: false } : p
+        );
+      }
+      updateUI(); // بروزرسانی UI برای نمایش وضعیت جدید
+    });
+
+    // listener برای زمانی که بازیکنی به دلیل اتمام زمان فورفیت می شود
+    socket.on("player:forfeit", ({ userId, matchId }) => {
+      console.log(`Player forfeit: ${userId}, Match: ${matchId}`);
+      setMsg(`بازیکن ${userId} به دلیل اتمام زمان، از بازی حذف شد.`);
+      // بروزرسانی UI برای نشان دادن وضعیت بازیکن حذف شده
+      if (gameState && gameState.players) {
+        gameState.players = gameState.players.map(p =>
+          p.userId === userId ? { ...p, forfeited: true, isConnected: false } : p // فرض می‌کنیم فورفیت شدن به معنی قطع اتصال هم هست
+        );
+      }
+      // اگر بازی به پایان رسید (کمتر از دو نفر باقی مانده)، باید منطق پایان بازی را صدا زد
+      // if (gameState.players.filter(p => !p.forfeited).length < 2) {
+      //   endGameLogic();
+      // }
+      updateUI(); // بروزرسانی UI برای نمایش وضعیت جدید
+    });
+
   });
 
   draw();

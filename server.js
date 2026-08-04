@@ -42,6 +42,10 @@ const TURN_MS = 30000;
 const matchTimers = new Map(); // matchId -> { timeout }
 const connectedUsers = new Map(); // userId -> socketId
 
+// userId -> { timer, matchId, disconnectedAt }
+const disconnectionTimers = new Map();
+
+
 /*
 |--------------------------------------------------------------------------
 | Express + HTTP
@@ -785,12 +789,19 @@ async function settleCoinsForMatch(match) {
   const winnerUserId = match.playerColors[winnerColor];
   if (!winnerUserId) throw new Error("winnerUserId پیدا نشد.");
 
+  // تعداد بازیکنانی که در حال حاضر در رنگ‌ها حضور دارند
   const activePlayersCount = activePlayersCountFromPlayerColors(match.playerColors);
-  if (activePlayersCount < 2 || activePlayersCount > 4) {
+  // تعداد بازیکنانی که حذف یا فورفیت شدند
+  const forfeitedCount = (match.forfeitedPlayers || []).length;
+  // تعداد کل بازیکنان اولیه بازی
+  const totalOriginalPlayers = activePlayersCount + forfeitedCount;
+
+  if (totalOriginalPlayers < 2 || totalOriginalPlayers > 4) {
     throw new Error("تعداد بازیکنان برای تسویه مالی باید بین ۲ تا ۴ باشد.");
   }
 
-  const totalPot = activePlayersCount * match.tier;
+  const totalPot = totalOriginalPlayers * match.tier;
+
   const winnerAmount = Math.floor(0.9 * totalPot);
   const treasuryAmount = totalPot - winnerAmount;
 
@@ -836,6 +847,105 @@ async function settleCoinsForMatch(match) {
 }
 
 // ---------- match game ----------
+// تابع مدیریت حذف خودکار بازیکن (Forfeit) بعد از مهلت ۹۰ ثانیه‌ای
+async function handleForfeit(match, uid) {
+  try {
+    console.log("[FORFEIT_TRIGGERED]", { matchId: match.matchId, userId: uid });
+
+    let forfeitColor = null;
+    for (const color in match.playerColors) {
+      if (match.playerColors[color] === uid) {
+        forfeitColor = color;
+        break;
+      }
+    }
+
+    if (!forfeitColor) return;
+
+    // ۱. انتقال کاربر به لیست فورفیت شده‌ها جهت حفظ مقدار پات در تسویه مالی
+    if (!match.forfeitedPlayers) {
+      match.forfeitedPlayers = [];
+    }
+    if (!match.forfeitedPlayers.includes(uid)) {
+      match.forfeitedPlayers.push(uid);
+    }
+
+    // ۲. حذف بازیکن از رنگ مربوطه
+    match.playerColors[forfeitColor] = null;
+    if (match.game && match.game.playerColors) {
+      match.game.playerColors[forfeitColor] = null;
+    }
+
+    // اطلاع‌رسانی به روم بازی در سوکت
+    io.to(`match:${match.matchId}`).emit("player:forfeit", {
+      userId: uid,
+      color: forfeitColor,
+      reason: "disconnect_forfeit"
+    });
+
+    // تعداد بازیکنان واقعی که هنوز در بازی هستند
+    const activeCount = activePlayersCountFromPlayerColors(match.playerColors);
+
+    // اگر بازیکنِ دیسکانکت شده نوبتش بود، نوبت رد شود
+    if (match.game && !match.game.winner) {
+      const currentColor = colorOrder[match.game.currentTurn];
+      if (currentColor === forfeitColor) {
+        console.log("[FORFEIT_ACTIVE_TURN_SKIP]", { matchId: match.matchId, color: forfeitColor });
+        match.game.rolled = false;
+        match.game.pendingDice = [];
+        match.game.dice1 = 0;
+        match.game.dice2 = 0;
+        match.game.dice = 0;
+        nextTurn(match);
+      }
+    }
+
+    // اگر تعداد بازیکنان فعال کمتر از ۲ شد بازی باید خاتمه یابد
+    if (activeCount < 2) {
+      let winnerColor = null;
+      for (const color of colorOrder) {
+        if (match.playerColors[color] != null) {
+          winnerColor = color;
+          break;
+        }
+      }
+
+      if (winnerColor && match.game && !match.game.winner) {
+        console.log("[FORFEIT_GAME_END]", { matchId: match.matchId, winnerColor });
+        match.game.winner = winnerColor;
+        match.game.rolled = false;
+        match.game.pendingDice = [];
+
+        broadcastState(match);
+
+        const dbMatchId = String(match.matchId);
+        await prisma.match.upsert({
+          where: { id: dbMatchId },
+          update: {
+            status: "FINISHED",
+            winnerColor: winnerColor,
+            finishedAt: new Date(),
+          },
+          create: {
+            id: dbMatchId,
+            status: "FINISHED",
+            winnerColor: winnerColor,
+            finishedAt: new Date(),
+            playerColors: match.playerColors || {},
+            betAmount: String(match.tier || 0),
+          },
+        });
+
+        await settleCoinsForMatch(match);
+      }
+    } else {
+      broadcastState(match);
+    }
+  } catch (error) {
+    console.error("[HANDLE_FORFEIT_ERROR]", error);
+  }
+}
+
 function createMatchFromLobby(lobby) {
   return {
     matchId: lobby.matchId,
@@ -849,9 +959,10 @@ function createMatchFromLobby(lobby) {
     createdAt: Date.now(),
     tier: lobby.tier,
     financialSettled: false,
-    chargedEntry: false,
+    forfeitedPlayers: [], // اضافه شد برای ذخیره بازیکنانی که فورفیت شدند تا پات بازی خراب نشود
   };
 }
+
 
 function getActivePlayersCount(match) {
   return activePlayersCountFromPlayerColors(match.playerColors);
@@ -1248,8 +1359,30 @@ io.on("connection", (socket) => {
 
   connectedUsers.set(String(uid), socket.id);
 
+  // سیستم Reconnect: بررسی وجود تایمر فعال قطع اتصال برای این کاربر
+  if (disconnectionTimers.has(uid)) {
+    const { timer, matchId } = disconnectionTimers.get(uid);
+    clearTimeout(timer);
+    disconnectionTimers.delete(uid);
+
+    const match = matches.get(matchId);
+    if (match) {
+      socket.join(`match:${matchId}`);
+      console.log("[PLAYER_RECONNECTED]", { userId: uid, matchId });
+
+      // اطلاع به سایر کاربران روم
+      io.to(`match:${matchId}`).emit("player:reconnected", { userId: uid });
+
+      // ارسال آخرین وضعیت بازی به کاربر برگشته با تاخیر کوچک
+      setTimeout(() => {
+        broadcastState(match);
+      }, 500);
+    }
+  }
+
   // Join lobby / match room
   socket.on("room:join", async (payload, callback) => {
+
     try {
       const tier = Number(payload?.tier);
       if (!Number.isFinite(tier)) {
@@ -1335,6 +1468,7 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     try {
+      // ۱. بررسی لابی‌ها
       for (const [tier, lobby] of tierLobbies.entries()) {
         if (!lobby) continue;
 
@@ -1359,9 +1493,39 @@ io.on("connection", (socket) => {
           } else if (lobby.playerUidsInOrder.length === 3) {
             onLobbyPlayerJoined(tier).catch(() => {});
           }
+
         }
       }
 
+
+      // ۲. مدیریت قطع اتصال در حین مسابقه (شروع تایمر ۹۰ ثانیه‌ای)
+      for (const match of matches.values()) {
+        if (match.status === "playing" && match.playerColors) {
+          const hasPlayer = Object.values(match.playerColors).includes(uid);
+          if (hasPlayer && !match.game?.winner) {
+            console.log("[PLAYER_DISCONNECT_DURING_GAME]", { userId: uid, matchId: match.matchId });
+
+            // اطلاع به روم مسابقه
+            io.to(`match:${match.matchId}`).emit("player:disconnected", { userId: uid });
+
+            // پاکسازی تایمر قبلی در صورت وجود همزمان
+            if (disconnectionTimers.has(uid)) {
+              clearTimeout(disconnectionTimers.get(uid).timer);
+            }
+
+            // تایمر ۹۰ ثانیه‌ای (۹۰۰۰۰ میلی‌ثانیه)
+            const timer = setTimeout(() => {
+              handleForfeit(match, uid);
+              disconnectionTimers.delete(uid);
+            }, 90000);
+
+            disconnectionTimers.set(uid, { timer, matchId: match.matchId });
+            break;
+          }
+        }
+      }
+
+      // ۳. پاک کردن از سوکت‌های متصل
       if (connectedUsers.get(String(uid)) === socket.id) {
         connectedUsers.delete(String(uid));
       }
@@ -1369,6 +1533,7 @@ io.on("connection", (socket) => {
       console.error("[DISCONNECT ERROR]", error);
     }
   });
+
 
   // ---------------- Game: roll ----------------
   socket.on("game:roll", (payload, callback) => {
@@ -1637,7 +1802,7 @@ socket.on("game:move", async (payload, callback) => {
       });
     }
 
-    const piece = m.game.pieces.find(
+const piece = m.game.pieces.find(
       (p) => p.id === pieceId && p.color === currentColor
     );
 
