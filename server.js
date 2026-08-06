@@ -956,6 +956,9 @@ function createMatchFromLobby(lobby) {
     turnDeadlineAt: 0,
     turnId: 0,
     pendingTurnTimer: null,
+    pendingBotTimer: null,
+    pendingBotTurnId: null,
+    pendingBotUserId: null,
     createdAt: Date.now(),
     tier: lobby.tier,
     financialSettled: false,
@@ -1023,6 +1026,430 @@ function broadcastState(match) {
   });
 }
 
+async function finalizeDisconnectedBotWinner(match, winnerColor) {
+  try {
+    if (!match || !match.game || match.game.winner !== winnerColor) return;
+
+    const dbMatchId = String(match.matchId);
+
+    await prisma.match.upsert({
+      where: { id: dbMatchId },
+      update: {
+        status: "FINISHED",
+        winnerColor,
+        finishedAt: new Date(),
+      },
+      create: {
+        id: dbMatchId,
+        status: "FINISHED",
+        winnerColor,
+        finishedAt: new Date(),
+        playerColors: match.playerColors || {},
+        betAmount: String(match.tier || 0),
+      },
+    });
+
+    await settleCoinsForMatch(match);
+
+    console.log("[DISCONNECTED_BOT_MATCH_FINALIZED]", {
+      matchId: dbMatchId,
+      winnerColor,
+      winnerUserId: match.playerColors?.[winnerColor] ?? null,
+      tier: match.tier,
+    });
+  } catch (error) {
+    console.error("[DISCONNECTED_BOT_FINALIZE_ERROR]", {
+      matchId: match?.matchId,
+      winnerColor,
+      error,
+    });
+  }
+}
+
+async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
+  if (!match || !match.game || match.game.winner) return;
+  if (match.status !== "playing") return;
+  if (match.turnId !== expectedTurnId) return;
+
+  const currentColor = colorOrder[match.game.currentTurn];
+  const currentUserId = match.playerColors?.[currentColor];
+
+  if (currentUserId == null || currentUserId !== expectedUserId) return;
+
+  // اگر بازیکن در فاصله زمان‌بندی تا اجرای ربات برگشته باشد، ربات اجرا نشود.
+  if (connectedUsers.has(String(currentUserId))) {
+    console.log("[DISCONNECTED_BOT_CANCELLED_ON_RECONNECT]", {
+      matchId: match.matchId,
+      turnId: expectedTurnId,
+      userId: currentUserId,
+      color: currentColor,
+    });
+    return;
+  }
+
+  if (match.game.transitioning) {
+    console.log("[DISCONNECTED_BOT_WAIT_TRANSITION]", {
+      matchId: match.matchId,
+      turnId: expectedTurnId,
+      userId: currentUserId,
+      color: currentColor,
+    });
+
+    scheduleDisconnectedPlayerBot(match);
+    return;
+  }
+
+  match.game.transitioning = true;
+
+  try {
+    if (!match.game || match.game.winner) return;
+    if (match.turnId !== expectedTurnId) return;
+
+    const verifiedColor = colorOrder[match.game.currentTurn];
+    const verifiedUserId = match.playerColors?.[verifiedColor];
+
+    if (
+      verifiedColor !== currentColor ||
+      verifiedUserId !== expectedUserId ||
+      connectedUsers.has(String(expectedUserId))
+    ) {
+      return;
+    }
+
+    console.log("[DISCONNECTED_BOT_START]", {
+      matchId: match.matchId,
+      turnId: expectedTurnId,
+      userId: expectedUserId,
+      color: currentColor,
+      alreadyRolled: match.game.rolled,
+      pendingDice: Array.isArray(match.game.pendingDice)
+        ? match.game.pendingDice.slice()
+        : [],
+    });
+
+    // اگر بازیکن پیش از Disconnect تاس نریخته باشد، ربات دو تاس می‌اندازد.
+    if (
+      !match.game.rolled ||
+      !Array.isArray(match.game.pendingDice) ||
+      match.game.pendingDice.length === 0
+    ) {
+      const d1 = getNextDiceValueFromMatch();
+      const d2 = getNextDiceValueFromMatch();
+
+      match.game.dice1 = d1;
+      match.game.dice2 = d2;
+      match.game.dice = d1 + d2;
+      match.game.pendingDice = [d1, d2];
+      match.game.rolled = true;
+      match.game.turnMoved = false;
+
+      console.log("[DISCONNECTED_BOT_ROLL]", {
+        matchId: match.matchId,
+        turnId: expectedTurnId,
+        userId: expectedUserId,
+        color: currentColor,
+        dice1: d1,
+        dice2: d2,
+      });
+
+      broadcastState(match);
+    }
+
+    while (
+      match.game &&
+      !match.game.winner &&
+      match.turnId === expectedTurnId &&
+      Array.isArray(match.game.pendingDice) &&
+      match.game.pendingDice.length > 0
+    ) {
+      // در هر مرحله اولین تاسی را پیدا می‌کنیم که حداقل یک حرکت قانونی دارد.
+      let selectedDieIndex = -1;
+      let selectedDieValue = 0;
+      let selectedPiece = null;
+
+      for (
+        let dieIndex = 0;
+        dieIndex < match.game.pendingDice.length;
+        dieIndex++
+      ) {
+        const dieValue = Number(match.game.pendingDice[dieIndex]);
+
+        const legalPiece = match.game.pieces.find(
+          (piece) =>
+            piece.color === currentColor &&
+            canPieceMove(match.game, piece, dieValue)
+        );
+
+        if (legalPiece) {
+          selectedDieIndex = dieIndex;
+          selectedDieValue = dieValue;
+          selectedPiece = legalPiece;
+          break;
+        }
+      }
+
+      // هیچ‌کدام از تاس‌های باقی‌مانده حرکت قانونی ندارند.
+      if (
+        selectedDieIndex === -1 ||
+        !selectedPiece ||
+        selectedDieValue < 1
+      ) {
+        console.log("[DISCONNECTED_BOT_NO_LEGAL_MOVE]", {
+          matchId: match.matchId,
+          turnId: expectedTurnId,
+          userId: expectedUserId,
+          color: currentColor,
+          pendingDice: match.game.pendingDice.slice(),
+        });
+
+        match.game.rolled = false;
+        match.game.pendingDice = [];
+        match.game.dice1 = 0;
+        match.game.dice2 = 0;
+        match.game.dice = 0;
+        match.game.turnMoved = true;
+
+match.game.transitioning = false;
+nextTurn(match);
+
+        return;
+      }
+
+      const moved = movePiece(
+        match.game,
+        selectedPiece,
+        selectedDieValue
+      );
+
+      if (!moved) {
+        console.error("[DISCONNECTED_BOT_MOVE_FAILED]", {
+          matchId: match.matchId,
+          turnId: expectedTurnId,
+          userId: expectedUserId,
+          color: currentColor,
+          pieceId: selectedPiece.id,
+          dieValue: selectedDieValue,
+        });
+
+        match.game.rolled = false;
+        match.game.pendingDice = [];
+        match.game.dice1 = 0;
+        match.game.dice2 = 0;
+        match.game.dice = 0;
+        match.game.turnMoved = true;
+
+match.game.transitioning = false;
+nextTurn(match);
+
+        return;
+      }
+
+      match.game.pendingDice.splice(selectedDieIndex, 1);
+      match.game.dice1 = match.game.pendingDice[0]
+        ? Number(match.game.pendingDice[0])
+        : 0;
+      match.game.dice2 = match.game.pendingDice[1]
+        ? Number(match.game.pendingDice[1])
+        : 0;
+      match.game.dice = match.game.dice1 + match.game.dice2;
+      match.game.turnMoved = true;
+
+      console.log("[DISCONNECTED_BOT_MOVE]", {
+        matchId: match.matchId,
+        turnId: expectedTurnId,
+        userId: expectedUserId,
+        color: currentColor,
+        pieceId: selectedPiece.id,
+        dieValue: selectedDieValue,
+        remainingDice: match.game.pendingDice.slice(),
+      });
+
+      const hasWon = checkWinner(match.game, currentColor);
+
+      if (hasWon) {
+        match.game.winner = currentColor;
+        match.game.rolled = false;
+        match.game.pendingDice = [];
+        match.game.dice1 = 0;
+        match.game.dice2 = 0;
+        match.game.dice = 0;
+        match.game.turnDeadlineAt = null;
+        match.turnDeadlineAt = null;
+
+        if (match.pendingTurnTimer) {
+          clearTimeout(match.pendingTurnTimer);
+          match.pendingTurnTimer = null;
+        }
+
+        console.log("[DISCONNECTED_BOT_WINNER]", {
+          matchId: match.matchId,
+          turnId: expectedTurnId,
+          userId: expectedUserId,
+          winnerColor: currentColor,
+        });
+
+        broadcastState(match);
+        await finalizeDisconnectedBotWinner(match, currentColor);
+        return;
+      }
+
+      broadcastState(match);
+    }
+
+    // هر دو تاس مصرف شده‌اند؛ نوبت به بازیکن بعدی منتقل می‌شود.
+    if (
+      match.game &&
+      !match.game.winner &&
+      match.turnId === expectedTurnId
+    ) {
+      match.game.rolled = false;
+      match.game.pendingDice = [];
+      match.game.dice1 = 0;
+      match.game.dice2 = 0;
+      match.game.dice = 0;
+      match.game.turnMoved = true;
+
+console.log("[DISCONNECTED_BOT_TURN_FINISHED]", {
+  matchId: match.matchId,
+  turnId: expectedTurnId,
+  userId: expectedUserId,
+  color: currentColor,
+});
+
+match.game.transitioning = false;
+nextTurn(match);
+
+    }
+  } catch (error) {
+    console.error("[DISCONNECTED_BOT_ERROR]", {
+      matchId: match?.matchId,
+      turnId: expectedTurnId,
+      userId: expectedUserId,
+      error,
+    });
+
+    // در صورت خطای داخلی ربات، بازی روی نوبت بازیکن آفلاین قفل نشود.
+    if (
+      match?.game &&
+      !match.game.winner &&
+      match.turnId === expectedTurnId
+    ) {
+      match.game.rolled = false;
+      match.game.pendingDice = [];
+      match.game.dice1 = 0;
+      match.game.dice2 = 0;
+      match.game.dice = 0;
+match.game.turnMoved = true;
+match.game.transitioning = false;
+nextTurn(match);
+
+    }
+  } finally {
+    if (match?.game) {
+      match.game.transitioning = false;
+    }
+  }
+}
+
+function scheduleDisconnectedPlayerBot(match) {
+  if (!match) return;
+
+  if (match.pendingBotTimer) {
+    clearTimeout(match.pendingBotTimer);
+    match.pendingBotTimer = null;
+  }
+
+  match.pendingBotTurnId = null;
+  match.pendingBotUserId = null;
+
+  if (!match.game || match.game.winner) return;
+  if (match.status !== "playing") return;
+
+  const currentColor = colorOrder[match.game.currentTurn];
+  const currentUserId = match.playerColors?.[currentColor];
+
+  if (currentUserId == null) return;
+
+  // فقط بازیکنی که در connectedUsers حضور ندارد توسط ربات کنترل می‌شود.
+  if (connectedUsers.has(String(currentUserId))) return;
+
+  const expectedTurnId = match.turnId;
+  const expectedUserId = currentUserId;
+  const expectedMatchId = String(match.matchId);
+
+  match.pendingBotTurnId = expectedTurnId;
+  match.pendingBotUserId = expectedUserId;
+
+  console.log("[DISCONNECTED_BOT_SCHEDULED]", {
+    matchId: expectedMatchId,
+    turnId: expectedTurnId,
+    userId: expectedUserId,
+    color: currentColor,
+  });
+
+  match.pendingBotTimer = setTimeout(() => {
+    match.pendingBotTimer = null;
+    match.pendingBotTurnId = null;
+    match.pendingBotUserId = null;
+
+    const currentMatch = matches.get(expectedMatchId);
+
+    if (!currentMatch || !currentMatch.game) return;
+    if (currentMatch.game.winner) return;
+    if (currentMatch.status !== "playing") return;
+    if (currentMatch.turnId !== expectedTurnId) return;
+
+    const activeColor = colorOrder[currentMatch.game.currentTurn];
+    const activeUserId = currentMatch.playerColors?.[activeColor];
+
+    if (activeUserId !== expectedUserId) return;
+    if (connectedUsers.has(String(expectedUserId))) return;
+
+if (currentMatch.game.transitioning) {
+  console.log("[DISCONNECTED_BOT_RETRY_TRANSITION]", {
+    matchId: expectedMatchId,
+    turnId: expectedTurnId,
+    userId: expectedUserId,
+  });
+
+  // تلاش بعدی با تأخیر کوتاه، بدون دست‌کاری turnId
+  currentMatch.pendingBotTimer = setTimeout(() => {
+    currentMatch.pendingBotTimer = null;
+
+    runDisconnectedPlayerBot(
+      currentMatch,
+      expectedTurnId,
+      expectedUserId
+    ).catch((error) => {
+      console.error("[DISCONNECTED_BOT_RETRY_ERROR]", {
+        matchId: expectedMatchId,
+        turnId: expectedTurnId,
+        userId: expectedUserId,
+        error,
+      });
+    });
+  }, 300);
+
+  return;
+}
+
+
+    runDisconnectedPlayerBot(
+      currentMatch,
+      expectedTurnId,
+      expectedUserId
+    ).catch((error) => {
+      console.error("[DISCONNECTED_BOT_PROMISE_ERROR]", {
+        matchId: expectedMatchId,
+        turnId: expectedTurnId,
+        userId: expectedUserId,
+        error,
+      });
+    });
+}, 1500);
+
+}
+
 function startTurnTimeout(match) {
   if (!match.game || match.game.winner) return;
 
@@ -1038,14 +1465,39 @@ function startTurnTimeout(match) {
 
   broadcastState(match);
 
-  match.pendingTurnTimer = setTimeout(() => {
-    const m = matches.get(match.matchId);
-    if (!m) return;
-    if (m.turnId !== myTurnId) return;
-    if (!m.game || m.game.winner) return;
-    if (m.game?.transitioning) return;
-    nextTurn(m);
-  }, TURN_MS);
+match.pendingTurnTimer = setTimeout(() => {
+  const m = matches.get(match.matchId);
+
+  if (!m) return;
+  if (m.turnId !== myTurnId) return;
+  if (!m.game || m.game.winner) return;
+
+  console.log("[TURN_TIMEOUT_FIRE]", {
+    matchId: m.matchId,
+    turnId: m.turnId,
+    currentTurn: m.game.currentTurn,
+    currentColor: colorOrder[m.game.currentTurn],
+    transitioningBeforeReset: m.game.transitioning,
+  });
+
+  // تایمر سرور نباید به‌خاطر قفل باقی‌مانده متوقف شود.
+  // قبل از انتقال نوبت، قفل قبلی را آزاد می‌کنیم.
+  m.game.transitioning = false;
+
+  m.game.rolled = false;
+  m.game.pendingDice = [];
+  m.game.dice1 = 0;
+  m.game.dice2 = 0;
+  m.game.dice = 0;
+  m.game.turnMoved = true;
+  m.game.turnDeadlineAt = null;
+  m.turnDeadlineAt = null;
+
+  nextTurn(m);
+}, TURN_MS);
+
+
+  scheduleDisconnectedPlayerBot(match);
 }
 
 function nextTurn(match) {
@@ -1367,6 +1819,21 @@ io.on("connection", (socket) => {
 
     const match = matches.get(matchId);
     if (match) {
+      if (
+        match.pendingBotTimer &&
+        match.pendingBotUserId === uid
+      ) {
+        clearTimeout(match.pendingBotTimer);
+        match.pendingBotTimer = null;
+        match.pendingBotTurnId = null;
+        match.pendingBotUserId = null;
+
+        console.log("[DISCONNECTED_BOT_CANCELLED_BY_RECONNECT]", {
+          userId: uid,
+          matchId,
+        });
+      }
+
       socket.join(`match:${matchId}`);
       console.log("[PLAYER_RECONNECTED]", { userId: uid, matchId });
 
@@ -1467,71 +1934,95 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    try {
-      // ۱. بررسی لابی‌ها
-      for (const [tier, lobby] of tierLobbies.entries()) {
-        if (!lobby) continue;
-
-        const idx = lobby.playerUidsInOrder.indexOf(uid);
-        if (idx !== -1 && lobby.status === "lobby") {
-          lobby.playerUidsInOrder.splice(idx, 1);
-
-          stopLobbyTimer(lobby);
-
-          if (lobby.playerUidsInOrder.length < 2) {
-            lobby.lobbyPhase = 1;
-            emitLobbyStatus(lobby, {
-              phase: 1,
-              searchingFor: 3,
-              deadlineAt: null,
-              deadlineMs: null,
-              message: "منتظر نفر دوم...",
-              status: "WAIT_2",
-            });
-          } else if (lobby.playerUidsInOrder.length === 2) {
-            onLobbyPlayerJoined(tier).catch(() => {});
-          } else if (lobby.playerUidsInOrder.length === 3) {
-            onLobbyPlayerJoined(tier).catch(() => {});
-          }
-
+      // --- START CUSTOM DISCONNECT HANDLING ---
+      try {
+        // اگر این سوکت، سوکت فعال فعلی کاربر نیست، یعنی کاربر قبلاً
+        // با سوکت جدید Reconnect کرده است؛ Disconnect قدیمی نادیده گرفته شود.
+        if (connectedUsers.get(String(uid)) !== socket.id) {
+          console.log("[STALE_SOCKET_DISCONNECT_IGNORED]", {
+            userId: uid,
+            staleSocketId: socket.id,
+            activeSocketId: connectedUsers.get(String(uid)) || null,
+          });
+          return;
         }
-      }
 
+        // کاربر باید پیش از بررسی مسابقه آفلاین علامت‌گذاری شود تا
+        // زمان‌بندی ربات بتواند نبودن او در connectedUsers را تشخیص دهد.
+        connectedUsers.delete(String(uid));
 
-      // ۲. مدیریت قطع اتصال در حین مسابقه (شروع تایمر ۹۰ ثانیه‌ای)
-      for (const match of matches.values()) {
-        if (match.status === "playing" && match.playerColors) {
-          const hasPlayer = Object.values(match.playerColors).includes(uid);
-          if (hasPlayer && !match.game?.winner) {
-            console.log("[PLAYER_DISCONNECT_DURING_GAME]", { userId: uid, matchId: match.matchId });
+        // ۱. بررسی لابی‌ها
+        for (const [tier, lobby] of tierLobbies.entries()) {
+          if (!lobby) continue;
 
-            // اطلاع به روم مسابقه
-            io.to(`match:${match.matchId}`).emit("player:disconnected", { userId: uid });
+          const idx = lobby.playerUidsInOrder.indexOf(uid);
+          if (idx !== -1 && lobby.status === "lobby") {
+            lobby.playerUidsInOrder.splice(idx, 1);
 
-            // پاکسازی تایمر قبلی در صورت وجود همزمان
-            if (disconnectionTimers.has(uid)) {
-              clearTimeout(disconnectionTimers.get(uid).timer);
+            stopLobbyTimer(lobby);
+
+            if (lobby.playerUidsInOrder.length < 2) {
+              lobby.lobbyPhase = 1;
+              emitLobbyStatus(lobby, {
+                phase: 1,
+                searchingFor: 3,
+                deadlineAt: null,
+                deadlineMs: null,
+                message: "منتظر نفر دوم...",
+                status: "WAIT_2",
+              });
+            } else if (lobby.playerUidsInOrder.length === 2) {
+              onLobbyPlayerJoined(tier).catch(() => {});
+            } else if (lobby.playerUidsInOrder.length === 3) {
+              onLobbyPlayerJoined(tier).catch(() => {});
             }
 
-            // تایمر ۹۰ ثانیه‌ای (۹۰۰۰۰ میلی‌ثانیه)
-            const timer = setTimeout(() => {
-              handleForfeit(match, uid);
-              disconnectionTimers.delete(uid);
-            }, 90000);
-
-            disconnectionTimers.set(uid, { timer, matchId: match.matchId });
-            break;
           }
         }
-      }
 
-      // ۳. پاک کردن از سوکت‌های متصل
-      if (connectedUsers.get(String(uid)) === socket.id) {
-        connectedUsers.delete(String(uid));
+
+        // ۲. مدیریت قطع اتصال در حین مسابقه (شروع تایمر ۹۰ ثانیه‌ای)
+        for (const match of matches.values()) {
+          if (match.status === "playing" && match.playerColors) {
+            const hasPlayer = Object.values(match.playerColors).includes(uid);
+            if (hasPlayer && !match.game?.winner) {
+              console.log("[PLAYER_DISCONNECT_DURING_GAME]", { userId: uid, matchId: match.matchId });
+
+              // اطلاع به روم مسابقه
+              io.to(`match:${match.matchId}`).emit("player:disconnected", { userId: uid });
+
+              // پاکسازی تایمر قبلی در صورت وجود همزمان
+              if (disconnectionTimers.has(uid)) {
+                clearTimeout(disconnectionTimers.get(uid).timer);
+              }
+
+              // تایمر ۹۰ ثانیه‌ای (۹۰۰۰۰ میلی‌ثانیه)
+              const timer = setTimeout(() => {
+                handleForfeit(match, uid);
+                disconnectionTimers.delete(uid);
+              }, 90000);
+
+              disconnectionTimers.set(uid, {
+                timer,
+                matchId: match.matchId,
+                disconnectedAt: Date.now(),
+              });
+
+              // اگر همین حالا نوبت بازیکن قطع‌شده باشد، ربات بدون
+              // منتظرماندن تا پایان تایمر نوبت وارد عمل می‌شود.
+              scheduleDisconnectedPlayerBot(match);
+              break; // چون فقط در یک مسابقه می‌توان حضور داشت
+            }
+          }
+        }
+
+        // connectedUsers در ابتدای handler و پس از اعتبارسنجی
+        // socket.id پاک شده است تا مسابقه فوراً Disconnect را تشخیص دهد.
+      } catch (error) {
+        console.error("[DISCONNECT ERROR]", error);
       }
-    } catch (error) {
-      console.error("[DISCONNECT ERROR]", error);
-    }
+      // --- END CUSTOM DISCONNECT HANDLING ---
+
   });
 
 
@@ -1648,8 +2139,20 @@ io.on("connection", (socket) => {
         }
 
 
+      // پرتاب موفق بوده و حداقل یک حرکت قانونی وجود دارد.
+      // تایمر قبلی که از ابتدای نوبت شروع شده بود پاک می‌شود و
+      // بازیکن از لحظه نمایش نتیجه تاس‌ها، زمان کامل برای حرکت می‌گیرد.
       m.game.transitioning = false;
-      broadcastState(m);
+      startTurnTimeout(m);
+
+      console.log("[MOVE_PHASE_TIMER_STARTED]", {
+        matchId: m.matchId,
+        turnId: m.turnId,
+        currentTurn: m.game.currentTurn,
+        activeColor: colorOrder[m.game.currentTurn],
+        pendingDice: m.game.pendingDice.slice(),
+        turnDeadlineAt: m.game.turnDeadlineAt,
+      });
 
       return callback?.({
         success: true,
@@ -1659,6 +2162,7 @@ io.on("connection", (socket) => {
         noLegalMoves: false,
         turnSkipped: false,
         pendingDice: m.game.pendingDice.slice(),
+        turnDeadlineAt: m.game.turnDeadlineAt,
         winnerColor: null,
       });
 
@@ -1956,10 +2460,12 @@ const piece = m.game.pieces.find(
           remainingDice,
         });
 
-        nextTurn(m);
-        broadcastState(m);
+m.game.transitioning = false;
+nextTurn(m);
+broadcastState(m);
 
-        return callback?.({
+return callback?.({
+
           success: true,
           bonusRoll: false,
           pendingDice: [],
@@ -1983,11 +2489,16 @@ const piece = m.game.pieces.find(
 
 m.game.turnMoved = true;
 
+// nextTurn تایمر و ربات نوبت جدید را فعال می‌کند؛
+// بنابراین قفل حرکت فعلی باید قبل از آن آزاد شود.
+m.game.transitioning = false;
+
 // nextTurn خودش تاس‌ها، pendingDice و rolled را ریست می‌کند.
 nextTurn(m);
 
 // مهم: state نوبت جدید را بعد از تغییر نوبت بفرست.
 broadcastState(m);
+
  // nextTurn داخل خودش transition را مدیریت می‌کند یا باید اینجا مدیریت شود؟
 
     // مهم: اینجا return می‌کنیم، پس finally اجرا خواهد شد.
