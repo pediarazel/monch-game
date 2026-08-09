@@ -175,15 +175,15 @@ app.post("/api/auth/login", async (req, res) => {
   const { username, password } = req.body;
   try {
     const user = await prisma.user.findUnique({ where: { username } });
-    if (!user) return res.status(401).json({ message: "Invalid credentials" });
-
+    if (!user) return res.status(401).json({ message: "نام کاربری یا رمز عبور اشتباه است" });
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
+    if (!isMatch) return res.status(401).json({ message: "نام کاربری یا رمز عبور اشتباه است" });
+
 
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "1h" });
     return res.json({ token });
   } catch (error) {
-    return res.status(500).json({ message: "Internal server error" });
+    return res.status(500).json({ message: error.message });
   }
 });
 
@@ -852,7 +852,8 @@ async function settleCoinsForMatch(match) {
 
 // ---------- match game ----------
 // تابع مدیریت حذف خودکار بازیکن (Forfeit) بعد از مهلت ۹۰ ثانیه‌ای
-async function handleForfeit(match, uid) {
+async function handleForfeit(match, uid, reason = "disconnect_forfeit") {
+
   try {
     console.log("[FORFEIT_TRIGGERED]", { matchId: match.matchId, userId: uid });
 
@@ -882,10 +883,11 @@ async function handleForfeit(match, uid) {
 
     // اطلاع‌رسانی به روم بازی در سوکت
     io.to(`match:${match.matchId}`).emit("player:forfeit", {
-      userId: uid,
-      color: forfeitColor,
-      reason: "disconnect_forfeit"
-    });
+  userId: uid,
+  color: forfeitColor,
+  reason,
+});
+
 
     // تعداد بازیکنان واقعی که هنوز در بازی هستند
     const activeCount = activePlayersCountFromPlayerColors(match.playerColors);
@@ -1936,10 +1938,147 @@ io.on("connection", (socket) => {
       return callback?.({ success: false, message: e?.message || "خطای join" });
     }
   });
-
-  socket.on("disconnect", () => {
-      // --- START CUSTOM DISCONNECT HANDLING ---
+      // خروج عمدی از صف یا بازی:
+    // این رویداد با disconnect معمولی فرق دارد؛ بنابراین reconnect timer فعال نمی‌شود.
+    socket.on("game:leave", async (payload, callback) => {
       try {
+        const matchId = String(payload?.matchId ?? "");
+
+        if (!matchId) {
+          return callback?.({
+            success: false,
+            message: "شناسه بازی ارسال نشده است.",
+          });
+        }
+
+        // ----------------------------------------------------------
+        // ۱) خروج از لابی/صف، پیش از شروع مسابقه
+        // ----------------------------------------------------------
+        for (const [tier, lobby] of tierLobbies.entries()) {
+          if (!lobby || lobby.matchId !== matchId || lobby.status !== "lobby") {
+            continue;
+          }
+
+          const index = lobby.playerUidsInOrder.indexOf(uid);
+          if (index === -1) {
+            continue;
+          }
+
+          lobby.playerUidsInOrder.splice(index, 1);
+          stopLobbyTimer(lobby);
+
+          const remainingCount = lobby.playerUidsInOrder.length;
+          lobby.lobbyPhase = getLobbyPhaseFromCount(remainingCount);
+
+          if (remainingCount < 2) {
+            lobby.lobbyPhase = 1;
+
+            emitLobbyStatus(lobby, {
+              phase: 1,
+              searchingFor: 3,
+              deadlineAt: null,
+              deadlineMs: null,
+              message: "یک بازیکن از صف خارج شد. منتظر نفر دوم...",
+              status: "WAIT_2",
+            });
+          } else {
+            await onLobbyPlayerJoined(tier);
+          }
+
+          await socket.leave(`match:${lobby.matchId}`);
+
+          // فقط disconnect بعدیِ همین خروج عمدی نادیده گرفته شود.
+          socket.data.skipNextDisconnect = true;
+
+          console.log("[PLAYER_MANUAL_LEAVE_LOBBY]", {
+            userId: uid,
+            matchId: lobby.matchId,
+          });
+
+          return callback?.({
+            success: true,
+            type: "lobby_leave",
+            message: "از صف بازی خارج شدی.",
+          });
+        }
+
+        // ----------------------------------------------------------
+        // ۲) خروج از بازی‌ای که شروع شده است
+        // ----------------------------------------------------------
+        const match = matches.get(matchId);
+
+        if (!match || match.status !== "playing" || !match.playerColors) {
+          return callback?.({
+            success: false,
+            message: "بازی فعال پیدا نشد.",
+          });
+        }
+
+        const isPlayerInMatch = Object.values(match.playerColors).includes(uid);
+
+        if (!isPlayerInMatch) {
+          return callback?.({
+            success: false,
+            message: "شما عضو این بازی نیستید.",
+          });
+        }
+
+        // اگر برای این کاربر تایمر قطع اتصال قبلی باقی مانده باشد، حذف شود.
+        if (disconnectionTimers.has(uid)) {
+          clearTimeout(disconnectionTimers.get(uid).timer);
+          disconnectionTimers.delete(uid);
+        }
+
+        // خروج دستی = فورفیت فوری؛ بدون انتظار ۹۰ ثانیه.
+        await handleForfeit(match, uid, "manual_leave");
+
+        await socket.leave(`match:${match.matchId}`);
+
+        // کلاینت پس از دریافت پاسخ، سوکت را قطع می‌کند.
+        // این فلگ نمی‌گذارد disconnect به‌عنوان قطع اینترنت پردازش شود.
+        socket.data.skipNextDisconnect = true;
+
+        console.log("[PLAYER_MANUAL_LEAVE_GAME]", {
+          userId: uid,
+          matchId: match.matchId,
+        });
+
+        return callback?.({
+          success: true,
+          type: "game_forfeit",
+          message: "از بازی خارج شدی.",
+        });
+      } catch (error) {
+        console.error("[GAME_LEAVE_ERROR]", error);
+
+        return callback?.({
+          success: false,
+          message: "خطا در خروج از بازی.",
+        });
+      }
+    });
+
+
+    socket.on("disconnect", () => {
+        // --- START CUSTOM DISCONNECT HANDLING ---
+        try {
+          // اگر کاربر با دکمه «خروج از بازی» خارج شده باشد،
+          // disconnect فعلی نباید تایمر reconnect ۹۰ ثانیه‌ای ایجاد کند.
+          if (socket.data.skipNextDisconnect === true) {
+            socket.data.skipNextDisconnect = false;
+
+            if (connectedUsers.get(String(uid)) === socket.id) {
+              connectedUsers.delete(String(uid));
+            }
+
+            console.log("[MANUAL_LEAVE_DISCONNECT_IGNORED]", {
+              userId: uid,
+              socketId: socket.id,
+            });
+
+            return;
+          }
+
         // اگر این سوکت، سوکت فعال فعلی کاربر نیست، یعنی کاربر قبلاً
         // با سوکت جدید Reconnect کرده است؛ Disconnect قدیمی نادیده گرفته شود.
         if (connectedUsers.get(String(uid)) !== socket.id) {
@@ -2491,21 +2630,35 @@ return callback?.({
       });
     }
 
-m.game.turnMoved = true;
+    // بررسی جایزه جفت ۶
+    const isDoubleSix = (m.game.dice1 === 6 && m.game.dice2 === 6);
 
-// nextTurn تایمر و ربات نوبت جدید را فعال می‌کند؛
-// بنابراین قفل حرکت فعلی باید قبل از آن آزاد شود.
-m.game.transitioning = false;
+    if (isDoubleSix) {
+      m.game.rolled = false;
+      m.game.pendingDice = [];
+      m.game.dice1 = 0;
+      m.game.dice2 = 0;
+      m.game.dice = 0;
+      m.game.turnMoved = false;
 
-// nextTurn خودش تاس‌ها، pendingDice و rolled را ریست می‌کند.
-nextTurn(m);
+      startTurnTimeout(m);
+      broadcastState(m);
 
-// مهم: state نوبت جدید را بعد از تغییر نوبت بفرست.
-broadcastState(m);
+      return callback?.({
+        success: true,
+        bonusRoll: true,
+        pendingDice: [],
+        turnSkipped: false,
+        winnerColor: null,
+      });
+    }
 
- // nextTurn داخل خودش transition را مدیریت می‌کند یا باید اینجا مدیریت شود؟
+    // اگر جفت ۶ نبود، نوبت به نفر بعدی منتقل می‌شود
+    m.game.turnMoved = true;
+    m.game.transitioning = false;
+    nextTurn(m);
+    broadcastState(m);
 
-    // مهم: اینجا return می‌کنیم، پس finally اجرا خواهد شد.
     return callback?.({
       success: true,
       bonusRoll: false,
@@ -2513,6 +2666,7 @@ broadcastState(m);
       turnSkipped: false,
       winnerColor: null,
     });
+
 
   } catch (e) {
     console.error("Error in game:move:", e);
