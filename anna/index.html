@@ -940,7 +940,9 @@ function updateUI() {
     joinBtn.disabled = false; // فعال‌شدن دکمه ورود به اتاق جدید
     rollBtn.disabled = true;
     rollBtn.classList.remove("roll-ready");
-    exitGameBtn.style.display = "none";
+      exitGameBtn.style.display = "inline-block";
+      exitGameBtn.textContent = "بازگشت به لابی";
+
 
     turnInfo.innerHTML = `برنده: <span class="tag ${gameState.winner}">${colorLabel[gameState.winner]}</span> 🎉`;
     setMsg("بازی به پایان رسید.");
@@ -1269,19 +1271,28 @@ dice2El.addEventListener("click", ()=>{
 
   rollBtn.addEventListener("click", rollDice);
     exitGameBtn.addEventListener("click", () => {
+      // ۱. اگر بازی تمام شده، فقط بازگشت به لابی
+      if (gameState && gameState.winner) {
+        currentMatchId = null;
+        gameState = null;
+        updateUI();
+        return;
+      }
+
+      // ۲. اگر بازی در جریان است، خروج امن
       if (!currentMatchId) {
         setMsg("بازی فعالی برای خروج وجود ندارد.");
         return;
       }
-
-      if (!socket || !socket.connected) {
-        setMsg("اتصال به سرور برقرار نیست؛ خروج امن انجام نشد.");
-        return;
+      
+      if (confirm("آیا مطمئن هستید که می‌خواهید از بازی خارج شوید؟")) {
+        socket.emit("game:leave", { matchId: currentMatchId, reason: "manual_leave" });
+        currentMatchId = null;
+        gameState = null;
+        updateUI();
       }
+    });
 
-      const confirmed = window.confirm(
-        "آیا مطمئنی می‌خواهی از بازی خارج شوی؟ این کار در بازی شروع‌شده به معنی انصراف است."
-      );
 
       if (!confirmed) {
         return;
