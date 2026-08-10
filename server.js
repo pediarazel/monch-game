@@ -1876,17 +1876,18 @@ io.on("connection", (socket) => {
         }
       }
 
-            // پاکسازی کاربر از لابی‌های دیگر با مبالغ متفاوت قبل از ورود جدید
-      for (const [t, l] of tierLobbies.entries()) {
-        if (t !== tier) {
-          const idx = l.playerUidsInOrder.indexOf(uid);
-          if (idx !== -1) {
-            l.playerUidsInOrder.splice(idx, 1);
-            socket.leave(`match:${l.matchId}`);
-          }
-        }
-      }
+      // حالا کاربر را به لابی جدید اضافه کن
+      const lobby = getTierLobby(tier); // پیدا کردن لابی بر اساس tier جدید
 
+      if (!lobby.playerUidsInOrder.includes(uid)) { // چک کن که آیا کاربر در این لابی جدید هست یا نه
+        if (lobby.status !== "lobby") { // چک کن که آیا لابی هنوز در وضعیت lobby است یا نه
+          return callback?.({
+            success: false,
+            message: "این لابی در حال شروع است. لطفاً دوباره تلاش کنید.",
+          });
+        }
+        lobby.playerUidsInOrder.push(uid); // اضافه کردن کاربر به صف لابی جدید
+      }
 
       const lobby = getTierLobby(tier);
 
