@@ -39,26 +39,6 @@
     }
     .dice.rolling{ animation:shake 0.08s linear infinite; }
     @keyframes shake{ 0%{ transform:rotate(-3deg);} 50%{ transform:rotate(3deg);} 100%{ transform:rotate(-3deg);} }
-          #rollBtn.roll-ready{
-        animation:rollReadyPulse 0.8s ease-in-out infinite alternate;
-        background:#22c55e;
-        color:#fff;
-        box-shadow:0 0 0 0 rgba(34,197,94,.75);
-      }
-
-      @keyframes rollReadyPulse{
-        from{
-          transform:scale(1);
-          box-shadow:0 0 0 0 rgba(34,197,94,.70);
-          filter:brightness(1);
-        }
-        to{
-          transform:scale(1.06);
-          box-shadow:0 0 0 11px rgba(34,197,94,0);
-          filter:brightness(1.2);
-        }
-      }
-
 
     .dicePick{
       cursor:pointer;
@@ -223,20 +203,16 @@
         <div class="muted" style="font-size:12px;">تاس 2</div>
       </div>
 
-<div style="display:flex; flex-direction:column; gap:8px; align-items:center; min-width:260px;">
-  <button id="rollBtn" disabled>ریختن تاس</button>
+      <div style="display:flex; flex-direction:column; gap:8px; align-items:center; min-width:260px;">
+<button id="rollBtn" disabled>ریختن تاس</button>
 
-  <button
-    id="exitGameBtn"
-    type="button"
-    style="display:none; background:#dc2626; color:#fff;"
-  >
-    خروج از بازی
-  </button>
+<button id="leaveGameBtn" style="background:#ef4444;color:#fff;">
+  خروج از بازی/صف
+</button>
 
-  <button id="resetBtn">شروع مجدد (فقط لوکال)</button>
-</div>
+<button id="resetBtn">شروع مجدد (فقط لوکال)</button>
 
+      </div>
     </div>
 
     <div class="info">
@@ -464,8 +440,8 @@
   const ctx = canvas.getContext("2d");
 
 const rollBtn = document.getElementById("rollBtn");
-const exitGameBtn = document.getElementById("exitGameBtn");
 const resetBtn = document.getElementById("resetBtn");
+const leaveGameBtn = document.getElementById("leaveGameBtn");
 
 
   const dice1El = document.getElementById("dice1");
@@ -919,51 +895,30 @@ function drawPieces() {
   }
 
 function updateUI() {
-  if (!gameState) {
-    rollBtn.disabled = true;
-    rollBtn.classList.remove("roll-ready");
-
-    // در لابی ممکن است هنوز gameState نداشته باشیم،
-    // اما currentMatchId وجود دارد و کاربر باید بتواند از صف خارج شود.
-    exitGameBtn.style.display = currentMatchId ? "inline-block" : "none";
-
-    turnInfo.textContent = "";
-    setMsg("بازی هنوز شروع نشده است.");
-    dice1El.textContent = "🎲";
-    dice2El.textContent = "🎲";
-    pickedDieValue = null;
-    clearDiePickUI();
-    return;
-  }
-
-  if (gameState.winner) {
-    joinBtn.disabled = false; // فعال‌شدن دکمه ورود به اتاق جدید
-    rollBtn.disabled = true;
-    rollBtn.classList.remove("roll-ready");
-      exitGameBtn.style.display = "inline-block";
-      exitGameBtn.textContent = "بازگشت به لابی";
-
-
-    turnInfo.innerHTML = `برنده: <span class="tag ${gameState.winner}">${colorLabel[gameState.winner]}</span> 🎉`;
-    setMsg("بازی به پایان رسید.");
-    dice1El.textContent = "🎉";
-    dice2El.textContent = "🎉";
-    pickedDieValue = null;
-    clearDiePickUI();
-    return;
-  }
-
-  const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-  const canRoll =
-    (myColor === turnColor) &&
-    !gameState.rolling &&
-    !gameState.rolled &&
-    !gameState.winner;
-
-  rollBtn.disabled = !canRoll;
-  rollBtn.classList.toggle("roll-ready", canRoll);
-  exitGameBtn.style.display = currentMatchId ? "inline-block" : "none";
-
+    if (!gameState) {
+        rollBtn.disabled = true;
+        turnInfo.textContent = "";
+        setMsg("بازی هنوز شروع نشده است.");
+        dice1El.textContent = "🎲";
+        dice2El.textContent = "🎲";
+        pickedDieValue = null;
+        clearDiePickUI();
+        return;
+    }
+if (gameState.winner) {
+  joinBtn.disabled = false; // ✅ فعال شدن دکمه ورود به اتاق جدید
+  rollBtn.disabled = true;
+  turnInfo.innerHTML = `برنده: <span class="tag ${gameState.winner}">${colorLabel[gameState.winner]}</span> 🎉`;
+  setMsg("بازی به پایان رسید.");
+  dice1El.textContent = "🎉";
+  dice2El.textContent = "🎉";
+  pickedDieValue = null;
+  clearDiePickUI();
+  return;
+}
+    const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+    const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.rolled && !gameState.winner;
+    rollBtn.disabled = !canRoll;
   const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
   const d1 = Number(gameState.dice1 ?? 0);
   const d2 = Number(gameState.dice2 ?? 0);
@@ -1270,94 +1225,6 @@ dice2El.addEventListener("click", ()=>{
 });
 
   rollBtn.addEventListener("click", rollDice);
-    exitGameBtn.addEventListener("click", () => {
-      // ۱. اگر بازی تمام شده، فقط بازگشت به لابی
-      if (gameState && gameState.winner) {
-        currentMatchId = null;
-        gameState = null;
-        updateUI();
-        return;
-      }
-
-      // ۲. اگر بازی در جریان است، خروج امن
-      if (!currentMatchId) {
-        setMsg("بازی فعالی برای خروج وجود ندارد.");
-        return;
-      }
-      
-      if (confirm("آیا مطمئن هستید که می‌خواهید از بازی خارج شوید؟")) {
-        socket.emit("game:leave", { matchId: currentMatchId, reason: "manual_leave" });
-        currentMatchId = null;
-        gameState = null;
-        updateUI();
-      }
-    });
-
-
-      if (!confirmed) {
-        return;
-      }
-
-      exitGameBtn.disabled = true;
-      rollBtn.disabled = true;
-      rollBtn.classList.remove("roll-ready");
-
-      setMsg("در حال خروج از بازی...");
-
-      socket.emit("game:leave", { matchId: currentMatchId }, (response) => {
-        if (!response?.success) {
-          exitGameBtn.disabled = false;
-          setMsg(response?.message || "خروج از بازی ناموفق بود.");
-          updateUI();
-          return;
-        }
-
-        // پاک‌سازی وضعیت محلی و بازگشت به انتخاب اتاق
-        stopTurnTimer();
-        stopLobbyCountdown();
-
-        currentMatchId = null;
-        currentTurnId = null;
-        gameState = null;
-        myColor = null;
-        joinInProgress = false;
-
-        pickedDieValue = null;
-        pickedDieIndex = null;
-        lastDice1 = 0;
-        lastDice2 = 0;
-
-        clearDiePickUI();
-
-        dice1El.textContent = "🎲";
-        dice2El.textContent = "🎲";
-        turnInfo.textContent = "";
-
-        peopleNewsEl.textContent = "";
-        joinStatusEl.textContent = "";
-        serverMsgEl.textContent = response.message || "از بازی خارج شدی.";
-        socketStatusEl.textContent = "";
-
-        joinBtn.disabled = false;
-        exitGameBtn.disabled = false;
-        exitGameBtn.style.display = "none";
-
-        // پاسخ سرور قبل از disconnect رسیده است؛
-        // سرور این disconnect را به‌عنوان خروج عمدی نادیده می‌گیرد.
-        if (socket) {
-          try {
-            socket.removeAllListeners();
-            socket.disconnect();
-          } catch {}
-
-          socket = null;
-        }
-
-        setMsg("از بازی خارج شدی. می‌توانی یک اتاق جدید انتخاب کنی.");
-        draw();
-        updateUI();
-      });
-    });
 
   resetBtn.addEventListener("click", ()=>{
     dice1El.textContent = "🎲";
@@ -1610,6 +1477,114 @@ setMsg("ریست لوکال (کنترل اصلی با سرور است).");
 
   const tierInput = document.getElementById("tierInput");
   const joinBtn = document.getElementById("joinBtn");
+function returnToLobbyAfterManualLeave(message) {
+  // توقف تایمرهای بازی و لابی قبلی
+  stopTurnTimer();
+  stopLobbyCountdown();
+
+  // پاک‌کردن کامل وضعیت بازی قبلی از فرانت
+  gameState = null;
+  myColor = null;
+  currentMatchId = null;
+  currentTurnId = null;
+
+  pickedDieValue = null;
+  pickedDieIndex = null;
+  moveInFlight = false;
+
+  lastDice1 = 0;
+  lastDice2 = 0;
+
+  // بازنشانی ظاهر تاس‌ها
+  dice1El.classList.remove("rolling");
+  dice2El.classList.remove("rolling");
+  clearDiePickUI();
+
+  dice1El.textContent = "🎲";
+  dice2El.textContent = "🎲";
+
+  dice1El.style.pointerEvents = "none";
+  dice2El.style.pointerEvents = "none";
+  dice1El.style.opacity = "0.5";
+  dice2El.style.opacity = "0.5";
+
+  // بازگرداندن رابط به وضعیت آماده ورود به صف
+  rollBtn.disabled = true;
+  joinBtn.disabled = false;
+  joinInProgress = false;
+
+  joinStatusEl.textContent = "";
+  peopleNewsEl.textContent = "";
+  serverMsgEl.textContent = "Tier را انتخاب کن و دوباره وارد صف شو.";
+  socketStatusEl.textContent = "از بازی/صف خارج شدی.";
+
+  turnInfo.textContent = "";
+  setMsg(message || "از بازی خارج شدی. می‌توانی دوباره وارد صف شوی.");
+
+  // رسم مجدد تختهٔ خالی
+  draw();
+  updateUI();
+}
+
+leaveGameBtn.addEventListener("click", () => {
+  if (!currentMatchId) {
+    setMsg("شما اکنون داخل صف یا بازی فعالی نیستی.");
+    return;
+  }
+
+  if (!socket || !socket.connected) {
+    setMsg("اتصال به سرور برقرار نیست؛ خروج از بازی ثبت نشد.");
+    return;
+  }
+
+  const gameFinished = Boolean(gameState?.winner);
+
+  const confirmed = window.confirm(
+    gameFinished
+      ? "بازی تمام شده است.\n\nآیا می‌خواهی به لابی برگردی و برای بازی جدید آماده شوی؟"
+      : "آیا مطمئنی؟\n\nاگر بازی شروع شده باشد، خروج فوری به معنی انصراف و باخت است."
+  );
+
+
+  if (!confirmed) return;
+
+  const leavingMatchId = currentMatchId;
+
+  leaveGameBtn.disabled = true;
+  leaveGameBtn.textContent = "در حال خروج...";
+
+  socket.emit("game:leave", { matchId: leavingMatchId }, (response) => {
+    leaveGameBtn.disabled = false;
+    leaveGameBtn.textContent = "خروج از بازی/صف";
+
+    if (!response?.success) {
+      setMsg(response?.message || "خروج از بازی انجام نشد.");
+      return;
+    }
+
+    const message =
+      response.type === "game_forfeit"
+        ? "از بازی خارج شدی و انصراف ثبت شد."
+        : (response.message || "از صف بازی خارج شدی.");
+
+    /*
+      طبق منطق واقعی server.js:
+      سرور قبل از پاسخ موفق، skipNextDisconnect را فعال می‌کند.
+      بنابراین این disconnect نباید تایمر ۹۰ ثانیه‌ای ایجاد کند.
+    */
+    if (socket) {
+      try {
+        socket.removeAllListeners();
+        socket.disconnect();
+      } catch (error) {
+        console.warn("[MANUAL_LEAVE_SOCKET_DISCONNECT_ERROR]", error);
+      }
+      socket = null;
+    }
+
+    returnToLobbyAfterManualLeave(message);
+  });
+});
 
   joinBtn.addEventListener("click", async ()=>{
     if (joinInProgress) return;

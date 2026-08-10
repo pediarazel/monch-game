@@ -2023,14 +2023,36 @@ io.on("connection", (socket) => {
           });
         }
 
+        // اگر بازی قبلاً تمام شده و برنده مشخص است،
+        // خروج نباید فورفیت یا تغییر در نتیجه بازی ایجاد کند.
+        if (match.game?.winner) {
+          await socket.leave(`match:${match.matchId}`);
+
+          // قطع اتصال بعدیِ ناشی از خروج عمدی، قطع اینترنت حساب نشود.
+          socket.data.skipNextDisconnect = true;
+
+          console.log("[PLAYER_LEAVE_FINISHED_GAME]", {
+            userId: uid,
+            matchId: match.matchId,
+            winnerColor: match.game.winner,
+          });
+
+          return callback?.({
+            success: true,
+            type: "finished_game_leave",
+            message: "بازی تمام شده است. به لابی برگشتی.",
+          });
+        }
+
         // اگر برای این کاربر تایمر قطع اتصال قبلی باقی مانده باشد، حذف شود.
         if (disconnectionTimers.has(uid)) {
           clearTimeout(disconnectionTimers.get(uid).timer);
           disconnectionTimers.delete(uid);
         }
 
-        // خروج دستی = فورفیت فوری؛ بدون انتظار ۹۰ ثانیه.
+        // خروج دستی در بازیِ در حال اجرا = فورفیت فوری؛ بدون انتظار ۹۰ ثانیه.
         await handleForfeit(match, uid, "manual_leave");
+
 
         await socket.leave(`match:${match.matchId}`);
 
