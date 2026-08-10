@@ -1610,6 +1610,8 @@ leaveGameBtn.addEventListener("click", () => {
     joinInProgress = true;
     currentMatchId = null;
     gameState = null;
+    if (typeof ctx !== 'undefined') ctx.clearRect(0, 0, canvas.width, canvas.height);
+
     myColor = null;
 
     stopLobbyCountdown();
