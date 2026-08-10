@@ -1865,12 +1865,14 @@ io.on("connection", (socket) => {
       }
       assertValidTier(tier);
             // پاکسازی کامل از تمام صف‌های قبلی (ضد تداخل)
+      // اصلاحیه: پاکسازی کامل و قطعی کاربر از تمام لابی‌های دیگر (صرف نظر از مبلغ)
       for (const [t, l] of tierLobbies.entries()) {
         const idx = l.playerUidsInOrder.indexOf(uid);
         if (idx !== -1) {
           l.playerUidsInOrder.splice(idx, 1);
+          // خروج از سوکت مربوط به آن لابی قدیمی
           socket.leave(`match:${l.matchId}`);
-          console.log(`User ${uid} was removed from stale lobby tier ${t}`);
+          console.log(`[FIX] User ${uid} removed from stale lobby tier ${t}`);
         }
       }
 
