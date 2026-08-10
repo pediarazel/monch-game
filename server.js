@@ -1159,6 +1159,8 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
       });
 
       broadcastState(match);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
     }
 
     while (
@@ -2502,15 +2504,29 @@ const piece = m.game.pieces.find(
     }
 
     // --- انجام حرکت و پردازش‌های بعدی ---
+    const wasDoubleSix =
+      Number(m.game.dice1) === 6 && Number(m.game.dice2) === 6;
+
     movePiece(m.game, piece, dieValue);
+
     if (Array.isArray(m.game.pendingDice)) {
       m.game.pendingDice.splice(dieIndex, 1);
     } else {
       m.game.pendingDice = [];
     }
+
     m.game.dice1 = m.game.pendingDice[0] ? Number(m.game.pendingDice[0]) : 0;
     m.game.dice2 = m.game.pendingDice[1] ? Number(m.game.pendingDice[1]) : 0;
     m.game.dice = m.game.dice1 + m.game.dice2;
+
+    console.log("[MOVE_AFTER_CONSUME]", {
+      matchId,
+      pendingDice: m.game.pendingDice,
+      dice1: m.game.dice1,
+      dice2: m.game.dice2,
+      diceSum: m.game.dice
+    });
+
 
     console.log("[MOVE_AFTER_CONSUME]", {
       matchId,
@@ -2653,9 +2669,7 @@ return callback?.({
     }
 
     // بررسی جایزه جفت ۶
-    const isDoubleSix = (m.game.dice1 === 6 && m.game.dice2 === 6);
-
-    if (isDoubleSix) {
+    if (wasDoubleSix) {
       m.game.rolled = false;
       m.game.pendingDice = [];
       m.game.dice1 = 0;
@@ -2674,6 +2688,7 @@ return callback?.({
         winnerColor: null,
       });
     }
+
 
     // اگر جفت ۶ نبود، نوبت به نفر بعدی منتقل می‌شود
     m.game.turnMoved = true;

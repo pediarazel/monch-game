@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>منچ آنلاین</title>
   <style>
+    @keyframes blink {
+      0% { opacity: 1; }
+      50% { opacity: 0.3; }
+      100% { opacity: 1; }
+    }
+    .blink-me { animation: blink 1s infinite; }
+
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body{
       margin:0;background:#050505;color:#fff;font-family:sans-serif;
@@ -917,8 +924,9 @@ if (gameState.winner) {
   return;
 }
     const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-    const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.rolled && !gameState.winner;
+    const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.winner && (!gameState.rolled || (gameState.dice1 === 0 && gameState.dice2 === 0));
     rollBtn.disabled = !canRoll;
+
   const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
   const d1 = Number(gameState.dice1 ?? 0);
   const d2 = Number(gameState.dice2 ?? 0);
@@ -943,11 +951,16 @@ if (gameState.winner) {
     const isDice1Available = canPickDice && show1 > 0;
     const isDice2Available = canPickDice && show2 > 0;
 
+    // مدیریت تاس اول
     dice1El.style.pointerEvents = isDice1Available ? "auto" : "none";
+    dice1El.classList.toggle("blink-me", isDice1Available && pickedDieIndex !== 0);
     dice1El.style.opacity = isDice1Available ? "1" : "0.5";
 
+    // مدیریت تاس دوم
     dice2El.style.pointerEvents = isDice2Available ? "auto" : "none";
+    dice2El.classList.toggle("blink-me", isDice2Available && pickedDieIndex !== 1);
     dice2El.style.opacity = isDice2Available ? "1" : "0.5";
+
 
     if (pickedDieIndex != null) {
       const pendingLen = pendingDice.length;
