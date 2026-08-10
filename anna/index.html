@@ -924,7 +924,10 @@ if (gameState.winner) {
   return;
 }
     const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-    const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.winner && (!gameState.rolled || (gameState.dice1 === 0 && gameState.dice2 === 0));
+// اضافه کردن شرط جفت ۶: اگر تاس‌ها جفت ۶ باشند، کاربر باید بتواند دوباره رول کند
+const isDoubleSix = (gameState.dice1 === 6 && gameState.dice2 === 6);
+const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.winner && (!gameState.rolled || isDoubleSix || (gameState.dice1 === 0 && gameState.dice2 === 0));
+
     rollBtn.disabled = !canRoll;
 
   const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
