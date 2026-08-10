@@ -1864,31 +1864,23 @@ io.on("connection", (socket) => {
         return callback?.({ success: false, message: "tier لازم است." });
       }
       assertValidTier(tier);
-            // پاکسازی کامل از تمام صف‌های قبلی (ضد تداخل)
-      // اصلاحیه: پاکسازی کامل و قطعی کاربر از تمام لابی‌های دیگر (صرف نظر از مبلغ)
-      for (const [t, l] of tierLobbies.entries()) {
-        const idx = l.playerUidsInOrder.indexOf(uid);
-        if (idx !== -1) {
-          l.playerUidsInOrder.splice(idx, 1);
-          // خروج از سوکت مربوط به آن لابی قدیمی
-          socket.leave(`match:${l.matchId}`);
-          console.log(`[FIX] User ${uid} removed from stale lobby tier ${t}`);
-        }
-      }
+      // پاکسازی کامل کاربر از تمام لابی‌های قبلی؛ جلوگیری از تداخل Tierها
+      for (const [oldTier, oldLobby] of tierLobbies.entries()) {
+        const oldIndex = oldLobby.playerUidsInOrder.indexOf(uid);
 
-      // حالا کاربر را به لابی جدید اضافه کن
-      const lobby = getTierLobby(tier); // پیدا کردن لابی بر اساس tier جدید
+        if (oldIndex !== -1) {
+          oldLobby.playerUidsInOrder.splice(oldIndex, 1);
+          socket.leave(`match:${oldLobby.matchId}`);
 
-      if (!lobby.playerUidsInOrder.includes(uid)) { // چک کن که آیا کاربر در این لابی جدید هست یا نه
-        if (lobby.status !== "lobby") { // چک کن که آیا لابی هنوز در وضعیت lobby است یا نه
-          return callback?.({
-            success: false,
-            message: "این لابی در حال شروع است. لطفاً دوباره تلاش کنید.",
+          console.log("[LOBBY_STALE_USER_REMOVED]", {
+            userId: uid,
+            oldTier,
+            oldMatchId: oldLobby.matchId,
           });
         }
-        lobby.playerUidsInOrder.push(uid); // اضافه کردن کاربر به صف لابی جدید
       }
 
+      // ورود به لابی Tier انتخاب‌شده
       const lobby = getTierLobby(tier);
 
       if (!lobby.playerUidsInOrder.includes(uid)) {
@@ -1898,6 +1890,7 @@ io.on("connection", (socket) => {
             message: "این لابی در حال شروع است. لطفاً دوباره تلاش کنید.",
           });
         }
+
         lobby.playerUidsInOrder.push(uid);
       }
 
