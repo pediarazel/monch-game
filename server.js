@@ -1864,6 +1864,16 @@ io.on("connection", (socket) => {
         return callback?.({ success: false, message: "tier لازم است." });
       }
       assertValidTier(tier);
+            // پاکسازی کامل از تمام صف‌های قبلی (ضد تداخل)
+      for (const [t, l] of tierLobbies.entries()) {
+        const idx = l.playerUidsInOrder.indexOf(uid);
+        if (idx !== -1) {
+          l.playerUidsInOrder.splice(idx, 1);
+          socket.leave(`match:${l.matchId}`);
+          console.log(`User ${uid} was removed from stale lobby tier ${t}`);
+        }
+      }
+
             // پاکسازی کاربر از لابی‌های دیگر با مبالغ متفاوت قبل از ورود جدید
       for (const [t, l] of tierLobbies.entries()) {
         if (t !== tier) {
