@@ -1700,17 +1700,19 @@ for (const uid of lobby.playerUidsInOrder) {
   }
 }
 // بعد از join room ها
-  const ok = await startMatch(match);
-  if (!ok) {
-    lobby.status = "lobby";
-    lobby.playerUidsInOrder = [];
-    lobby.playerColors = { red: null, green: null, yellow: null, blue: null };
-    lobby.lobbyPhase = 1;
-    lobby.lobbyDeadlineAt = null;
-    stopLobbyTimer(lobby);
-  }
-
-  // خود startMatch می‌فرسته game:started و game:state
+    const ok = await startMatch(match);
+    if (ok) {
+      // ✅ اصلاحیه مهم: وقتی بازی شروع شد، لابی را پاک کن تا لابی بعدی تازه ساخته شود
+      tierLobbies.delete(lobby.tier);
+      console.log(`[LOBBY_CLEANUP] Tier ${lobby.tier} cleared after match start.`);
+    } else {
+      lobby.status = "lobby";
+      lobby.playerUidsInOrder = [];
+      lobby.playerColors = { red: null, green: null, yellow: null, blue: null };
+      lobby.lobbyPhase = 1;
+      lobby.lobbyDeadlineAt = null;
+      stopLobbyTimer(lobby);
+    }
 }
 
 //
@@ -1881,7 +1883,14 @@ io.on("connection", (socket) => {
       }
 
       // ورود به لابی Tier انتخاب‌شده
-      const lobby = getTierLobby(tier);
+      let lobby = getTierLobby(tier);
+
+      // ✅ اگر به هر دلیلی لابیِ پیدا شده در وضعیت لابی نبود، آن را حذف و یکی نو بساز
+      if (lobby.status !== "lobby") {
+          tierLobbies.delete(tier);
+          lobby = getTierLobby(tier);
+      }
+
 
       if (!lobby.playerUidsInOrder.includes(uid)) {
         if (lobby.status !== "lobby") {
