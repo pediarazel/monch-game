@@ -2634,73 +2634,72 @@ const piece = m.game.pieces.find(
       });
     }
 
-    // اگر هنوز تاسی باقی مانده باشد، بررسی کن آیا با تاس‌های باقی‌مانده
-    // اصلاً حرکت قانونی وجود دارد یا نه.
+    // --- منطق بررسی نوبت و جفت ۶ (اصلاح شده) ---
+
+    // 1. اگر جفت ۶ بوده، نوبت نباید عوض شود (چه تاس باقی مانده باشد چه نه)
+    if (wasDoubleSix) {
+      if (m.game.pendingDice.length > 0) {
+        // هنوز تاس برای حرکت دارد (حرکت دوم)
+        broadcastState(m);
+        return callback?.({
+          success: true,
+          bonusRoll: false,
+          pendingDice: m.game.pendingDice.slice(),
+          turnSkipped: false,
+          winnerColor: null,
+        });
+      } else {
+        // هر دو تاس مصرف شده، جایزه جفت ۶
+        m.game.rolled = false;
+        m.game.pendingDice = [];
+        m.game.dice1 = 0;
+        m.game.dice2 = 0;
+        m.game.dice = 0;
+        m.game.turnMoved = false;
+
+        startTurnTimeout(m);
+        broadcastState(m);
+
+        return callback?.({
+          success: true,
+          bonusRoll: true,
+          pendingDice: [],
+          turnSkipped: false,
+          winnerColor: null,
+        });
+      }
+    }
+
+    // 2. اگر جفت ۶ نبوده، بررسی کن آیا تاس دیگری باقی مانده
     if (m.game.pendingDice.length > 0) {
       m.game.turnMoved = true;
-
       const remainingDice = m.game.pendingDice.slice();
       const hasAnyLegalMove = remainingDice.some((dieValue) =>
         hasLegalMoveForDie(m.game, Number(dieValue))
       );
 
-      console.log("[MOVE_REMAINING_DICE_CHECK]", {
-        matchId,
-        remainingDice,
-        currentTurn: m.game.currentTurn,
-        currentColor,
-        hasAnyLegalMove,
-      });
-
-      // اگر هیچ حرکت قانونی برای تاس‌های باقی‌مانده وجود ندارد:
+      // اگر حرکت قانونی ندارد، نوبت را رد کن
       if (!hasAnyLegalMove) {
         m.game.rolled = false;
         m.game.pendingDice = [];
         m.game.dice1 = 0;
         m.game.dice2 = 0;
         m.game.dice = 0;
-
-        console.log("[MOVE_AUTO_SKIP_NO_LEGAL_REMAINING_DICE]", {
-          matchId,
-          currentColor,
-          remainingDice,
-          wasDoubleSix
-        });
-
         m.game.transitioning = false;
+        nextTurn(m);
+        broadcastState(m);
 
-        if (wasDoubleSix) {
-          // اگر جفت ۶ بوده ولی حرکت دوم قفل است، نوبت عوض نمی‌شود و جایزه می‌گیرد
-          m.game.turnMoved = false;
-          startTurnTimeout(m);
-          broadcastState(m);
-
-          return callback?.({
-            success: true,
-            bonusRoll: true,
-            pendingDice: [],
-            turnSkipped: false,
-            winnerColor: null,
-            noLegalMovesAfterConsume: true,
-          });
-        } else {
-          // اگر جفت ۶ نبود، نوبت به نفر بعدی منتقل می‌شود
-          nextTurn(m);
-          broadcastState(m);
-
-          return callback?.({
-            success: true,
-            bonusRoll: false,
-            pendingDice: [],
-            turnSkipped: true,
-            winnerColor: null,
-            noLegalMovesAfterConsume: true,
-          });
-        }
+        return callback?.({
+          success: true,
+          bonusRoll: false,
+          pendingDice: [],
+          turnSkipped: true,
+          winnerColor: null,
+          noLegalMovesAfterConsume: true,
+        });
       }
 
       broadcastState(m);
-
       return callback?.({
         success: true,
         bonusRoll: false,
@@ -2710,26 +2709,20 @@ const piece = m.game.pieces.find(
       });
     }
 
-    // بررسی جایزه جفت ۶ (پس از اتمام هر دو حرکت)
-    if (wasDoubleSix) {
-      m.game.rolled = false;
-      m.game.pendingDice = [];
-      m.game.dice1 = 0;
-      m.game.dice2 = 0;
-      m.game.dice = 0;
-      m.game.turnMoved = false;
+    // 3. اگر جفت ۶ نبود و هیچ تاس دیگری باقی نمانده، نوبت بعدی
+    m.game.turnMoved = true;
+    m.game.transitioning = false;
+    nextTurn(m);
+    broadcastState(m);
 
-      startTurnTimeout(m);
-      broadcastState(m);
+    return callback?.({
+      success: true,
+      bonusRoll: false,
+      pendingDice: [],
+      turnSkipped: false,
+      winnerColor: null,
+    });
 
-      return callback?.({
-        success: true,
-        bonusRoll: true,
-        pendingDice: [],
-        turnSkipped: false,
-        winnerColor: null,
-      });
-    }
 
     // اگر جفت ۶ نبود، نوبت به نفر بعدی منتقل می‌شود
     m.game.turnMoved = true;
