@@ -2269,6 +2269,11 @@ io.on("connection", (socket) => {
         m.game.dice2 = d2;
         m.game.dice = d1 + d2;
 
+        // این پرچم تا پایان مصرف هر دو تاس حفظ می‌شود.
+        // بنابراین بعد از حرکت اول هم می‌دانیم تاس اولیه جفت ۶ بوده است.
+        m.game.isDoubleSixRoll = d1 === 6 && d2 === 6;
+
+
         console.log("[ROLL_RESULT]", {
           matchId: m.matchId,
           currentTurn: m.game.currentTurn,
@@ -2290,11 +2295,13 @@ io.on("connection", (socket) => {
         if (noLegalMoves) {
           const myTurnId = m.turnId;
 
-          m.game.pendingDice = [];
-          m.game.dice1 = 0;
-          m.game.dice2 = 0;
-          m.game.dice = 0;
-          m.game.turnMoved = true;
+            m.game.pendingDice = [];
+            m.game.dice1 = 0;
+            m.game.dice2 = 0;
+            m.game.dice = 0;
+            m.game.turnMoved = true;
+            m.game.isDoubleSixRoll = false;
+
 
           console.log("[NO_MOVES] before broadcastState", {
             matchId,
@@ -2530,8 +2537,9 @@ const piece = m.game.pieces.find(
     }
 
     // --- انجام حرکت و پردازش‌های بعدی ---
-    const wasDoubleSix =
-      Number(m.game.dice1) === 6 && Number(m.game.dice2) === 6;
+      // این مقدار هنگام ریختن تاس ذخیره شده تا با مصرف تاس اول از بین نرود.
+      const wasDoubleSix = m.game.isDoubleSixRoll === true;
+
 
     movePiece(m.game, piece, dieValue);
 
@@ -2648,14 +2656,19 @@ const piece = m.game.pieces.find(
           turnSkipped: false,
           winnerColor: null,
         });
-      } else {
-        // هر دو تاس مصرف شده، جایزه جفت ۶
-        m.game.rolled = false;
-        m.game.pendingDice = [];
-        m.game.dice1 = 0;
-        m.game.dice2 = 0;
-        m.game.dice = 0;
-        m.game.turnMoved = false;
+        } else {
+          // هر دو تاس جفت ۶ مصرف شده‌اند؛ بازیکن در همان نوبت دوباره تاس می‌ریزد.
+          m.game.rolled = false;
+          m.game.pendingDice = [];
+          m.game.dice1 = 0;
+          m.game.dice2 = 0;
+          m.game.dice = 0;
+          m.game.turnMoved = false;
+
+          // جایزه‌ی جفت ۶ فقط یک‌بار داده می‌شود؛
+          // برای تاس‌ریزی بعدی، مقدار تازه در game:roll ثبت خواهد شد.
+          m.game.isDoubleSixRoll = false;
+
 
         startTurnTimeout(m);
         broadcastState(m);
@@ -2722,22 +2735,6 @@ const piece = m.game.pieces.find(
       turnSkipped: false,
       winnerColor: null,
     });
-
-
-    // اگر جفت ۶ نبود، نوبت به نفر بعدی منتقل می‌شود
-    m.game.turnMoved = true;
-    m.game.transitioning = false;
-    nextTurn(m);
-    broadcastState(m);
-
-    return callback?.({
-      success: true,
-      bonusRoll: false,
-      pendingDice: [],
-      turnSkipped: false,
-      winnerColor: null,
-    });
-
 
   } catch (e) {
     console.error("Error in game:move:", e);
