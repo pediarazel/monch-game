@@ -117,6 +117,18 @@
   opacity: 1 !important;
   filter: none !important;
 }
+/* انیمیشن چشمک‌زن برای دکمه و تاس‌ها */
+@keyframes blink-animation {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7); border-color: #fff; }
+  50% { transform: scale(1.05); box-shadow: 0 0 15px 5px rgba(255, 255, 255, 0.5); border-color: #ffd700; }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); border-color: #fff; }
+}
+
+.blink-me {
+  animation: blink-animation 1s infinite !important;
+  border: 3px solid #fff !important;
+  border-radius: 8px;
+}
 
   </style>
 </head>
@@ -928,41 +940,56 @@ if (gameState.winner) {
 const isDoubleSix = (gameState.dice1 === 6 && gameState.dice2 === 6);
 const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.winner && (!gameState.rolled || isDoubleSix || (gameState.dice1 === 0 && gameState.dice2 === 0));
 
+    // --- مدیریت دکمه ریختن تاس ---
     rollBtn.disabled = !canRoll;
+    // اگر نوبت من است و هنوز تاس نریخته‌ام، دکمه چشمک بزند
+    if (canRoll && !gameState.rolled) {
+      rollBtn.classList.add("blink-me");
+    } else {
+      rollBtn.classList.remove("blink-me");
+    }
 
-  const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
-  const d1 = Number(gameState.dice1 ?? 0);
-  const d2 = Number(gameState.dice2 ?? 0);
+    const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
+    const d1 = Number(gameState.dice1 ?? 0);
+    const d2 = Number(gameState.dice2 ?? 0);
 
-  // تاس قابل حرکت فقط از pendingDice خوانده می‌شود.
-  // در جفت 6، pendingDice خالی است اما dice1 و dice2 باید نمایش داده شوند.
-  const hasPendingDice = pendingDice.length > 0;
-  const hasResultDice = d1 > 0 || d2 > 0;
+    const hasPendingDice = pendingDice.length > 0;
+    const hasResultDice = d1 > 0 || d2 > 0;
 
-  const show1 = hasPendingDice ? Number(pendingDice[0] ?? 0) : d1;
-  const show2 = hasPendingDice ? Number(pendingDice[1] ?? 0) : d2;
+    const show1 = hasPendingDice ? Number(pendingDice[0] ?? 0) : d1;
+    const show2 = hasPendingDice ? Number(pendingDice[1] ?? 0) : d2;
 
-  const canPickDice =
-    myColor === turnColor &&
-    gameState.rolled === true &&
-    hasPendingDice;
+    const canPickDice =
+      myColor === turnColor &&
+      gameState.rolled === true &&
+      hasPendingDice;
 
-  if (hasPendingDice || hasResultDice) {
-    dice1El.textContent = show1 > 0 ? String(show1) : "🎲";
-    dice2El.textContent = show2 > 0 ? String(show2) : "🎲";
+    if (hasPendingDice || hasResultDice) {
+      dice1El.textContent = show1 > 0 ? String(show1) : "🎲";
+      dice2El.textContent = show2 > 0 ? String(show2) : "🎲";
 
-    const isDice1Available = canPickDice && show1 > 0;
-    const isDice2Available = canPickDice && show2 > 0;
+      // تاس ۱ زمانی چشمک می‌زند که موجود باشد، نوبت من باشد و فعلاً آن را انتخاب نکرده باشم
+      const isDice1Available = canPickDice && show1 > 0;
+      dice1El.style.pointerEvents = isDice1Available ? "auto" : "none";
+      if (isDice1Available && pickedDieIndex !== 0) {
+        dice1El.classList.add("blink-me");
+      } else {
+        dice1El.classList.remove("blink-me");
+      }
+      dice1El.style.opacity = isDice1Available ? "1" : "0.5";
 
-    // مدیریت تاس اول
-    dice1El.style.pointerEvents = isDice1Available ? "auto" : "none";
-    dice1El.classList.toggle("blink-me", isDice1Available && pickedDieIndex !== 0);
-    dice1El.style.opacity = isDice1Available ? "1" : "0.5";
+      // تاس ۲ زمانی چشمک می‌زند که موجود باشد، نوبت من باشد و فعلاً آن را انتخاب نکرده باشم
+      const isDice2Available = canPickDice && (pendingDice.length > 1 ? show2 > 0 : (pendingDice.length === 1 && pickedDieIndex === 0 ? false : show1 > 0));
+      // اصلاح ساده‌تر برای تاس دوم: اگر در لیست انتظار هست و انتخاب نشده، چشمک بزند
+      const d2ActualAvailable = canPickDice && pendingDice.length > 0 && ( (pendingDice.length === 2 && pickedDieIndex !== 1) || (pendingDice.length === 1 && pickedDieIndex === null) );
 
-    // مدیریت تاس دوم
-    dice2El.style.pointerEvents = isDice2Available ? "auto" : "none";
-    dice2El.classList.toggle("blink-me", isDice2Available && pickedDieIndex !== 1);
-    dice2El.style.opacity = isDice2Available ? "1" : "0.5";
+      dice2El.style.pointerEvents = isDice2Available ? "auto" : "none";
+      if (d2ActualAvailable) {
+        dice2El.classList.add("blink-me");
+      } else {
+        dice2El.classList.remove("blink-me");
+      }
+      dice2El.style.opacity = isDice2Available ? "1" : "0.5";
 
 
     if (pickedDieIndex != null) {
