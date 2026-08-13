@@ -1031,6 +1031,23 @@ function broadcastState(match) {
     activeColor,
   });
 }
+// ارسال وضعیت بازی فقط برای یک سوکت؛ مناسب بازگشت خودکار بازیکن
+function emitStateToSocket(socket, match) {
+  if (!socket || !match || !match.game) return;
+
+  const activeColor = colorOrder[match.game.currentTurn];
+
+  socket.emit("game:state", {
+    ...cloneGameForClient(match.game),
+    matchId: match.matchId,
+    status: match.status,
+    tier: match.tier,
+    turnId: match.turnId,
+    turnDeadlineAt: match.turnDeadlineAt || match.game.turnDeadlineAt || null,
+    playerColors: match.playerColors,
+    activeColor,
+  });
+}
 
 async function finalizeDisconnectedBotWinner(match, winnerColor) {
   try {
@@ -1856,6 +1873,90 @@ io.on("connection", (socket) => {
       }, 500);
     }
   }
+    // بازگرداندن خودکار بازیکن به مسابقه فعال پس از قطع و وصل اینترنت
+    socket.on("game:restoreSession", (payload, callback) => {
+      try {
+        // در همه مسابقه‌های در حال بازی جستجو می‌کنیم.
+        // فقط مسابقه‌ای معتبر است که این userId در playerColors آن حضور داشته باشد.
+        const activeMatch = Array.from(matches.values()).find((match) => {
+          if (!match || match.status !== "playing" || !match.game || match.game.winner) {
+            return false;
+          }
+
+          return Object.values(match.playerColors || {}).some(
+            (playerId) => Number(playerId) === uid
+          );
+        });
+
+        // کاربر مسابقه فعالی ندارد؛ این حالت خطا نیست.
+        if (!activeMatch) {
+          return callback?.({
+            success: true,
+            restored: false,
+            message: "بازی فعال برای بازیابی پیدا نشد.",
+          });
+        }
+
+        // اگر تایمر ۹۰ ثانیه‌ای قطع اتصال وجود دارد، لغو شود.
+        if (disconnectionTimers.has(uid)) {
+          const { timer } = disconnectionTimers.get(uid);
+          clearTimeout(timer);
+          disconnectionTimers.delete(uid);
+        }
+
+        // اگر ربات موقت برای این بازیکن زمان‌بندی شده، متوقف شود.
+        if (
+          activeMatch.pendingBotTimer &&
+          activeMatch.pendingBotUserId === uid
+        ) {
+          clearTimeout(activeMatch.pendingBotTimer);
+          activeMatch.pendingBotTimer = null;
+          activeMatch.pendingBotTurnId = null;
+          activeMatch.pendingBotUserId = null;
+
+          console.log("[DISCONNECTED_BOT_CANCELLED_BY_RESTORE]", {
+            userId: uid,
+            matchId: activeMatch.matchId,
+          });
+        }
+
+        // سوکت جدید وارد روم همان مسابقه می‌شود.
+        socket.join(`match:${activeMatch.matchId}`);
+
+        console.log("[GAME_SESSION_RESTORED]", {
+          userId: uid,
+          matchId: activeMatch.matchId,
+          socketId: socket.id,
+        });
+
+        // به دیگر بازیکنان اطلاع می‌دهیم که بازیکن برگشته است.
+        io.to(`match:${activeMatch.matchId}`).emit("player:reconnected", {
+          userId: uid,
+          matchId: activeMatch.matchId,
+        });
+
+        // State کامل فقط برای بازیکنی که برگشته ارسال می‌شود.
+        emitStateToSocket(socket, activeMatch);
+
+        return callback?.({
+          success: true,
+          restored: true,
+          matchId: activeMatch.matchId,
+          message: "بازی فعال با موفقیت بازیابی شد.",
+        });
+      } catch (error) {
+        console.error("[GAME_RESTORE_SESSION_ERROR]", {
+          userId: uid,
+          error,
+        });
+
+        return callback?.({
+          success: false,
+          restored: false,
+          message: "خطا در بازیابی بازی فعال.",
+        });
+      }
+    });
 
   // Join lobby / match room
   socket.on("room:join", async (payload, callback) => {

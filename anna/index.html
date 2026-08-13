@@ -1352,11 +1352,28 @@ setMsg("ریست لوکال (کنترل اصلی با سرور است).");
       reconnectionDelayMax: 5000
     });
 
-    socket.on("connect", async () => {
-      socketStatusEl.textContent = "✅ سوکت متصل شد (" + socket.id + ")";
-      serverMsgEl.textContent = "✅ اتصال آنلاین برقرار شد.";
-      await updateBalance().catch(()=>{});
-    });
+      socket.on("connect", async () => {
+        socketStatusEl.textContent = "✅ سوکت متصل شد (" + socket.id + ")";
+        serverMsgEl.textContent = "✅ اتصال آنلاین برقرار شد.";
+
+        await updateBalance().catch(() => {});
+
+        // در اتصال اول و اتصال مجدد، از سرور می‌پرسیم آیا بازی فعالی داریم.
+        // اگر داشته باشیم، بدون رفرش و بدون room:join بازی برمی‌گردد.
+        socket.emit("game:restoreSession", {}, (resp) => {
+          console.log("GAME RESTORE RESPONSE:", resp);
+
+          if (resp?.success && resp?.restored && resp?.matchId) {
+            currentMatchId = String(resp.matchId);
+
+            socketStatusEl.textContent = "✅ اتصال برقرار شد؛ بازی در حال همگام‌سازی است.";
+            joinStatusEl.textContent = "🎮 بازگشت خودکار به بازی";
+            serverMsgEl.textContent = "✅ بازی فعال شما بازیابی شد.";
+            setMsg("بازی شما بدون نیاز به رفرش بازیابی شد.");
+          }
+        });
+      });
+
 
     socket.on("connect_error", error => {
       const message = error && error.message ? error.message : String(error || "خطای نامشخص");
