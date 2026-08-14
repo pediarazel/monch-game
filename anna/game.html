@@ -710,11 +710,17 @@
         leaveGameBtn.disabled = false; leaveGameBtn.textContent = "خروج از بازی/صف";
         if (!response?.success) { setMsg(response?.message || "خروج انجام نشد."); return; }
         const message = response.type === "game_forfeit" ? "انصراف ثبت شد." : (response.message || "از صف خارج شدی.");
-        if (socket) {
-          try { socket.removeAllListeners(); socket.disconnect(); } catch {}
-          socket = null;
-        }
-        returnToLobbyAfterManualLeave(message);
+if (socket) {
+  try {
+    socket.removeAllListeners();
+    socket.disconnect();
+  } catch {}
+
+  socket = null;
+}
+
+window.location.replace("/lobby.html");
+
       });
     });
 
@@ -822,9 +828,21 @@
       return socket;
     }
 
-    // ====== شروع ======
+// ====== شروع ======
+draw();
+updateUI();
+
+/*
+  چشمک‌زدن نام بازیکن نوبت‌دار:
+  Canvas باید هر نیم‌ثانیه دوباره رسم شود؛
+  در غیر این صورت نام یک‌بار پاک می‌شود و تا state بعدی برنمی‌گردد.
+*/
+setInterval(() => {
+  if (gameState && !gameState.winner) {
     draw();
-    updateUI();
+  }
+}, 500);
+
     // اتصال خودکار Socket در صورت وجود توکن
     if (getToken()) {
       connectSocketOnce();

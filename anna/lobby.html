@@ -367,39 +367,65 @@ function isJwtExpired(token) {
         return socket;
       }
 
-      function renderLobbyByDeadline(data) {
-        if (!data) return;
-        joinStatusEl.textContent = data.status || "";
-        serverMsgEl.textContent = data.serverMessage || "";
-        if (data.countdown) {
-          startLobbyCountdown(data.countdown);
-        } else {
-          stopLobbyCountdown();
-        }
-      }
+function renderLobbyByDeadline(data) {
+  if (!data) return;
 
-      function startLobbyCountdown(targetTimestamp) {
-        stopLobbyCountdown();
-        const updateCountdown = () => {
-          const now = Date.now();
-          const timeLeftMs = targetTimestamp - now;
-          if (timeLeftMs <= 0) {
-            stopLobbyCountdown();
-            peopleNewsEl.textContent = "⏳ انتظار برای شروع...";
-            return;
-          }
-          const seconds = Math.floor(timeLeftMs / 1000);
-          peopleNewsEl.textContent = `بازی در ${seconds} ثانیه دیگر شروع می‌شود...`;
-        };
-        updateCountdown();
-        lobbyCountdownInterval = setInterval(updateCountdown, 1000);
-      }
+  joinStatusEl.textContent = data.message || "";
+  serverMsgEl.textContent = "";
+
+  const phase = Number(data.phase || 0);
+  const searchingFor = Number(data.searchingFor || 0);
+
+  if (phase === 4) {
+    peopleNewsEl.textContent = "🎮 بازی شروع می‌شود...";
+  } else if (searchingFor > 0) {
+    peopleNewsEl.textContent = `⏳ در حال جستجوی نفر ${searchingFor}...`;
+  } else {
+    peopleNewsEl.textContent = "";
+  }
+
+  if (data.deadlineAt) {
+    startLobbyCountdown(data.deadlineAt, data.message || "در حال جستجوی بازیکن");
+  } else {
+    stopLobbyCountdown();
+  }
+}
+
+function startLobbyCountdown(deadlineAt, message) {
+  stopLobbyCountdown();
+
+  const deadlineMs = new Date(deadlineAt).getTime();
+
+  if (!Number.isFinite(deadlineMs)) {
+    return;
+  }
+
+  const updateCountdown = () => {
+    const remainingMs = deadlineMs - Date.now();
+    const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
+
+    joinStatusEl.textContent =
+      `${message} (${seconds} ثانیه باقی مانده)`;
+
+    if (remainingMs <= 0) {
+      stopLobbyCountdown();
+      peopleNewsEl.textContent = "⏳ در انتظار شروع بازی...";
+    }
+  };
+
+  updateCountdown();
+
+  lobbyCountdownInterval = setInterval(updateCountdown, 500);
+}
+
 function stopLobbyCountdown() {
   if (lobbyCountdownInterval) {
     clearInterval(lobbyCountdownInterval);
   }
+
   lobbyCountdownInterval = null;
 }
+
 
 
       // --- Join Logic ---
