@@ -1,1843 +1,247 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>منچ آنلاین</title>
-  <style>
-    @keyframes blink {
-      0% { opacity: 1; }
-      50% { opacity: 0.3; }
-      100% { opacity: 1; }
-    }
-    .blink-me { animation: blink 1s infinite; }
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Monopoly Online - ورود</title>
+    <style>
+      body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #0a0a0a;
+        color: #e2e8f0;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        text-align: center;
+        font-size: 16px;
+        touch-action:manipulation;
+      }
 
-    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    body{
-      margin:0;background:#050505;color:#fff;font-family:sans-serif;
-      display:flex;flex-direction:column;align-items:center;padding:10px;
-      user-select:none;
-    }
-    h2{ margin:8px 0 10px; color:#fff; font-size:20px; }
-    .wrap{ width:100%; max-width:860px; display:flex; flex-direction:column; gap:12px; align-items:center; }
+      .panel{
+        width:min(96vw,700px);
+        display:flex; flex-wrap:wrap; gap:10px;
+        justify-content:center; align-items:center;
+        background:#101010;border:1px solid #252525;border-radius:14px;
+        padding:12px;
+      }
 
-    canvas{
-      width:min(96vw,600px);
-      height:min(96vw,600px);
-      background:#111;border:2px solid #333;border-radius:16px;
-      touch-action:manipulation;
-    }
+      .row{ width:100%; max-width:700px; display:flex; flex-wrap:wrap; gap:10px; justify-content:center; align-items:center; }
 
-    .panel{
-      width:min(96vw,700px);
-      display:flex; flex-wrap:wrap; gap:10px;
-      justify-content:center; align-items:center;
-      background:#101010;border:1px solid #252525;border-radius:14px;
-      padding:12px;
-    }
+      button{
+        border:none;background:#fff;color:#000;border-radius:12px;
+        padding:12px 18px;font-size:15px;font-weight:bold;cursor:pointer;
+        transition:background 0.2s;
+      }
+      button:active{ background:#ccc; }
+      button:disabled{ opacity:0.4; cursor:not-allowed; }
 
-    .row{ width:100%; max-width:700px; display:flex; flex-wrap:wrap; gap:10px; justify-content:center; align-items:center; }
-
-    .dice{
-      width:70px;height:70px;border-radius:14px;
-      background:linear-gradient(145deg,#1d1d1d,#080808);
-      border:2px solid #555;display:flex;align-items:center;justify-content:center;
-      font-size:30px;font-weight:bold;color:#fff;
-    }
-    .dice.rolling{ animation:shake 0.08s linear infinite; }
-    @keyframes shake{ 0%{ transform:rotate(-3deg);} 50%{ transform:rotate(3deg);} 100%{ transform:rotate(-3deg);} }
-
-    .dicePick{
-      cursor:pointer;
-      transition:transform .08s, border-color .15s, filter .15s;
-      filter:saturate(1);
-    }
-    .dicePick:hover{ transform:scale(1.03); border-color:#8bffdd; }
-    .dicePick.selected{
-      border-color:#22c55e;
-      box-shadow:0 0 0 3px rgba(34,197,94,.25);
-    }
-
-    button{
-      border:none;background:#fff;color:#000;border-radius:12px;
-      padding:12px 18px;font-size:15px;font-weight:bold;cursor:pointer;
-      transition:background 0.2s;
-    }
-    button:active{ background:#ccc; }
-    button:disabled{ opacity:0.4; cursor:not-allowed; }
-
-    .info{ width:100%; text-align:center; font-size:14px; line-height:1.8; margin-top:5px; }
-    .tag{ display:inline-block; padding:2px 8px; border-radius:4px; font-weight:bold; color:#000; }
-    .red{ background:#ff4d4d; }
-    .green{ background:#2ecc71; }
-    .yellow{ background:#f1c40f; }
-    .blue{ background:#3498db; }
-    .muted{ color:#cbd5e1; font-size:13px; }
-    input, select{
-      width:100%;
-      border:none;border-radius:10px;padding:12px;font-size:15px;
-      background:#1f2937;color:#fff;outline:none;
-    }
-    .card{
-      width:100%; max-width:420px;
-      background:#111827;border-radius:16px;padding:16px;
-      box-shadow:0 10px 30px rgba(0,0,0,0.35);
-    }
-    .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-    pre#debug{
-      text-align:left;
-      width:100%;
-      background:#0b1220;
-      border:1px solid #23314f;
-      border-radius:12px;
-      padding:10px;
-      overflow:auto;
-      max-height:220px;
-      font-size:12px;
-      color:#e5e7eb;
-      margin:10px 0 0;
-      white-space:pre-wrap;
-      word-break:break-word;
-    }
-    /* یکدست و سفید کردن هر دو تاس */
-#dice1, #dice2, .die, .dice {
-  color: #ffffff !important;
-  opacity: 1 !important;
-  filter: none !important;
-  background-color: #252525 !important;
-  border: 2px solid #ffffff !important;
-  text-shadow: 0 0 5px rgba(255, 255, 255, 0.8) !important;
-}
-
-#dice1:disabled, #dice2:disabled,
-#dice1.selected, #dice2.selected,
-#dice1.used, #dice2.used,
-#dice1.picked, #dice2.picked {
-  color: #ffffff !important;
-  opacity: 1 !important;
-  filter: none !important;
-}
-/* انیمیشن چشمک‌زن برای دکمه و تاس‌ها */
-@keyframes blink-animation {
-  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7); border-color: #fff; }
-  50% { transform: scale(1.05); box-shadow: 0 0 15px 5px rgba(255, 255, 255, 0.5); border-color: #ffd700; }
-  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); border-color: #fff; }
-}
-
-.blink-me {
-  animation: blink-animation 1s infinite !important;
-  border: 3px solid #fff !important;
-  border-radius: 8px;
-}
-
-  </style>
+      .info{ width:100%; text-align:center; font-size:14px; line-height:1.8; margin-top:5px; }
+      .muted{ color:#cbd5e1; font-size:13px; }
+      input, select{
+        width:100%;
+        border:none;border-radius:10px;padding:12px;font-size:15px;
+        background:#1f2937;color:#fff;outline:none;
+      }
+    </style>
 </head>
 <body>
-<div class="wrap">
-
-  <h2>منچ آنلاین</h2>
-
-  <div class="card">
-    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
-      <div>
-        <div style="font-size:18px; font-weight:700;">ورود / ثبت‌نام</div>
-        <div class="muted" id="authHint">با توکن وارد می‌شویم تا بازی آنلاین هماهنگ باشد.</div>
-      </div>
-      <button id="logoutBtn" style="background:#ef4444;color:#fff;">خروج</button>
-    </div>
-
-    <div style="height:10px;"></div>
-
-    <div class="grid2">
-      <div>
-        <label class="muted" for="username">نام کاربری</label>
-        <input id="username" type="text" placeholder="مثلاً ali" />
-      </div>
-      <div>
-        <label class="muted" for="password">رمز عبور</label>
-        <input id="password" type="password" placeholder="رمز" />
-      </div>
-    </div>
-
-    <div style="height:10px;"></div>
-
-    <div class="row">
-      <button id="loginBtn">ورود</button>
-      <button id="registerBtn" style="background:#22c55e;color:#fff;">ثبت‌نام</button>
-    </div>
-
-    <div style="height:10px;"></div>
-    <div class="muted" style="direction:ltr;">(توکن در LocalStorage ذخیره می‌شود)</div>
-
-    <div style="height:10px;"></div>
-    <div class="muted" style="text-align:center; width:100%;">
-      موجودی شما: <b id="balanceValue">0</b>
-    </div>
-
-    <div id="authResult" class="info" style="margin:0; color:#e2e8f0;"></div>
-    <pre id="debug" aria-label="debug"></pre>
-  </div>
 
   <div class="panel">
     <div style="display:flex;flex-direction:column;align-items:center;gap:6px; width:100%;">
-      <div class="muted">ورود به صف بازی (بر اساس Tier)</div>
+      <div class="muted">ورود یا ثبت‌نام</div>
 
-      <div style="display:flex; gap:10px; width:100%; justify-content:center; flex-wrap:wrap; margin-top:6px;">
-        <div style="max-width:260px; width:100%;">
-<label class="muted" for="tierInput" style="display:block; margin-bottom:6px; text-align:center;">قیمت اتاق</label>
-<select id="tierInput">
-  <option value="20">20,000 تومان</option>
-  <option value="50" selected>50,000 تومان</option>
-  <option value="100">100,000 تومان</option>
-  <option value="200">200,000 تومان</option>
-</select>
+      <div class="row">
+        <input id="usernameInput" type="text" placeholder="نام کاربری" />
+      </div>
+      <div class="row">
+        <input id="passwordInput" type="password" placeholder="رمز عبور" />
+      </div>
 
-        </div>
-
-        <button id="joinBtn" style="background:#3b82f6;color:#fff; font-weight:700;">
-          ورود به بازی
+      <div style="display:flex; gap:10px; width:100%; justify-content:center; margin-top:6px;">
+        <button id="loginBtn" style="background:#3b82f6;color:#fff; font-weight:700;">
+          ورود
+        </button>
+        <button id="registerBtn" style="background:#22c55e;color:#fff;">
+          ثبت‌نام
         </button>
       </div>
 
-      <div class="muted" style="direction:ltr; margin-top:2px;" id="joinMeta">
-قیمت ورودی از موجودی شما کم می‌شود. جایزهٔ برنده ۹۰٪ مبلغ کل است.
-
-      </div>
-
-      <div class="muted" id="socketStatus" style="margin-top:6px;"></div>
-      <div class="muted" id="joinStatus"></div>
-      <div class="muted" id="peopleNews" style="min-height:18px;"></div>
+      <div class="muted" id="authStatus" style="min-height:18px;"></div>
       <div class="muted" id="serverMsg" style="min-height:18px;"></div>
     </div>
   </div>
 
-  <canvas id="board" width="600" height="600"></canvas>
-
-  <div class="panel">
-    <div style="display:flex; align-items:center; justify-content:center; gap:10px; width:100%; flex-wrap:wrap;">
-      <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
-        <div id="dice1" class="dice dicePick">🎲</div>
-        <div class="muted" style="font-size:12px;">تاس 1</div>
-      </div>
-
-      <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
-        <div id="dice2" class="dice dicePick">🎲</div>
-        <div class="muted" style="font-size:12px;">تاس 2</div>
-      </div>
-
-      <div style="display:flex; flex-direction:column; gap:8px; align-items:center; min-width:260px;">
-<button id="rollBtn" disabled>ریختن تاس</button>
-
-<button id="leaveGameBtn" style="background:#ef4444;color:#fff;">
-  خروج از بازی/صف
-</button>
-
-<button id="resetBtn">شروع مجدد (فقط لوکال)</button>
-
-      </div>
-    </div>
-
-    <div class="info">
-      <div id="turnInfo"></div>
-      <div id="msg"></div>
-    </div>
-  </div>
-
-</div>
-
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-<script>
-(function(){
-  const msgEl = document.getElementById('msg');
-  const debugEl = document.getElementById('debug');
-
-  const socketStatusEl = document.getElementById('socketStatus');
-  const joinStatusEl = document.getElementById('joinStatus');
-  const peopleNewsEl = document.getElementById('peopleNews');
-  const serverMsgEl = document.getElementById('serverMsg');
-
-  function setMsg(text){ if(msgEl) msgEl.textContent = text; }
-  let lastDebugData = {};
-  function setDebug(value) {
-    try {
-      let nextValue = value;
-      if (typeof value === "function") nextValue = value(lastDebugData);
-
-      if (nextValue && typeof nextValue === "object" && !Array.isArray(nextValue)) {
-        lastDebugData = nextValue;
-      } else {
-        lastDebugData = nextValue;
-      }
-
-      debugEl.textContent =
-        typeof nextValue === "string" ? nextValue : JSON.stringify(nextValue, null, 2);
-    } catch (error) {
-      debugEl.textContent = String(error?.message || value || "Debug error");
-    }
-  }
-
-  window.addEventListener('error', (e)=> setMsg('ERROR: ' + (e.message || e.error || e)));
-  window.addEventListener('unhandledrejection', (e)=> setMsg('PROMISE ERROR: ' + ((e.reason && e.reason.message) ? e.reason.message : e)));
-
-  setMsg('صفحه لود شد ✅');
-
-  const SOCKET_URL = window.SOCKET_URL_OVERRIDE || "https://monch-game.onrender.com";
-  const API_BASE = (window.API_BASE_OVERRIDE || "https://monch-game.onrender.com").trim();
-  function api(path){ return API_BASE ? (API_BASE.replace(/\/$/,'') + path) : path; }
-
-  // --- Token helpers ---
-  const TOKEN_STORAGE_KEY = "token";
-  function normalizeToken(value) {
-    if (value == null) return "";
-    let token = String(value).trim();
-
-    if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
-      try { token = JSON.parse(token); } catch { token = token.slice(1, -1); }
-    }
-    token = String(token || "").trim();
-    token = token.replace(/^Bearer\s+/i, "").trim();
-    return token;
-  }
-  function getToken() {
-    const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
-    const token = normalizeToken(storedToken);
-    if (token && token !== storedToken) localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    return token;
-  }
-  function setToken(value) {
-    const token = normalizeToken(value);
-    if (!token) { localStorage.removeItem(TOKEN_STORAGE_KEY); return ""; }
-    localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    return token;
-  }
-  function clearToken() { localStorage.removeItem(TOKEN_STORAGE_KEY); }
-
-  function getTokenPayload() {
-    try {
-      const token = getToken();
-      if (!token) return null;
-
-      const parts = token.split(".");
-      if (parts.length !== 3) return null;
-
-      let base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-      while (base64.length % 4 !== 0) base64 += "=";
-
-      const binary = atob(base64);
-      const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
-      const json = new TextDecoder("utf-8").decode(bytes);
-
-      return JSON.parse(json);
-    } catch { return null; }
-  }
-  function getMyUserIdFromPayload(payload){
-    const candidate = payload?.userId ?? payload?.id ?? payload?.sub ?? payload?.uid ?? null;
-    if(candidate == null) return null;
-    const n = Number(candidate);
-    return Number.isFinite(n) ? n : null;
-  }
-
-  // UI refs
-  const balanceValueEl = document.getElementById("balanceValue");
-  function formatTomanFromCoins(coins) {
-    const value = Number(coins || 0) * 1000;
-    return `${value.toLocaleString("en-US")} تومان`;
-  }
-
-  balanceValueEl.textContent = formatTomanFromCoins(0);
-
-
-  const usernameInput = document.getElementById("username");
-  const passwordInput = document.getElementById("password");
-  const authResult = document.getElementById("authResult");
-
-  const loginBtn = document.getElementById("loginBtn");
-  const registerBtn = document.getElementById("registerBtn");
-  const logoutBtn = document.getElementById("logoutBtn");
-
-  function setAuthResult(x){ authResult.textContent = typeof x === "string" ? x : JSON.stringify(x, null, 2); }
-
-  async function updateBalance() {
-    const token = getToken();
-    if (!token) return;
-    const res = await fetch(api("/api/me/balance"), {
-      method: "GET",
-      headers: { "Authorization": "Bearer " + token },
-      cache: "no-store"
-    });
-    const data = await res.json().catch(()=>null);
-    if (data && data.success && data.coins != null) {
-      balanceValueEl.textContent = formatTomanFromCoins(data.coins);
-    }
-
-  }
-
-  let balanceIntervalId = null;
-  const BALANCE_REFRESH_MS = 5000;
-  function startBalanceAutoRefresh(){
-    if (balanceIntervalId) clearInterval(balanceIntervalId);
-    updateBalance().catch(()=>{});
-    balanceIntervalId = setInterval(() => updateBalance().catch(()=>{}), BALANCE_REFRESH_MS);
-  }
-  function stopBalanceAutoRefresh(){
-    if (balanceIntervalId) clearInterval(balanceIntervalId);
-    balanceIntervalId = null;
-  }
-
-  // --- LOGIN ---
-  loginBtn.addEventListener("click", async ()=>{
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value;
-    if(!username || !password){ setAuthResult("نام کاربری و رمز را وارد کن."); return; }
-
-    try{
-      const res = await fetch(api("/api/auth/login"), {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ username, password })
-      });
-
-      const text = await res.text();
-      let data = null;
-      try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
-
-      setDebug({ auth: { loginResponse: { status: res.status, ok: res.ok, body: data } } });
-
-      if(!res.ok){
-        setAuthResult(data?.message || `خطا: ${res.status}`);
-        return;
-      }
-      if(!data || (!data.success && !data.token)){
-        setAuthResult(data?.message || "خطا");
-        return;
-      }
-      if(!data.token){
-        setAuthResult(data.message || "توکن دریافت نشد.");
-        return;
-      }
-
-      setToken(data.token);
-
-      if (socket) {
-        try { socket.removeAllListeners(); socket.disconnect(); } catch {}
-        socket = null;
-      }
-
-      setAuthResult("✅ ورود انجام شد.");
-      serverMsgEl.textContent = "حالا Tier را انتخاب کن و وارد صف شو.";
-      socketStatusEl.textContent = "آماده اتصال با توکن جدید.";
-
-      startBalanceAutoRefresh();
-      await updateBalance();
-
-    }catch(e){
-      setAuthResult("خطا در ارتباط با سرور");
-      setDebug({ err: String(e?.message||e), stack: e?.stack });
-    }
-  });
-
-  // --- REGISTER ---
-  registerBtn.addEventListener("click", async ()=>{
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value;
-    if(!username || !password){ setAuthResult("نام کاربری و رمز را وارد کن."); return; }
-
-    try{
-      const res = await fetch(api("/api/auth/register"), {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ username, password })
-      });
-
-      const text = await res.text();
-      let data = null;
-      try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
-
-      setDebug({ auth: { registerResponse: { status: res.status, ok: res.ok, body: data } } });
-
-      if(!res.ok){
-        setAuthResult(data?.message || "خطا");
-        return;
-      }
-      setAuthResult("✅ ثبت‌نام انجام شد. حالا ورود بزن.");
-    }catch(e){
-      setAuthResult("خطا در ارتباط با سرور");
-      setDebug({ err: String(e?.message||e), stack: e?.stack });
-    }
-  });
-
-  // --- Game UI / Socket + Board ---
-  const canvas = document.getElementById("board");
-  const ctx = canvas.getContext("2d");
-
-const rollBtn = document.getElementById("rollBtn");
-const resetBtn = document.getElementById("resetBtn");
-const leaveGameBtn = document.getElementById("leaveGameBtn");
-
-
-  const dice1El = document.getElementById("dice1");
-  const dice2El = document.getElementById("dice2");
-  const turnInfo = document.getElementById("turnInfo");
-
-  const COLORS = {
-    red: "#ff4d4d", green: "#2ecc71", yellow: "#f1c40f", blue: "#3498db",
-    white: "#ffffff", board: "#0a0a0a", grid: "#222222",
-    softRed: "#e74c3c", softGreen: "#27ae60", softYellow: "#f39c12", softBlue: "#2980b9"
-  };
-
-  const layout = {
-    cells: {
-      "P1":{c:7,r:2},"P2":{c:7,r:3},"P3":{c:7,r:4},"P4":{c:7,r:5},
-      "P5":{c:8,r:5},"P6":{c:9,r:5},"P7":{c:10,r:5},"P8":{c:11,r:5},
-      "P9":{c:11,r:6},"P10":{c:10,r:7},"P11":{c:9,r:7},"P12":{c:8,r:7},
-      "P13":{c:7,r:7},"P14":{c:7,r:8},"P15":{c:7,r:9},"P16":{c:7,r:10},
-      "P17":{c:7,r:11},"P18":{c:6,r:11},"P19":{c:5,r:10},"P20":{c:5,r:9},
-      "P21":{c:5,r:8},"P22":{c:5,r:7},"P23":{c:4,r:7},"P24":{c:3,r:7},
-      "P25":{c:2,r:7},"P26":{c:1,r:7},"P27":{c:1,r:6},"P28":{c:2,r:5},
-      "P29":{c:3,r:5},"P30":{c:4,r:5},"P31":{c:5,r:5},"P32":{c:5,r:4},
-      "P33":{c:5,r:3},"P34":{c:5,r:2},"P35":{c:5,r:1},"P36":{c:6,r:1},
-      "S_R":{c:1,r:5},"S_B":{c:7,r:1},"S_G":{c:11,r:7},"S_Y":{c:5,r:11},
-      "F_R1":{c:2,r:6},"F_R2":{c:3,r:6},"F_R3":{c:4,r:6},"F_R4":{c:5,r:6},
-      "F_B1":{c:6,r:2},"F_B2":{c:6,r:3},"F_B3":{c:6,r:4},"F_B4":{c:6,r:5},
-      "F_G1":{c:10,r:6},"F_G2":{c:9,r:6},"F_G3":{c:8,r:6},"F_G4":{c:7,r:6},
-      "F_Y1":{c:6,r:10},"F_Y2":{c:6,r:9},"F_Y3":{c:6,r:8},"F_Y4":{c:6,r:7}
-    },
-    mainPath:[
-      "P1","P2","P3","P4","P5","P6","P7","P8","P9","P10","P11","P12","P13","P14",
-      "P15","P16","P17","P18","P19","P20","P21","P22","P23","P24","P25","P26",
-      "P27","P28","P29","P30","P31","P32","P33","P34","P35","P36"
-    ],
-    startCells:{red:"S_R",blue:"S_B",green:"S_G",yellow:"S_Y"},
-    finishCells:{
-      red:["F_R1","F_R2","F_R3","F_R4"],
-      blue:["F_B1","F_B2","F_B3","F_B4"],
-      green:["F_G1","F_G2","F_G3","F_G4"],
-      yellow:["F_Y1","F_Y2","F_Y3","F_Y4"]
-    },
-    entryPathIndexes:{ red:27, blue:0, green:9, yellow:18 }
-  };
-
-  const YARD_PIECES_POS = {
-    red:    [[1,1], [1,2], [2,1], [2,2]],
-    blue:   [[10,1], [10,2], [11,1], [11,2]],
-    green:  [[10,10], [10,11], [11,10], [11,11]],
-    yellow: [[1,10], [1,11], [2,10], [2,11]]
-  };
-
-  const colorOrder = ["red", "green", "yellow", "blue"];
-  const colorLabel = {red:"قرمز", green:"سبز", yellow:"زرد", blue:"آبی"};
-
-  const SIZE = canvas.width;
-  const GRID_COUNT = 13;
-  const CELL = SIZE / GRID_COUNT;
-
-  let socket = null;
-  let myColor = null;
-  let gameState = null;
-  let currentMatchId = null;
-  let currentTurnId = null; // ✅ اضافه کن
-let lastDice1 = 0;
-let lastDice2 = 0;
-  let turnTimerInterval = null;
-  let lobbyCountdownInterval = null;
-
-  function formatRemainingMs(deadlineAt) {
-    if (!deadlineAt) return null;
-    const deadline = new Date(deadlineAt).getTime();
-    if (!Number.isFinite(deadline)) return null;
-    return Math.ceil(Math.max(0, deadline - Date.now()) / 1000);
-  }
-
-  function stopTurnTimer() {
-    if (turnTimerInterval) clearInterval(turnTimerInterval);
-    turnTimerInterval = null;
-  }
-  function stopLobbyCountdown() {
-    if (lobbyCountdownInterval) clearInterval(lobbyCountdownInterval);
-    lobbyCountdownInterval = null;
-  }
-
-  function renderLobbyByDeadline(lobbyPayload) {
-    const { deadlineAt, phase, searchingFor, message, filledColors } = lobbyPayload || {};
-
-    stopLobbyCountdown();
-
-    const hasDeadline = !!deadlineAt;
-    if (!hasDeadline) {
-      // متن ثابت
-      let t = message || "";
-      if (!t) {
-        if (phase === 2) t = "👥 نفر دوم وارد شد. در حال جستجوی نفر سوم...";
-        else if (phase === 3) t = "👥 نفر سوم وارد شد. در حال جستجوی نفر چهارم...";
-        else t = "در حال اتصال...";
-      }
-      joinStatusEl.textContent = t;
-      serverMsgEl.textContent = "";
-      return;
-    }
-
-    const deadlineAtMs = new Date(deadlineAt).getTime();
-    if (!Number.isFinite(deadlineAtMs)) return;
-
-    const render = () => {
-      const secs = formatRemainingMs(deadlineAt);
-      const base =
-        phase === 2
-          ? `👤 نفر دوم پیدا شد. در حال جستجوی نفر سوم...`
-          : phase === 3
-            ? `👥 نفر سوم پیدا شد. در حال جستجوی نفر چهارم...`
-            : (message || "در حال جستجو...");
-
-      joinStatusEl.textContent =
-        `⏳ ${base} (${secs} ثانیه دیگر)`;
-
-      serverMsgEl.textContent = filledColors
-        ? `تعداد فعلی: ${filledColors}`
-        : "";
-
-      setMsg(`در حال جستجوی نفر بعدی... ${secs} ثانیه مانده`);
-      if (secs <= 0) stopLobbyCountdown();
-    };
-
-    render();
-    lobbyCountdownInterval = setInterval(render, 500);
-  }
-
-  function startTurnTimer() {
-    stopTurnTimer();
-    if (!gameState || !gameState.turnDeadlineAt || gameState.winner) return;
-
-    const renderCountdown = () => {
-      if (!gameState || !gameState.turnDeadlineAt || gameState.winner) {
-        stopTurnTimer();
-        return;
-      }
-      const secs = formatRemainingMs(gameState.turnDeadlineAt);
-      const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-      const myColorText = myColor ? colorLabel[myColor] : "تماشاچی";
-      const turnColorText = turnColor ? colorLabel[turnColor] : "نامشخص";
-
-      turnInfo.innerHTML =
-        `نوبت: <span class="tag ${turnColor}">${turnColorText}</span> | ` +
-        `رنگ شما: <span class="tag ${myColor || "muted"}">${myColorText}</span> | ` +
-        `زمان باقی‌مانده: <b style="color:#ef4444; font-size:16px;">${secs !== null ? secs : "-"}</b> ثانیه`;
-    };
-
-    renderCountdown();
-    turnTimerInterval = setInterval(renderCountdown, 500);
-  }
-
-  // انتخاب تاس
-  let pickedDieValue = null;
-let pickedDieIndex = null; // 0 برای تاس 1 ، 1 برای تاس 2
-let moveInFlight = false;
-
-  function clearDiePickUI(){
-    dice1El.classList.remove("selected");
-    dice2El.classList.remove("selected");
-  }
-function syncDiePickUI(){
-  clearDiePickUI();
-
-  if (pickedDieIndex == null) return;
-
-  const pending = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
-  if (pending.length <= pickedDieIndex) return;
-
-  if (pickedDieIndex === 0) dice1El.classList.add("selected");
-  if (pickedDieIndex === 1) dice2El.classList.add("selected");
-}
-
-  function getPieceDrawPos(p){
-    if (p.state === "yard") {
-      const [c,r] = YARD_PIECES_POS[p.color][p.index];
-      return { x: c*CELL + CELL/2, y: r*CELL + CELL/2 };
-    }
-    if (p.state === "start") {
-      const T = layout.cells[layout.startCells[p.color]];
-      return { x: T.c*CELL + CELL/2, y: T.r*CELL + CELL/2 };
-    }
-    if (p.state === "path") {
-      const T = layout.cells[layout.mainPath[p.pathIndex]];
-      return { x: T.c*CELL + CELL/2, y: T.r*CELL + CELL/2 };
-    }
-    if (p.state === "home") {
-      const T = layout.cells[layout.finishCells[p.color][p.homeIndex]];
-      return { x: T.c*CELL + CELL/2, y: T.r*CELL + CELL/2 };
-    }
-    return null;
-  }
-
-  function drawYardBackgrounds(){
-    const BG = {
-      red:    { x:0, y:0, c:"#1e0c0c", slot:COLORS.softRed },
-      blue:   { x:9, y:0, c:"#0c181e", slot:COLORS.softBlue },
-      green:  { x:9, y:9, c:"#0c1e12", slot:COLORS.softGreen },
-      yellow: { x:0, y:9, c:"#1e1d0c", slot:COLORS.softYellow }
-    };
-    for (const k in BG){
-      ctx.fillStyle = BG[k].c;
-      ctx.fillRect(BG[k].x*CELL, BG[k].y*CELL, 4*CELL, 4*CELL);
-      ctx.strokeStyle = COLORS.grid;
-      ctx.strokeRect(BG[k].x*CELL, BG[k].y*CELL, 4*CELL, 4*CELL);
-    }
-    for (const color of colorOrder){
-      for (const [c,r] of YARD_PIECES_POS[color]){
-        ctx.fillStyle = BG[color].slot;
-        ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
-        ctx.strokeStyle = COLORS.grid;
-        ctx.strokeRect(c*CELL, r*CELL, CELL, CELL);
-      }
-    }
-  }
-
-  function drawCellByName(name, color, label=""){
-    const t = layout.cells[name];
-    if (!t) return;
-    ctx.fillStyle = color;
-    ctx.fillRect(t.c*CELL, t.r*CELL, CELL, CELL);
-    ctx.strokeStyle = COLORS.grid;
-    ctx.strokeRect(t.c*CELL, t.r*CELL, CELL, CELL);
-    if (label){
-      ctx.fillStyle = "#000";
-      ctx.font = "bold 14px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(label, t.c*CELL + CELL/2, t.r*CELL + CELL/2);
-    }
-  }
-
-function drawPieces() {
-  if (!gameState || !Array.isArray(gameState.pieces) || !ctx) return;
-
-  const winner = gameState.winner;
-  const turnColor = gameState.currentTurnColor ?? gameState.turnColor;
-
-  const rTurn = CELL * 0.32;
-  const maxRAllowed = CELL * 0.50 - 2;
-  const rOther = Math.min(rTurn * 1.08, maxRAllowed);
-
-  function hexToRgb(hex) {
-    const h = String(hex).replace("#", "");
-    const rr = parseInt(h.slice(0, 2), 16);
-    const gg = parseInt(h.slice(2, 4), 16);
-    const bb = parseInt(h.slice(4, 6), 16);
-    return { r: rr, g: gg, b: bb };
-  }
-
-  function getBaseHex(colorVal) {
-    // اگر رنگ‌ها کلید داخل COLORS هستند:
-    if (typeof COLORS !== "undefined" && COLORS && COLORS[colorVal]) return COLORS[colorVal];
-    return colorVal; // فرض: hex
-  }
-
-  function drawSphereFill(x, y, r, baseHex) {
-    const { r: br, g: bg, b: bb } = hexToRgb(getBaseHex(baseHex));
-    ctx.save();
-
-    // بدنه گوی: کره‌ای و نورخورده (نه الماسی، نه خطی)
-    const grad = ctx.createRadialGradient(
-      x - r * 0.35, y - r * 0.35, r * 0.05,
-      x, y, r * 1.05
-    );
-
-    // روشنایی بالا-چپ
-    grad.addColorStop(0.00, "rgba(255,255,255,0.98)");
-    grad.addColorStop(0.10, `rgba(${br},${bg},${bb},0.95)`);
-    grad.addColorStop(0.55, `rgba(${br},${bg},${bb},0.75)`);
-    grad.addColorStop(0.80, `rgba(${Math.round(br*0.45)},${Math.round(bg*0.45)},${Math.round(bb*0.45)},0.75)`);
-    grad.addColorStop(1.00, "rgba(0,0,0,0.35)");
-
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.fill();
-
-    // هایلایت بیضی نرم (روی گوی)
-    ctx.globalCompositeOperation = "screen";
-    const hl = ctx.createRadialGradient(
-      x - r * 0.35, y - r * 0.42, r * 0.03,
-      x - r * 0.25, y - r * 0.35, r * 0.85
-    );
-    hl.addColorStop(0, "rgba(255,255,255,0.95)");
-    hl.addColorStop(0.25, `rgba(${br},${bg},${bb},0.25)`);
-    hl.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = hl;
-
-    ctx.beginPath();
-    ctx.arc(x - r * 0.15, y - r * 0.18, r * 0.55, 0, Math.PI * 2);
-    ctx.fill();
-
-    // لبه برای مشخص شدن فرم گوی
-    ctx.globalCompositeOperation = "source-over";
-    ctx.strokeStyle = "rgba(0,0,0,0.25)";
-    ctx.lineWidth = Math.max(1.2, r * 0.06);
-    ctx.beginPath();
-    ctx.arc(x, y, r * 0.98, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // سایه خیلی کم برای عمق
-    ctx.fillStyle = "rgba(0,0,0,0.08)";
-    ctx.beginPath();
-    ctx.ellipse(x + r * 0.10, y + r * 0.20, r * 0.75, r * 0.65, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
-  }
-
-  function drawTurnRing(x, y, r, turnHex) {
-    const { r: tr, g: tg, b: tb } = hexToRgb(getBaseHex(turnHex));
-
-    const ringOuter = r * 1.28;
-    const ringMid   = r * 1.16;
-
-    ctx.save();
-
-    // دور سفید برای دیده شدن روی هر زمینه
-    ctx.shadowColor = "rgba(255,255,255,0.95)";
-    ctx.shadowBlur = Math.max(12, r * 0.45);
-    ctx.strokeStyle = "rgba(255,255,255,0.95)";
-    ctx.lineWidth = Math.max(6, r * 0.14);
-    ctx.beginPath();
-    ctx.arc(x, y, ringOuter, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // حلقه رنگی نوبت (همون رنگ بازیکن)
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = `rgba(${tr},${tg},${tb},0.95)`;
-    ctx.lineWidth = Math.max(4, r * 0.10);
-    ctx.beginPath();
-    ctx.arc(x, y, ringMid, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // خط مشکی خیلی کم برای شارپ بودن
-    ctx.strokeStyle = "rgba(0,0,0,0.55)";
-    ctx.lineWidth = Math.max(2, r * 0.06);
-    ctx.beginPath();
-    ctx.arc(x, y, (ringMid + ringOuter) * 0.5, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.restore();
-  }
-
-  for (const piece of gameState.pieces) {
-    const pos = getPieceDrawPos(piece);
-    if (!pos) continue;
-
-    const x = pos.x, y = pos.y;
-
-    const isTurnPiece = (!winner && piece.color === turnColor);
-    const r = isTurnPiece ? rTurn : rOther;
-
-    // گوی داخل مهره (برای همه یکسان)
-    drawSphereFill(x, y, r, piece.color);
-
-    // فقط دور بیرونی برای مشخص شدن نوبت
-    if (isTurnPiece) {
-      drawTurnRing(x, y, r, turnColor);
-    }
-  }
-}
-  function draw(){
-    ctx.clearRect(0,0,SIZE,SIZE);
-    ctx.fillStyle = COLORS.board;
-    ctx.fillRect(0,0,SIZE,SIZE);
-
-    ctx.strokeStyle = COLORS.grid;
-    for (let i=0;i<GRID_COUNT;i++){
-      ctx.beginPath(); ctx.moveTo(i*CELL,0); ctx.lineTo(i*CELL,SIZE); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0,i*CELL); ctx.lineTo(SIZE,i*CELL); ctx.stroke();
-    }
-
-    drawYardBackgrounds();
-    drawCellByName("S_R", COLORS.softRed, "S");
-    drawCellByName("S_B", COLORS.softBlue, "S");
-    drawCellByName("S_G", COLORS.softGreen, "S");
-    drawCellByName("S_Y", COLORS.softYellow, "S");
-
-    for (let i=0;i<layout.mainPath.length;i++){
-      const cellName = layout.mainPath[i];
-      const cell = layout.cells[cellName];
-      ctx.fillStyle = COLORS.white;
-      ctx.fillRect(cell.c*CELL, cell.r*CELL, CELL, CELL);
-      ctx.strokeStyle = COLORS.grid;
-      ctx.strokeRect(cell.c*CELL, cell.r*CELL, CELL, CELL);
-    }
-
-    for (const c of colorOrder){
-      layout.finishCells[c].forEach((cellName,i)=>{
-        const cell = layout.cells[cellName];
-        ctx.fillStyle = COLORS[c];
-        ctx.fillRect(cell.c*CELL, cell.r*CELL, CELL, CELL);
-        ctx.strokeStyle = COLORS.grid;
-        ctx.strokeRect(cell.c*CELL, cell.r*CELL, CELL, CELL);
-
-        ctx.fillStyle="#000";
-        ctx.font="bold 14px sans-serif";
-        ctx.textAlign="center";
-        ctx.textBaseline="middle";
-        ctx.fillText((i+1).toString(), cell.c*CELL + CELL/2, cell.r*CELL + CELL/2);
-      });
-    }
-    drawPieces();
-    // نام کاربری بالای جایگاه رنگ اختصاصی هر بازیکن
-    // فقط نام بازیکنی که نوبتش است چشمک می‌زند.
-    function drawPlayerNames() {
-      if (!gameState || !gameState.playerNames) return;
-
-      const yardTitles = {
-        red:    { x: 2 * CELL,  y: 0.58 * CELL },
-        blue:   { x: 11 * CELL, y: 0.58 * CELL },
-        green:  { x: 11 * CELL, y: 9.58 * CELL },
-        yellow: { x: 2 * CELL,  y: 9.58 * CELL },
-      };
-
-      const turnColor =
-        gameState.currentTurnColor ??
-        colorOrder[gameState.currentTurn];
-
-      // ۵۰۰ میلی‌ثانیه دیده شود و ۵۰۰ میلی‌ثانیه پنهان شود.
-      const blinkIsVisible = Math.floor(Date.now() / 500) % 2 === 0;
-
-      for (const color of colorOrder) {
-        const username = String(gameState.playerNames?.[color] || "").trim();
-        const titlePos = yardTitles[color];
-
-        // رنگی که بازیکن ندارد، هیچ نامی نمایش داده نمی‌دهد.
-        if (!username || !titlePos) continue;
-
-        const isCurrentTurn = color === turnColor;
-
-        // فقط نام بازیکن نوبت‌دار چشمک بزند.
-        if (isCurrentTurn && !blinkIsVisible) continue;
-
-        ctx.save();
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.direction = "rtl";
-
-        const fontSize = Math.max(12, Math.floor(CELL * 0.32));
-        ctx.font = `bold ${fontSize}px sans-serif`;
-
-        // نام نوبت‌دار روشن‌تر است؛ بقیه ثابت و کمی ملایم‌ترند.
-        ctx.fillStyle = isCurrentTurn
-          ? "#ffffff"
-          : "rgba(255,255,255,0.78)";
-
-        // برای جلوگیری از خروج نام‌های خیلی بلند از محدودهٔ جایگاه
-        const shownName =
-          username.length > 14
-            ? `${username.slice(0, 14)}…`
-            : username;
-
-        ctx.fillText(`👤 ${shownName}`, titlePos.x, titlePos.y);
-        ctx.restore();
-      }
-    }
-
-    drawPlayerNames();
-
-
-  }
-
-function updateUI() {
-    if (!gameState) {
-        rollBtn.disabled = true;
-        turnInfo.textContent = "";
-        setMsg("بازی هنوز شروع نشده است.");
-        dice1El.textContent = "🎲";
-        dice2El.textContent = "🎲";
-        pickedDieValue = null;
-        clearDiePickUI();
-        return;
-    }
-if (gameState.winner) {
-  joinBtn.disabled = false; // ✅ فعال شدن دکمه ورود به اتاق جدید
-  rollBtn.disabled = true;
-  turnInfo.innerHTML = `برنده: <span class="tag ${gameState.winner}">${colorLabel[gameState.winner]}</span> 🎉`;
-  setMsg("بازی به پایان رسید.");
-  dice1El.textContent = "🎉";
-  dice2El.textContent = "🎉";
-  pickedDieValue = null;
-  clearDiePickUI();
-  return;
-}
-    const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-// اضافه کردن شرط جفت ۶: اگر تاس‌ها جفت ۶ باشند، کاربر باید بتواند دوباره رول کند
-const isDoubleSix = (gameState.dice1 === 6 && gameState.dice2 === 6);
-const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.winner && (!gameState.rolled || isDoubleSix || (gameState.dice1 === 0 && gameState.dice2 === 0));
-
-      // --- ابتدا همه افکت‌های چشمک‌زن پاک شوند ---
-      // این کار باعث می‌شود در نوبت بازیکن دیگر، هیچ تاسی چشمک نزند.
-      rollBtn.classList.remove("blink-me");
-      dice1El.classList.remove("blink-me");
-      dice2El.classList.remove("blink-me");
-
-      // --- دکمه ریختن تاس ---
-      rollBtn.disabled = !canRoll;
-
-      // فقط وقتی نوبت خودم است و هنوز تاس نریخته‌ام
-      if (myColor === turnColor && canRoll && !gameState.rolled) {
-        rollBtn.classList.add("blink-me");
-      }
-
-      // --- تاس‌های باقی‌مانده ---
-      const pendingDice = Array.isArray(gameState?.pendingDice)
-        ? gameState.pendingDice
-        : [];
-
-      const d1 = Number(gameState.dice1 ?? 0);
-      const d2 = Number(gameState.dice2 ?? 0);
-
-      const hasPendingDice = pendingDice.length > 0;
-      const hasResultDice = d1 > 0 || d2 > 0;
-
-      const show1 = hasPendingDice ? Number(pendingDice[0] ?? 0) : d1;
-      const show2 = pendingDice.length > 1 ? Number(pendingDice[1] ?? 0) : d2;
-
-      // فقط بازیکنی که نوبتش است بتواند تاس انتخاب کند
-      const canPickDice =
-        myColor === turnColor &&
-        gameState.rolled === true &&
-        hasPendingDice;
-
-      if (hasPendingDice || hasResultDice) {
-        dice1El.textContent = show1 > 0 ? String(show1) : "🎲";
-        dice2El.textContent = show2 > 0 ? String(show2) : "🎲";
-
-        // تاس اول: فقط اگر واقعاً در pendingDice باشد
-        const isDice1Available =
-          canPickDice &&
-          pendingDice.length >= 1 &&
-          show1 > 0;
-
-        dice1El.style.pointerEvents = isDice1Available ? "auto" : "none";
-        dice1El.style.opacity = isDice1Available ? "1" : "0.5";
-
-// تاس اول تا وقتی خودش انتخاب نشده، چشمک بزند
-if (isDice1Available && pickedDieIndex !== 0) {
-  dice1El.classList.add("blink-me");
-}
-
-
-        // تاس دوم: فقط در صورتی که واقعاً تاس دوم در pendingDice وجود داشته باشد
-        const isDice2Available =
-          canPickDice &&
-          pendingDice.length >= 2 &&
-          show2 > 0;
-
-        dice2El.style.pointerEvents = isDice2Available ? "auto" : "none";
-        dice2El.style.opacity = isDice2Available ? "1" : "0.5";
-
-// تاس دوم تا وقتی خودش انتخاب نشده، چشمک بزند
-if (isDice2Available && pickedDieIndex !== 1) {
-  dice2El.classList.add("blink-me");
-}
-
-
-
-    if (pickedDieIndex != null) {
-      const pendingLen = pendingDice.length;
-
-      if (!canPickDice || pendingLen <= pickedDieIndex) {
-        pickedDieValue = null;
-        pickedDieIndex = null;
-        clearDiePickUI();
-      }
-    }
-
-    syncDiePickUI();
-
-    if (canPickDice) {
-      setMsg(
-        pickedDieValue == null
-          ? "تاس خودت را انتخاب کن."
-          : "حالا یک مهره را بزن."
-      );
-    } else if (d1 === 6 && d2 === 6 && !gameState.rolled) {
-      setMsg("جفت ۶ آمد. تاس جایزه داری.");
-    } else if (myColor !== turnColor) {
-      setMsg("هنوز نوبت شما نیست.");
-    } else {
-      setMsg("تاس بیندازید.");
-    }
-  } else {
-    dice1El.textContent = "🎲";
-    dice2El.textContent = "🎲";
-    dice1El.style.pointerEvents = "none";
-    dice1El.style.opacity = "0.5";
-    dice2El.style.pointerEvents = "none";
-    dice2El.style.opacity = "0.5";
-    pickedDieValue = null;
-    pickedDieIndex = null;
-    clearDiePickUI();
-    setMsg(myColor === turnColor ? "تاس بیندازید." : "هنوز نوبت شما نیست.");
-  }
-
-
-}
-
-  // آپدیت UI
-  setInterval(() => {
-    if (gameState) {
-      try {
-        updateUI();
-        draw();
-      } catch {}
-    }
-  }, 250);
-
-
-  function canRollLocal(){
-    if(!gameState || gameState.winner) return false;
-    const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-    return myColor && myColor === turnColor && !gameState.rolled;
-  }
-
-  function rollDice() {
-    console.log("[ROLL_CLICK]", {
-  connected: socket?.connected,
-  currentMatchId,
-  canRoll: canRollLocal(),
-  rolled: gameState?.rolled
-});
-
-    if (!socket || !socket.connected) {
-      setMsg("اتصال به سرور برقرار نیست.");
-      return;
-    }
-
-    if (!currentMatchId) {
-      setMsg("هنوز matchId ساخته نشده است (منتظر نفر ۴ بمانید).");
-      return;
-    }
-
-    if (!canRollLocal()) {
-      setMsg("الان اجازه ریختن تاس را نداری.");
-      return;
-    }
-
-    rollBtn.disabled = true;
-    moveInFlight = false;
-    pickedDieValue = null;
-    pickedDieIndex = null;
-    clearDiePickUI();
-
-
-    let animationCount = 0;
-
-    dice1El.classList.add("rolling");
-    dice2El.classList.add("rolling");
-
-    const animation = setInterval(() => {
-      dice1El.textContent = String(Math.floor(Math.random() * 6) + 1);
-      dice2El.textContent = String(Math.floor(Math.random() * 6) + 1);
-      animationCount++;
-      if (animationCount > 12) clearInterval(animation);
-    }, 70);
-
-    socket.emit("game:roll", { matchId: currentMatchId }, (response) => {
-   console.log("[ROLL_RESPONSE]", response);
-   
-      clearInterval(animation);
-
-      dice1El.classList.remove("rolling");
-      dice2El.classList.remove("rolling");
-
-      if (response?.success) {
-        dice1El.textContent = String(response.dice1 ?? "🎲");
-        dice2El.textContent = String(response.dice2 ?? "🎲");
-
-        pickedDieValue = null;
-        pickedDieIndex = null;
-        clearDiePickUI();
-
-
-        if (response.noLegalMoves || response.turnSkipped) {
-          setMsg("هیچ حرکت مجازی برای این دو تاس وجود نداشت.");
-        } else {
-          setMsg("یکی از تاس‌ها را انتخاب کن، سپس مهره موردنظر را بزن.");
-        }
-        return;
-      }
-
-      rollBtn.disabled = false;
-      setMsg(response?.message || "هنگام ریختن تاس خطایی رخ داد.");
-    });
-  }
-
-  function onBoardClick(e){
-    if (!socket || !gameState || !gameState.rolled || gameState.winner) return;
-    if (currentTurnId == null) {
-        setMsg("هنوز نوبت کامل برای حرکت مشخص نشده؛ چند لحظه صبر کن.");
-        return;
-    }
-    const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-    if (myColor !== turnColor) return;
-
-    const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
-    if (pendingDice.length === 0) return; // اگر تاسی ریخته نشده، کاری نکن
-
-    const rect = canvas.getBoundingClientRect();
-    const scale = canvas.width / rect.width;
-    const x = (e.clientX - rect.left) * scale;
-    const y = (e.clientY - rect.top) * scale;
-
-    let clickedPiece = null;
-    const movablePieces = gameState.pieces || [];
-    for (const p of movablePieces){
-      const pos = getPieceDrawPos(p);
-      if(!pos) continue;
-      if (Math.hypot(x-pos.x, y-pos.y) <= CELL*0.6){
-        clickedPiece = p;
-        break; // مهره پیدا شد
-      }
-    }
-
-    if (!clickedPiece) return; // روی مهره‌ای کلیک نشده
-
-    // ✅ منطق جدید:
-    if (pickedDieIndex == null) { // تاسی هنوز انتخاب نشده
-      setMsg("لطفاً اول یکی از تاس‌ها را انتخاب کن.");
-      // شما نیاز به یک تابع برای "انتخاب مهره" دارید که آن را هایلایت کند
-      // و سپس منتظر کلیک روی تاس بماند. فعلا این بخش را نادیده می‌گیریم.
-      return; // منتظر می‌مانیم تا تاس انتخاب شود
-
-    } else {
-      // تا وقتی پاسخ حرکت قبلی نیامده، حرکت دیگری ارسال نشود
-      if (moveInFlight) {
-        return;
-      }
-
-      // قبل از پاک‌کردن انتخاب، مقدار تاس را نگه می‌داریم
-      const selectedDieValue = Number(pickedDieValue);
-      const selectedDieIndex = Number(pickedDieIndex);
-
-      if (
-        !Number.isInteger(selectedDieValue) ||
-        selectedDieValue < 1 ||
-        selectedDieValue > 6
-      ) {
-        setMsg("تاس انتخاب‌شده معتبر نیست.");
-        return;
-      }
-
-      if (
-        !Number.isInteger(selectedDieIndex) ||
-        selectedDieIndex < 0
-      ) {
-        setMsg("ابتدا یکی از تاس‌ها را انتخاب کن.");
-        return;
-      }
-
-      // قفل حرکت فعال می‌شود
-      moveInFlight = true;
-
-      // انتخاب قبلی فوراً پاک می‌شود
-      pickedDieValue = null;
-      pickedDieIndex = null;
-      clearDiePickUI();
-
-      socket.emit("game:move", {
-        matchId: currentMatchId,
-        turnId: currentTurnId,
-        pieceId: clickedPiece.id,
-        dieValue: selectedDieValue,
-        dieIndex: selectedDieIndex
-      }, (response) => {
-        // پاسخ سرور رسید؛ قفل باز می‌شود
-        moveInFlight = false;
-
-        if (!response?.success) {
-          setMsg(response?.message || "حرکت مجاز نیست.");
-
-          // اگر حرکت رد شد و همان تاس هنوز موجود بود،
-          // دوباره آن تاس را انتخاب می‌کنیم
-          const pending = Array.isArray(gameState?.pendingDice)
-            ? gameState.pendingDice
-            : [];
-
-          if (
-            gameState?.rolled &&
-            pending[selectedDieIndex] === selectedDieValue
-          ) {
-            pickedDieIndex = selectedDieIndex;
-            pickedDieValue = selectedDieValue;
-            syncDiePickUI();
+  <pre id="debug" aria-label="debug" style="display:none;"></pre>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script>
+    (function(){
+      const debugEl = document.getElementById('debug');
+      const usernameInput = document.getElementById('usernameInput');
+      const passwordInput = document.getElementById('passwordInput');
+      const loginBtn = document.getElementById('loginBtn');
+      const registerBtn = document.getElementById('registerBtn');
+      const authStatusEl = document.getElementById('authStatus');
+      const serverMsgEl = document.getElementById('serverMsg');
+
+      let lastDebugData = {};
+      function setDebug(value) {
+        try {
+          let nextValue = value;
+          if (typeof value === "function") nextValue = value(lastDebugData);
+          if (nextValue && typeof nextValue === "object" && !Array.isArray(nextValue)) {
+            lastDebugData = nextValue;
+          } else {
+            lastDebugData = nextValue;
           }
+          debugEl.textContent = typeof nextValue === "string" ? nextValue : JSON.stringify(nextValue, null, 2);
+        } catch (error) {
+          debugEl.textContent = String(error?.message || value || "Debug error");
+        }
+      }
+      window.addEventListener('error', (e)=> console.error('Page Error:', e.message || e.error || e));
+      window.addEventListener('unhandledrejection', (e)=> console.error('Promise Error:', e.reason && e.reason.message ? e.reason.message : e));
 
+      const SOCKET_URL = "https://monch-game.onrender.com";
+      const API_BASE = "https://monch-game.onrender.com";
+      function api(path){ return API_BASE.replace(/\/$/,'') + path; }
+
+      // --- Token helpers ---
+      const TOKEN_STORAGE_KEY = "token";
+      function normalizeToken(value) {
+        if (value == null) return "";
+        let token = String(value).trim();
+        if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+          try { token = JSON.parse(token); } catch { token = token.slice(1, -1); }
+        }
+        token = String(token || "").trim();
+        token = token.replace(/^Bearer\s+/i, "").trim();
+        return token;
+      }
+      function getToken() {
+        const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+        const token = normalizeToken(storedToken);
+        if (token && token !== storedToken) localStorage.setItem(TOKEN_STORAGE_KEY, token);
+        return token;
+      }
+      function clearToken() { localStorage.removeItem(TOKEN_STORAGE_KEY); }
+
+      function isJwtExpired(token) {
+        if (!token) return true;
+        try {
+          const parts = token.split('.');
+          if (parts.length !== 3) return true;
+          const payload = JSON.parse(atob(parts[1]));
+          const currentTime = Math.floor(Date.now() / 1000);
+          return payload.exp < currentTime;
+        } catch (e) { console.error("JWT expiration check failed:", e); return true; }
+      }
+
+      function setAuthResult(message, type = 'info') {
+        authStatusEl.textContent = message;
+        authStatusEl.style.color = type === 'error' ? '#f87171' : '#9ca3af';
+      }
+
+      // --- Login ---
+      loginBtn.addEventListener("click", async ()=>{
+        const username = usernameInput.value.trim();
+        const password = passwordInput.value.trim();
+
+        if (!username || !password) {
+          setAuthResult("لطفاً نام کاربری و رمز عبور را وارد کنید.", "error");
           return;
         }
 
-        if (response.noLegalMoves || response.turnSkipped) {
-          setMsg("حرکت انجام شد؛ نوبت تمام شد.");
-        } else if (response.winnerColor) {
-          setMsg("بازی تمام شد.");
-        } else if (response.bonusRoll) {
-          setMsg("جفت ۶! دوباره تاس بینداز.");
-        } else if (
-          Array.isArray(response.pendingDice) &&
-          response.pendingDice.length > 0
-        ) {
-          setMsg("تاس بعدی را انتخاب کن.");
-        } else {
-          setMsg("حرکت انجام شد.");
-        }
-      });
-    }
+        try {
+          setAuthResult("در حال ورود...");
+          loginBtn.disabled = true;
+          registerBtn.disabled = true;
 
-  }
+          const res = await fetch(api("/api/auth/login"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password }),
+            cache: "no-store"
+          });
 
+          let data;
+          try { data = await res.json(); } catch { data = null; }
 
-function chooseDieAtIndex(di){
-  const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
-  if (pendingDice.length === 0) return;
-  if (di !== 0 && di !== 1) return;
-  if (pendingDice.length <= di) return;
-
-  pickedDieIndex = di;
-  pickedDieValue = pendingDice[di]; // مقدار همان تاس
-  syncDiePickUI();
-  setMsg("تاس انتخاب شد. حالا یک مهره را بزن.");
-}
-
-dice1El.addEventListener("click", ()=>{
-  if(!gameState || !gameState.rolled || gameState.winner) return;
-  const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
-  if(pendingDice.length === 0) return;
-  chooseDieAtIndex(0); // ✅ تاس 1
-});
-
-dice2El.addEventListener("click", ()=>{
-  if(!gameState || !gameState.rolled || gameState.winner) return;
-  const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
-  if(pendingDice.length < 2) return;
-  chooseDieAtIndex(1); // ✅ تاس 2
-});
-
-  rollBtn.addEventListener("click", rollDice);
-
-  resetBtn.addEventListener("click", ()=>{
-    dice1El.textContent = "🎲";
-    dice2El.textContent = "🎲";
-pickedDieValue = null;
-pickedDieIndex = null;
-clearDiePickUI();
-setMsg("ریست لوکال (کنترل اصلی با سرور است).");
-  });
-
-  canvas.addEventListener("click", onBoardClick);
-
-  function waitForSocketConnected(sock, timeoutMs = 15000) {
-    if (!sock) return Promise.reject(new Error("socket is null"));
-    if (sock.connected) return Promise.resolve();
-
-    return new Promise((resolve, reject) => {
-      let settled = false;
-
-      const t = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        reject(new Error("timeout waiting for socket connect"));
-      }, timeoutMs);
-
-      function cleanup() {
-        clearTimeout(t);
-        sock.off("connect", onConnect);
-        sock.off("connect_error", onErr);
-      }
-
-      function onConnect() {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        resolve();
-      }
-
-      function onErr(err) {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        reject(err instanceof Error ? err : new Error(String(err?.message || err)));
-      }
-
-      sock.once("connect", onConnect);
-      sock.once("connect_error", onErr);
-    });
-  }
-
-  function isJwtExpired(token) {
-    if (!token) return true;
-    try {
-      const parts = String(token).split(".");
-      if (parts.length !== 3) return true;
-
-      let base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-      while (base64.length % 4 !== 0) base64 += "=";
-
-      const binary = atob(base64);
-      const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
-      const json = new TextDecoder("utf-8").decode(bytes);
-      const payload = JSON.parse(json);
-
-      const exp = payload?.exp; // seconds
-      if (!exp) return false;
-      return Date.now() >= exp * 1000;
-    } catch {
-      return true;
-    }
-  }
-
-  let joinInProgress = false;
-
-  function connectSocketOnce() {
-    const token = getToken();
-
-    if (!token) {
-      setMsg("ابتدا وارد حساب کاربری شو.");
-      socketStatusEl.textContent = "❌ توکن ورود وجود ندارد.";
-      return null;
-    }
-
-    if (isJwtExpired(token)) {
-      setMsg("توکن منقضی شده؛ دوباره ورود کن.");
-      socketStatusEl.textContent = "❌ توکن منقضی شده.";
-      return null;
-    }
-
-    if (socket && socket.connected) return socket;
-
-    if (socket) {
-      try { socket.removeAllListeners(); socket.disconnect(); } catch {}
-      socket = null;
-    }
-
-    socket = io(SOCKET_URL, {
-      autoConnect: false,
-      transports: ["websocket", "polling"],
-      timeout: 15000,
-      auth: (callback) => {
-        const freshToken = getToken();
-        callback({ token: freshToken });
-      },
-      reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000
-    });
-
-      socket.on("connect", async () => {
-        socketStatusEl.textContent = "✅ سوکت متصل شد (" + socket.id + ")";
-        serverMsgEl.textContent = "✅ اتصال آنلاین برقرار شد.";
-
-        await updateBalance().catch(() => {});
-
-        // در اتصال اول و اتصال مجدد، از سرور می‌پرسیم آیا بازی فعالی داریم.
-        // اگر داشته باشیم، بدون رفرش و بدون room:join بازی برمی‌گردد.
-        socket.emit("game:restoreSession", {}, (resp) => {
-          console.log("GAME RESTORE RESPONSE:", resp);
-
-          if (resp?.success && resp?.restored && resp?.matchId) {
-            currentMatchId = String(resp.matchId);
-
-            socketStatusEl.textContent = "✅ اتصال برقرار شد؛ بازی در حال همگام‌سازی است.";
-            joinStatusEl.textContent = "🎮 بازگشت خودکار به بازی";
-            serverMsgEl.textContent = "✅ بازی فعال شما بازیابی شد.";
-            setMsg("بازی شما بدون نیاز به رفرش بازیابی شد.");
+          if (res.ok && data?.token) {
+            localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
+            setAuthResult("ورود موفقیت‌آمیز بود. در حال انتقال به لابی...", "success");
+            setTimeout(() => window.location.href = "/lobby.html", 1500);
+          } else {
+            setAuthResult(data?.message || "خطا در ورود", "error");
           }
-        });
+        } catch (e) {
+          console.error("Login fetch error:", e);
+          setAuthResult("خطا در ارتباط با سرور.", "error");
+        } finally {
+          loginBtn.disabled = false;
+          registerBtn.disabled = false;
+        }
       });
 
-
-    socket.on("connect_error", error => {
-      const message = error && error.message ? error.message : String(error || "خطای نامشخص");
-      socketStatusEl.textContent = "❌ خطای اتصال سوکت: " + message;
-      setDebug({ socketConnectError: { message, name: error?.name || null } });
-    });
-
-    socket.on("disconnect", reason => {
-      stopLobbyCountdown();
-      socketStatusEl.textContent = "⚠️ اتصال سوکت قطع شد: " + (reason || "نامشخص");
-    });
-
-    socket.on("lobby:status", data => {
-      setDebug(prev => ({ ...(prev && typeof prev === "object" ? prev : {}), lobbyStatus: data }));
-      if (!data) return;
-      renderLobbyByDeadline(data);
-      if (data?.phase === 4) {
-        peopleNewsEl.textContent = "🎮 بازی شروع می‌شود!";
-      } else if (data?.searchingFor) {
-        peopleNewsEl.textContent = `⏳ در حال جستجوی نفر ${data.searchingFor}...`;
-      }
-    });
-
-    socket.on("match:error", payload => {
-      stopLobbyCountdown();
-      const message = payload?.message || "خطا در شروع یا مدیریت بازی";
-      joinStatusEl.textContent = "❌ match:error";
-      serverMsgEl.textContent = "❌ " + message;
-      setMsg(message);
-      setDebug(prev => ({ ...(prev && typeof prev === "object" ? prev : {}), matchErrorPayload: payload || null }));
-      joinInProgress = false;
-    });
-
-    socket.on("game:started", payload => {
-      stopLobbyCountdown();
-      joinStatusEl.textContent = "🎮 بازی شروع شد";
-      serverMsgEl.textContent = "🎮 بازی از سمت سرور شروع شد.";
-      setMsg("بازی شروع شد. منتظر وضعیت بازی...");
-      peopleNewsEl.textContent = "";
-      if (payload?.matchId) currentMatchId = String(payload.matchId);
-      setDebug(prev => ({ ...(prev && typeof prev === "object" ? prev : {}), gameStartedPayload: payload || null }));
-    });
-
-    socket.on("game:state", state => {
-      gameState = state;
-
-      const payload = getTokenPayload();
-      const myUserId = getMyUserIdFromPayload(payload);
-
-      if (state?.playerColors && myUserId != null) {
-        myColor = colorOrder.find(color => String(state.playerColors[color]) === String(myUserId)) || null;
-      } else {
-        myColor = null;
-      }
-
-      if (state?.matchId) currentMatchId = String(state.matchId);
-      if (state?.turnId != null) currentTurnId = Number(state.turnId);
-      else currentTurnId = null;
-
-      const pendingDice = Array.isArray(state?.pendingDice) ? state.pendingDice : [];
-
-      if (!state?.rolled || pendingDice.length === 0 || pickedDieIndex == null || pendingDice.length <= pickedDieIndex) {
-        pickedDieIndex = null;
-        pickedDieValue = null;
-        clearDiePickUI();
-      } else {
-        pickedDieValue = pendingDice[pickedDieIndex];
-      }
-
-
-      stopLobbyCountdown();
-      joinStatusEl.textContent = "✅ وضعیت بازی دریافت شد";
-      serverMsgEl.textContent = "✅ state بازی دریافت شد.";
-
-      updateUI();
-      draw();
-      startTurnTimer();
-    });
-
-
-    socket.io.on("reconnect_attempt", attemptNumber => {
-      socketStatusEl.textContent = `در حال تلاش مجدد برای اتصال (${attemptNumber})...`;
-    });
-
-    socket.io.on("reconnect", () => {
-      socketStatusEl.textContent = `✅ اتصال مجدد برقرار شد`;
-    });
-
-    socket.io.on("reconnect_failed", () => {
-      socketStatusEl.textContent = "❌ تلاش‌های اتصال مجدد ناموفق بود.";
-    });
-
-    socket.connect();
-    return socket;
-  }
-
-  logoutBtn.addEventListener("click", ()=>{
-    stopBalanceAutoRefresh();
-    stopTurnTimer();
-    stopLobbyCountdown();
-
-    clearToken();
-    balanceValueEl.textContent = formatTomanFromCoins(0);
-
-    setAuthResult("خروج شد. دوباره ورود کن.");
-    serverMsgEl.textContent = "";
-    joinStatusEl.textContent = "";
-    socketStatusEl.textContent = "";
-    setMsg("ابتدا ورود کن.");
-
-    gameState = null;
-    myColor = null;
-    currentMatchId = null;
-    pickedDieValue = null;
-    pickedDieIndex = null;
-    lastDice1 = 0;
-    lastDice2 = 0;
-
-    stopLobbyCountdown();
-    peopleNewsEl.textContent = "";
-
-    clearDiePickUI();
-    dice1El.textContent = "🎲";
-    dice2El.textContent = "🎲";
-    turnInfo.textContent = "";
-
-    if (socket) {
-      try { socket.removeAllListeners(); socket.disconnect(); } catch {}
-      socket = null;
-    }
-
-    draw();
-    updateUI();
-  });
-
-  const tierInput = document.getElementById("tierInput");
-  const joinBtn = document.getElementById("joinBtn");
-function returnToLobbyAfterManualLeave(message) {
-  // توقف تایمرهای بازی و لابی قبلی
-  stopTurnTimer();
-  stopLobbyCountdown();
-
-  // پاک‌کردن کامل وضعیت بازی قبلی از فرانت
-  gameState = null;
-  myColor = null;
-  currentMatchId = null;
-  currentTurnId = null;
-
-  pickedDieValue = null;
-  pickedDieIndex = null;
-  moveInFlight = false;
-
-  lastDice1 = 0;
-  lastDice2 = 0;
-
-  // بازنشانی ظاهر تاس‌ها
-  dice1El.classList.remove("rolling");
-  dice2El.classList.remove("rolling");
-  clearDiePickUI();
-
-  dice1El.textContent = "🎲";
-  dice2El.textContent = "🎲";
-
-  dice1El.style.pointerEvents = "none";
-  dice2El.style.pointerEvents = "none";
-  dice1El.style.opacity = "0.5";
-  dice2El.style.opacity = "0.5";
-
-  // بازگرداندن رابط به وضعیت آماده ورود به صف
-  rollBtn.disabled = true;
-  joinBtn.disabled = false;
-  joinInProgress = false;
-
-  joinStatusEl.textContent = "";
-  peopleNewsEl.textContent = "";
-  serverMsgEl.textContent = "Tier را انتخاب کن و دوباره وارد صف شو.";
-  socketStatusEl.textContent = "از بازی/صف خارج شدی.";
-
-  turnInfo.textContent = "";
-  setMsg(message || "از بازی خارج شدی. می‌توانی دوباره وارد صف شوی.");
-
-  // رسم مجدد تختهٔ خالی
-  draw();
-  updateUI();
-}
-
-leaveGameBtn.addEventListener("click", () => {
-  if (!currentMatchId) {
-    setMsg("شما اکنون داخل صف یا بازی فعالی نیستی.");
-    return;
-  }
-
-  if (!socket || !socket.connected) {
-    setMsg("اتصال به سرور برقرار نیست؛ خروج از بازی ثبت نشد.");
-    return;
-  }
-
-  const gameFinished = Boolean(gameState?.winner);
-
-  const confirmed = window.confirm(
-    gameFinished
-      ? "بازی تمام شده است.\n\nآیا می‌خواهی به لابی برگردی و برای بازی جدید آماده شوی؟"
-      : "آیا مطمئنی؟\n\nاگر بازی شروع شده باشد، خروج فوری به معنی انصراف و باخت است."
-  );
-
-
-  if (!confirmed) return;
-
-  const leavingMatchId = currentMatchId;
-
-  leaveGameBtn.disabled = true;
-  leaveGameBtn.textContent = "در حال خروج...";
-
-  socket.emit("game:leave", { matchId: leavingMatchId }, (response) => {
-    leaveGameBtn.disabled = false;
-    leaveGameBtn.textContent = "خروج از بازی/صف";
-
-    if (!response?.success) {
-      setMsg(response?.message || "خروج از بازی انجام نشد.");
-      return;
-    }
-
-    const message =
-      response.type === "game_forfeit"
-        ? "از بازی خارج شدی و انصراف ثبت شد."
-        : (response.message || "از صف بازی خارج شدی.");
-
-    /*
-      طبق منطق واقعی server.js:
-      سرور قبل از پاسخ موفق، skipNextDisconnect را فعال می‌کند.
-      بنابراین این disconnect نباید تایمر ۹۰ ثانیه‌ای ایجاد کند.
-    */
-    if (socket) {
-      try {
-        socket.removeAllListeners();
-        socket.disconnect();
-      } catch (error) {
-        console.warn("[MANUAL_LEAVE_SOCKET_DISCONNECT_ERROR]", error);
-      }
-      socket = null;
-    }
-
-    returnToLobbyAfterManualLeave(message);
-  });
-});
-
-  joinBtn.addEventListener("click", async ()=>{
-    if (joinInProgress) return;
-    const token = getToken();
-    const tier = Number(tierInput.value);
-
-    if(!token){ setAuthResult("ابتدا ورود کن."); return; }
-    if (!Number.isFinite(tier) || ![20, 50, 100, 200].includes(tier)) {
-      setAuthResult("قیمت اتاق نامعتبر است.");
-      return;
-    }
-
-
-    joinInProgress = true;
-    currentMatchId = null;
-    gameState = null;
-    if (typeof ctx !== 'undefined') {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (typeof draw === 'function') draw(); // فراخوانی تابع رسم برای نمایش تخته خالی
-    }
-
-    if (lobbyCountdownInterval) clearInterval(lobbyCountdownInterval);
-    lobbyCountdownInterval = null;
-    serverMsgEl.textContent = "";
-    joinStatusEl.textContent = "";
-
-
-    myColor = null;
-
-    stopLobbyCountdown();
-    stopTurnTimer();
-
-    joinBtn.disabled = true;
-    rollBtn.disabled = true;
-
-    setMsg("در حال آماده‌سازی برای ورود به صف...");
-    socketStatusEl.textContent = "در حال اتصال...";
-    joinStatusEl.textContent = "منتظر connect...";
-
-    const s = connectSocketOnce();
-    if(!s){
-      joinBtn.disabled = false;
-      joinInProgress = false;
-      return;
-    }
-
-    try{
-      await waitForSocketConnected(s, 15000);
-      joinStatusEl.textContent = "✅ connect شد. ارسال room:join ...";
-    }catch(err){
-      joinBtn.disabled = false;
-      joinInProgress = false;
-      socketStatusEl.textContent = "❌ سوکت وصل نشد.";
-      joinStatusEl.textContent = "❌ connect wait failed: " + (err?.message || String(err));
-      setDebug({ connectWaitError: err?.message || String(err) });
-      return;
-    }
-
-    setMsg("در حال ورود به صف...");
-    serverMsgEl.textContent = "در حال ورود به صف...";
-
-    const joinPayload = { tier };
-
-    s.emit("room:join", joinPayload, (resp)=>{
-      console.log("ROOM JOIN RESP:", resp);
-      setDebug(prev => ({ ...(prev && typeof prev === "object" ? prev : {}), roomJoinResponse: resp || null }));
-
-      if(resp && resp.success){
-        // تا قبل از game:state، لابی با lobby:status نمایش داده میشه
-        if (resp?.matchId) currentMatchId = String(resp.matchId);
-
-        if (resp.waiting === true || resp.status === "waiting") {
-          joinStatusEl.textContent = "⏳ منتظر نفرات بیشتر هستید...";
-          serverMsgEl.textContent = "در صف منتظر شروع بازی...";
-          setMsg("در صف منتظر نفرات بیشتر هستید...");
-        } else {
-          joinStatusEl.textContent = "✅ join success";
-          serverMsgEl.textContent = "✅ join success";
-          setMsg("بازی در حال شروع است...");
+      // --- Register ---
+      registerBtn.addEventListener("click", async ()=>{
+        const username = usernameInput.value.trim();
+        const password = passwordInput.value.trim();
+
+        if (!username || !password) {
+          setAuthResult("لطفاً نام کاربری و رمز عبور را وارد کنید.", "error");
+          return;
         }
+
+        try {
+          setAuthResult("در حال ثبت‌نام...");
+          loginBtn.disabled = true;
+          registerBtn.disabled = true;
+
+          const res = await fetch(api("/api/auth/register"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password }),
+            cache: "no-store"
+          });
+
+          let data;
+          try { data = await res.json(); } catch { data = null; }
+
+          if (res.ok && data?.token) {
+            localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
+            setAuthResult("ثبت‌نام موفقیت‌آمیز بود. در حال انتقال به لابی...", "success");
+            setTimeout(() => window.location.href = "/lobby.html", 1500);
+          } else {
+            setAuthResult(data?.message || "خطا در ثبت‌نام", "error");
+          }
+        } catch (e) {
+          console.error("Register fetch error:", e);
+          setAuthResult("خطا در ارتباط با سرور.", "error");
+        } finally {
+          loginBtn.disabled = false;
+          registerBtn.disabled = false;
+        }
+      });
+
+      // --- Initial Load ---
+      const token = getToken();
+      if (token && !isJwtExpired(token)) {
+        setAuthResult("توکن معتبر است. در حال انتقال به لابی...", "success");
+        setTimeout(() => window.location.href = "/lobby.html", 1500);
       } else {
-        stopLobbyCountdown();
-        const message = resp?.message || "خطا در join";
-        serverMsgEl.textContent = "❌ ورود به صف: " + message;
-        joinStatusEl.textContent = "❌ join failed";
-        setMsg("ورود ناموفق بود.");
-        joinInProgress = false;
-        joinBtn.disabled = false;
-        rollBtn.disabled = false;
+        if (token) {
+          console.log("Token is expired, clearing it.");
+          clearToken();
+        }
+        setAuthResult("لطفاً وارد شوید یا ثبت‌نام کنید.");
       }
 
-      setTimeout(()=>{
-        joinBtn.disabled = false;
-      }, 500);
-    });
-    // listener برای زمانی که بازیکنی قطع می شود
-    socket.on("player:disconnected", ({ userId, matchId, forfeitReason }) => {
-      console.log(`Player disconnected: ${userId}, Match: ${matchId}, Reason: ${forfeitReason}`);
-      setMsg(`بازیکن ${userId} قطع شد. ${forfeitReason ? `دلیل: ${forfeitReason}` : ''}`);
-      // بروزرسانی UI برای نشان دادن وضعیت بازیکن قطع شده
-      if (gameState && gameState.players) {
-        gameState.players = gameState.players.map(p =>
-          p.userId === userId ? { ...p, isConnected: false, forfeited: !!forfeitReason } : p
-        );
-      }
-      updateUI(); // بروزرسانی UI برای نمایش وضعیت جدید
-    });
-
-    // listener برای زمانی که بازیکنی دوباره وصل می شود
-    socket.on("player:reconnected", ({ userId, matchId }) => {
-      console.log(`Player reconnected: ${userId}, Match: ${matchId}`);
-      setMsg(`بازیکن ${userId} دوباره وصل شد.`);
-      // بروزرسانی UI برای نشان دادن وضعیت بازیکن متصل شده
-      if (gameState && gameState.players) {
-        gameState.players = gameState.players.map(p =>
-          p.userId === userId ? { ...p, isConnected: true, forfeited: false } : p
-        );
-      }
-      updateUI(); // بروزرسانی UI برای نمایش وضعیت جدید
-    });
-
-    // listener برای زمانی که بازیکنی به دلیل اتمام زمان فورفیت می شود
-    socket.on("player:forfeit", ({ userId, matchId }) => {
-      console.log(`Player forfeit: ${userId}, Match: ${matchId}`);
-      setMsg(`بازیکن ${userId} به دلیل اتمام زمان، از بازی حذف شد.`);
-      // بروزرسانی UI برای نشان دادن وضعیت بازیکن حذف شده
-      if (gameState && gameState.players) {
-        gameState.players = gameState.players.map(p =>
-          p.userId === userId ? { ...p, forfeited: true, isConnected: false } : p // فرض می‌کنیم فورفیت شدن به معنی قطع اتصال هم هست
-        );
-      }
-      // اگر بازی به پایان رسید (کمتر از دو نفر باقی مانده)، باید منطق پایان بازی را صدا زد
-      // if (gameState.players.filter(p => !p.forfeited).length < 2) {
-      //   endGameLogic();
-      // }
-      updateUI(); // بروزرسانی UI برای نمایش وضعیت جدید
-    });
-
-  });
-
-  draw();
-  updateUI();
-})();
-</script>
+    })(); // End of IIFE
+  </script>
 </body>
 </html>

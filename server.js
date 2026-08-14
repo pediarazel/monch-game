@@ -192,26 +192,61 @@ app.post("/api/auth/login", async (req, res) => {
 
 app.post("/api/auth/register", async (req, res) => {
   try {
-    const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
-    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    const username = typeof req.body?.username === "string"
+      ? req.body.username.trim()
+      : "";
 
-    if (username.length < 3) return safeJsonError(res, 400, "نام کاربری حداقل 3 کاراکتر باشد.");
-    if (password.length < 4) return safeJsonError(res, 400, "رمز عبور حداقل 4 کاراکتر باشد.");
+    const password = typeof req.body?.password === "string"
+      ? req.body.password
+      : "";
 
-    const existing = await prisma.user.findUnique({ where: { username } });
-    if (existing) return safeJsonError(res, 409, "این نام کاربری قبلاً استفاده شده است.");
+    if (username.length < 3) {
+      return safeJsonError(res, 400, "نام کاربری حداقل 3 کاراکتر باشد.");
+    }
+
+    if (password.length < 4) {
+      return safeJsonError(res, 400, "رمز عبور حداقل 4 کاراکتر باشد.");
+    }
+
+    const existing = await prisma.user.findUnique({
+      where: { username },
+    });
+
+    if (existing) {
+      return safeJsonError(res, 409, "این نام کاربری قبلاً استفاده شده است.");
+    }
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    await prisma.user.create({
-      data: { username, password: passwordHash, coins: 0, role: "USER" },
+    const user = await prisma.user.create({
+      data: {
+        username,
+        password: passwordHash,
+        coins: 0,
+        role: "USER",
+      },
+      select: {
+        id: true,
+        username: true,
+      },
     });
 
-    return res.status(201).json({ success: true, message: "ثبت‌نام با موفقیت انجام شد." });
+    const token = jwt.sign(
+      { userId: user.id },
+      JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "ثبت‌نام با موفقیت انجام شد.",
+      token,
+    });
   } catch (e) {
     return safeJsonError(res, 500, e.message || "خطای داخلی");
   }
 });
+
 
 app.get("/api/auth/check", authenticateHttp, (req, res) => {
   return res.status(200).json({ success: true, user: req.user });

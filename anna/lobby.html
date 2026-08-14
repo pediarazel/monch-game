@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Monopoly Online - لابی</title>
+    <style>
+      body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #0a0a0a;
+        color: #e2e8f0;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        text-align: center;
+        font-size: 16px;
+        touch-action:manipulation;
+      }
+
+.panel{
+  width:min(92vw,430px);
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  justify-content:center;
+  align-items:center;
+  background:#101010;
+  border:1px solid #252525;
+  border-radius:14px;
+  padding:10px;
+}
+
+
+      .row{ width:100%; max-width:700px; display:flex; flex-wrap:wrap; gap:10px; justify-content:center; align-items:center; }
+
+button{
+  border:none;
+  background:#fff;
+  color:#000;
+  border-radius:10px;
+  padding:10px 14px;
+  font-size:14px;
+  font-weight:bold;
+  cursor:pointer;
+  transition:background 0.2s;
+}
+
+      button:active{ background:#ccc; }
+      button:disabled{ opacity:0.4; cursor:not-allowed; }
+
+      .info{ width:100%; text-align:center; font-size:14px; line-height:1.8; margin-top:5px; }
+      .muted{ color:#cbd5e1; font-size:13px; }
+input, select{
+  width:100%;
+  border:none;
+  border-radius:10px;
+  padding:10px;
+  font-size:14px;
+  background:#1f2937;
+  color:#fff;
+  outline:none;
+}
+
+.card{
+  width:min(92vw,430px);
+  background:#111827;
+  border-radius:14px;
+  padding:12px;
+  box-shadow:0 10px 30px rgba(0,0,0,0.35);
+  margin-bottom:12px;
+}
+
+    </style>
+</head>
+<body>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+      <div>
+        <div style="font-size:18px; font-weight:700;">موجودی شما</div>
+      </div>
+      <button id="logoutBtn" style="background:#ef4444;color:#fff;">خروج</button>
+    </div>
+    <div style="height:10px;"></div>
+    <div class="muted" style="text-align:center; width:100%;">
+      موجودی: <b id="balanceValue">0</b>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px; width:100%;">
+      <div class="muted">ورود به صف بازی (بر اساس Tier)</div>
+
+      <div style="display:flex; gap:10px; width:100%; justify-content:center; flex-wrap:wrap; margin-top:6px;">
+        <div style="max-width:260px; width:100%;">
+          <label class="muted" for="tierInput" style="display:block; margin-bottom:6px; text-align:center;">قیمت اتاق</label>
+          <select id="tierInput">
+            <option value="20">20,000 تومان</option>
+            <option value="50" selected>50,000 تومان</option>
+            <option value="100">100,000 تومان</option>
+            <option value="200">200,000 تومان</option>
+          </select>
+        </div>
+
+        <button id="joinBtn" style="background:#3b82f6;color:#fff; font-weight:700;">
+          ورود به بازی
+        </button>
+      </div>
+
+      <div class="muted" style="direction:ltr; margin-top:2px;" id="joinMeta">
+        قیمت ورودی از موجودی شما کم می‌شود. جایزهٔ برنده ۹۰٪ مبلغ کل است.
+      </div>
+
+      <div class="muted" id="socketStatus" style="min-height:18px;"></div>
+      <div class="muted" id="joinStatus" style="min-height:18px;"></div>
+      <div class="muted" id="peopleNews" style="min-height:18px;"></div>
+      <div class="muted" id="serverMsg" style="min-height:18px;"></div>
+    </div>
+  </div>
+
+  <pre id="debug" aria-label="debug" style="display:none;"></pre>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script>
+    (function(){
+      // --- Global Refs ---
+      const debugEl = document.getElementById('debug');
+      const socketStatusEl = document.getElementById('socketStatus');
+      const joinStatusEl = document.getElementById('joinStatus');
+      const peopleNewsEl = document.getElementById('peopleNews');
+      const serverMsgEl = document.getElementById('serverMsg');
+      const balanceValueEl = document.getElementById('balanceValue');
+      const logoutBtn = document.getElementById('logoutBtn');
+      const joinBtn = document.getElementById('joinBtn');
+      const tierInput = document.getElementById('tierInput');
+      const joinMeta = document.getElementById('joinMeta');
+
+      // --- Basic Setup ---
+      let lastDebugData = {};
+      function setDebug(value) {
+        try {
+          let nextValue = value;
+          if (typeof value === "function") nextValue = value(lastDebugData);
+          if (nextValue && typeof nextValue === "object" && !Array.isArray(nextValue)) {
+            lastDebugData = nextValue;
+          } else {
+            lastDebugData = nextValue;
+          }
+          debugEl.textContent = typeof nextValue === "string" ? nextValue : JSON.stringify(nextValue, null, 2);
+        } catch (error) {
+          debugEl.textContent = String(error?.message || value || "Debug error");
+        }
+      }
+      window.addEventListener('error', (e)=> console.error('Page Error:', e.message || e.error || e));
+      window.addEventListener('unhandledrejection', (e)=> console.error('Promise Error:', e.reason && e.reason.message ? e.reason.message : e));
+
+      const SOCKET_URL = "https://monch-game.onrender.com";
+      const API_BASE = "https://monch-game.onrender.com";
+      function api(path){ return API_BASE.replace(/\/$/,'') + path; }
+
+      // --- Token helpers ---
+      const TOKEN_STORAGE_KEY = "token";
+      function normalizeToken(value) {
+        if (value == null) return "";
+        let token = String(value).trim();
+        if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+          try { token = JSON.parse(token); } catch { token = token.slice(1, -1); }
+        }
+        token = String(token || "").trim();
+        token = token.replace(/^Bearer\s+/i, "").trim();
+        return token;
+      }
+      function getToken() {
+        const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+        const token = normalizeToken(storedToken);
+        if (token && token !== storedToken) localStorage.setItem(TOKEN_STORAGE_KEY, token);
+        return token;
+      }
+      function setToken(value) {
+        const token = normalizeToken(value);
+        if (!token) { localStorage.removeItem(TOKEN_STORAGE_KEY); return ""; }
+        localStorage.setItem(TOKEN_STORAGE_KEY, token);
+        return token;
+      }
+      function clearToken() { localStorage.removeItem(TOKEN_STORAGE_KEY); }
+
+      function isJwtExpired(token) {
+        if (!token) return true;
+        try {
+          const parts = token.split('.');
+          if (parts.length !== 3) return true;
+          const payload = JSON.parse(atob(parts[1]));
+          const currentTime = Math.floor(Date.now() / 1000);
+          return payload.exp < currentTime;
+        } catch (e) { console.error("JWT expiration check failed:", e); return true; }
+      }
+
+      // --- Balance ---
+      balanceValueEl.textContent = "0 تومان";
+      let balanceIntervalId = null;
+      const BALANCE_REFRESH_MS = 5000;
+      function startBalanceAutoRefresh(){
+        if (balanceIntervalId) clearInterval(balanceIntervalId);
+        updateBalance().catch(()=>{});
+        balanceIntervalId = setInterval(() => updateBalance().catch(()=>{}), BALANCE_REFRESH_MS);
+      }
+      function stopBalanceAutoRefresh(){
+        if (balanceIntervalId) clearInterval(balanceIntervalId);
+        balanceIntervalId = null;
+      }
+      async function updateBalance() {
+        const token = getToken();
+        if (!token || isJwtExpired(token)) {
+           balanceValueEl.textContent = "0 تومان";
+           stopBalanceAutoRefresh();
+           return;
+        }
+        try {
+          const res = await fetch(api("/api/me/balance"), {
+            method: "GET", headers: { "Authorization": "Bearer " + token }, cache: "no-store"
+          });
+          let data;
+          try { data = await res.json(); } catch { data = null; }
+
+          if (res.ok && data && data.coins != null) {
+            const value = Number(data.coins || 0) * 1000;
+            balanceValueEl.textContent = `${value.toLocaleString("en-US")} تومان`;
+          } else if (!res.ok && res.status === 401) {
+             console.log("Balance fetch failed: 401 Unauthorized. Clearing token.");
+             clearToken();
+             stopBalanceAutoRefresh();
+             balanceValueEl.textContent = "0 تومان";
+             window.location.href = "/index.html";
+          }
+        } catch (e) { console.error("Balance update error:", e); }
+      }
+
+      // --- Lobby Logic ---
+      let currentMatchId = null;
+      let lobbyCountdownInterval = null;
+      let joinInProgress = false;
+      let socket = null;
+
+      function connectSocketForLobby() {
+        const token = getToken();
+        if (!token || isJwtExpired(token)) {
+          socketStatusEl.textContent = "❌ توکن نامعتبر یا منقضی شده.";
+          serverMsgEl.textContent = "لطفاً دوباره وارد شوید.";
+          setTimeout(() => window.location.href = "/index.html", 2000);
+          return null;
+        }
+
+        if (socket && socket.connected) return socket;
+        if (socket) { try { socket.removeAllListeners(); socket.disconnect(); } catch {} socket = null; }
+
+        socket = io(SOCKET_URL, {
+          auth: { token }, autoConnect: false, transports: ["websocket", "polling"],
+          reconnection: true, reconnectionAttempts: 5, reconnectionDelay: 1000
+        });
+
+        socket.on("connect", () => {
+          socketStatusEl.textContent = `✅ متصل به سرور (${socket.id})`;
+          updateBalance();
+          socket.emit("game:restoreSession", {}, (resp) => {
+             if (resp?.success && resp?.restored && resp?.matchId) {
+                currentMatchId = String(resp.matchId);
+                serverMsgEl.textContent = "بازی شما بازیابی شد. در حال انتقال...";
+                setTimeout(() => window.location.href = `/game.html?matchId=${currentMatchId}`, 1000);
+              }
+          });
+        });
+
+        socket.on("connect_error", error => {
+          const message = error?.message || String(error || "خطای نامشخص");
+          socketStatusEl.textContent = `❌ اتصال خطا: ${message}`;
+          setDebug({ socketConnectError: { message, name: error?.name || null } });
+          if (error.data?.code === 'invalid token' || message.includes('unauthorized')) {
+             console.log("Connection failed due to invalid token. Clearing token and redirecting.");
+             clearToken();
+             setTimeout(() => window.location.href = "/index.html", 2000);
+          }
+        });
+
+        socket.on("disconnect", reason => {
+          socketStatusEl.textContent = `⚠️ قطع شد: ${reason}`;
+          stopLobbyCountdown();
+          if (reason === "io server disconnect" || reason === "io client disconnect") {
+            return;
+          }
+          serverMsgEl.textContent = "در حال تلاش برای اتصال مجدد...";
+        });
+
+        socket.on("game:started", payload => {
+          stopLobbyCountdown();
+          joinStatusEl.textContent = "🎮 بازی شروع شد!";
+          peopleNewsEl.textContent = "در حال انتقال به صفحه بازی...";
+          if (payload?.matchId) {
+            currentMatchId = String(payload.matchId);
+            setTimeout(() => window.location.href = `/game.html?matchId=${currentMatchId}`, 500);
+          }
+        });
+
+        socket.on("lobby:status", data => {
+          if (!data) return;
+          renderLobbyByDeadline(data);
+          if (data?.phase === 4) {
+            peopleNewsEl.textContent = "🎮 بازی شروع می‌شود!";
+          } else if (data?.searchingFor) {
+            peopleNewsEl.textContent = `⏳ در حال جستجوی نفر ${data.searchingFor}...`;
+          } else {
+            peopleNewsEl.textContent = "";
+          }
+        });
+
+        socket.on("match:error", payload => {
+          const message = payload?.message || "خطا در بازی/صف";
+          serverMsgEl.textContent = `❌ ${message}`;
+          joinStatusEl.textContent = "❌ خطا";
+          setDebug({ matchError: payload });
+          joinInProgress = false;
+          joinBtn.disabled = false;
+        });
+
+        socket.on("reconnect_attempt", attemptNumber => {
+          socketStatusEl.textContent = `تلاش مجدد اتصال (${attemptNumber})...`;
+        });
+        socket.on("reconnect_failed", () => {
+          socketStatusEl.textContent = "❌ اتصال مجدد ناموفق.";
+        });
+
+        socket.connect();
+        return socket;
+      }
+
+      function renderLobbyByDeadline(data) {
+        if (!data) return;
+        joinStatusEl.textContent = data.status || "";
+        serverMsgEl.textContent = data.serverMessage || "";
+        if (data.countdown) {
+          startLobbyCountdown(data.countdown);
+        } else {
+          stopLobbyCountdown();
+        }
+      }
+
+      function startLobbyCountdown(targetTimestamp) {
+        stopLobbyCountdown();
+        const updateCountdown = () => {
+          const now = Date.now();
+          const timeLeftMs = targetTimestamp - now;
+          if (timeLeftMs <= 0) {
+            stopLobbyCountdown();
+            peopleNewsEl.textContent = "⏳ انتظار برای شروع...";
+            return;
+          }
+          const seconds = Math.floor(timeLeftMs / 1000);
+          peopleNewsEl.textContent = `بازی در ${seconds} ثانیه دیگر شروع می‌شود...`;
+        };
+        updateCountdown();
+        lobbyCountdownInterval = setInterval(updateCountdown, 1000);
+      }
+function stopLobbyCountdown() {
+  if (lobbyCountdownInterval) clearInterval(lobbyCountdownInterval);
+  lobbyCountdownInterval = null;
+}
+ // Corrected variable name here
+      }
+
+      // --- Join Logic ---
+      joinBtn.addEventListener("click", async () => {
+        if (joinInProgress) return;
+        const token = getToken();
+        const tier = Number(tierInput.value);
+
+        if (!token || isJwtExpired(token)) {
+           serverMsgEl.textContent = "توکن شما نامعتبر است. لطفاً دوباره وارد شوید.";
+           setTimeout(() => window.location.href = "/index.html", 2000);
+           return;
+        }
+        if (!Number.isFinite(tier) || ![20, 50, 100, 200].includes(tier)) {
+          serverMsgEl.textContent = "قیمت اتاق نامعتبر است."; return;
+        }
+
+        joinInProgress = true;
+        joinBtn.disabled = true;
+        serverMsgEl.textContent = ""; joinStatusEl.textContent = ""; peopleNewsEl.textContent = "";
+
+        if (!socket || !socket.connected) {
+          const newSocket = connectSocketForLobby();
+          if (!newSocket) {
+            joinInProgress = false; joinBtn.disabled = false; return;
+          }
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error("Connection timeout")), 10000);
+            if (newSocket.connected) { clearTimeout(timeout); resolve(); }
+            newSocket.once("connect", () => { clearTimeout(timeout); resolve(); });
+            newSocket.once("connect_error", (err) => { clearTimeout(timeout); reject(err); });
+          }).catch(err => {
+             serverMsgEl.textContent = `خطا در اتصال: ${err.message || err}`;
+             joinInProgress = false; joinBtn.disabled = false;
+             return;
+          });
+        }
+
+        joinStatusEl.textContent = "✅ متصل شد. ارسال درخواست ورود...";
+        socket.emit("room:join", { tier }, (resp) => {
+          setDebug({ roomJoinResponse: resp });
+          if (resp?.success) {
+            currentMatchId = resp.matchId ? String(resp.matchId) : null;
+            if (resp.waiting || resp.status === "waiting") {
+              joinStatusEl.textContent = "⏳ منتظر نفرات بیشتر...";
+              serverMsgEl.textContent = "در صف انتظار...";
+            } else {
+              joinStatusEl.textContent = "✅ ورود موفق!";
+              serverMsgEl.textContent = "بازی در حال شروع است...";
+            }
+          } else {
+            const message = resp?.message || "خطا در ورود به صف";
+            serverMsgEl.textContent = `❌ ${message}`;
+            joinStatusEl.textContent = "❌ ورود ناموفق";
+            joinInProgress = false;
+            joinBtn.disabled = false;
+          }
+        });
+      });
+
+      // --- Logout ---
+      logoutBtn.addEventListener("click", ()=>{
+        stopBalanceAutoRefresh();
+        stopLobbyCountdown();
+        clearToken();
+        if (socket) { try { socket.removeAllListeners(); socket.disconnect(); } catch {} socket = null; }
+        window.location.href = "/index.html";
+      });
+
+      // --- Initial Load ---
+      const token = getToken();
+      if (!token || isJwtExpired(token)) {
+        console.log("No valid token found. Redirecting to login.");
+        setTimeout(() => window.location.href = "/index.html", 100);
+      } else {
+        startBalanceAutoRefresh();
+        connectSocketForLobby();
+      }
+
+    })(); // End of IIFE
+  </script>
+</body>
+</html>
