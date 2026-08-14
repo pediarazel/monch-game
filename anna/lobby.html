@@ -73,6 +73,28 @@ input, select{
   box-shadow:0 10px 30px rgba(0,0,0,0.35);
   margin-bottom:12px;
 }
+#lobbyCountdownBox{
+  width:min(92vw,430px);
+  margin-top:12px;
+  padding:14px 12px;
+  border:1px solid #f59e0b;
+  border-radius:14px;
+  background:linear-gradient(135deg,#201708,#111827);
+  color:#fbbf24;
+  text-align:center;
+  font-size:30px;
+  font-weight:900;
+  line-height:1.2;
+  box-shadow:0 8px 24px rgba(245,158,11,0.16);
+}
+
+#lobbyCountdownBox small{
+  display:block;
+  margin-top:6px;
+  color:#d1d5db;
+  font-size:13px;
+  font-weight:normal;
+}
 
     </style>
 </head>
@@ -131,6 +153,10 @@ input, select{
       <div class="muted" id="serverMsg" style="min-height:18px;"></div>
     </div>
   </div>
+  <div id="lobbyCountdownBox" hidden aria-live="polite">
+    ⏳ ۶۰ ثانیه
+    <small>زمان باقی‌مانده برای تکمیل بازیکنان</small>
+  </div>
 
   <pre id="debug" aria-label="debug" style="display:none;"></pre>
 
@@ -143,6 +169,8 @@ input, select{
       const joinStatusEl = document.getElementById('joinStatus');
       const peopleNewsEl = document.getElementById('peopleNews');
       const serverMsgEl = document.getElementById('serverMsg');
+      const lobbyCountdownBoxEl = document.getElementById('lobbyCountdownBox');
+
       const balanceValueEl = document.getElementById('balanceValue');
 const logoutBtn = document.getElementById('logoutBtn');
 const joinBtn = document.getElementById('joinBtn');
@@ -385,7 +413,10 @@ function renderLobbyByDeadline(data) {
   }
 
   if (data.deadlineAt) {
-    startLobbyCountdown(data.deadlineAt, data.message || "در حال جستجوی بازیکن");
+    startLobbyCountdown(
+      data.deadlineAt,
+      data.message || "در حال جستجوی بازیکن"
+    );
   } else {
     stopLobbyCountdown();
   }
@@ -404,8 +435,15 @@ function startLobbyCountdown(deadlineAt, message) {
     const remainingMs = deadlineMs - Date.now();
     const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
 
-    joinStatusEl.textContent =
-      `${message} (${seconds} ثانیه باقی مانده)`;
+    joinStatusEl.textContent = message;
+
+    if (lobbyCountdownBoxEl) {
+      lobbyCountdownBoxEl.hidden = false;
+      lobbyCountdownBoxEl.innerHTML = `
+        ⏳ ${seconds.toLocaleString("fa-IR")} ثانیه
+        <small>زمان باقی‌مانده برای تکمیل بازیکنان</small>
+      `;
+    }
 
     if (remainingMs <= 0) {
       stopLobbyCountdown();
@@ -424,7 +462,12 @@ function stopLobbyCountdown() {
   }
 
   lobbyCountdownInterval = null;
+
+  if (lobbyCountdownBoxEl) {
+    lobbyCountdownBoxEl.hidden = true;
+  }
 }
+
 
 
 
