@@ -657,7 +657,13 @@ function createLobby(tier) {
     createdAt: Date.now(),
     playerUidsInOrder: [],
     playerColors: { red: null, green: null, yellow: null, blue: null },
+
+    // نام کاربری هر بازیکن هنگام ورود به لابی ذخیره می‌شود.
+    // کلید این شیء userId است.
+    playerNamesByUserId: {},
+
     lobbyPhase: 1,
+
     lobbyDeadlineAt: null,
     lobbyTimer: null,
     timerToken: 0,
@@ -958,7 +964,17 @@ function createMatchFromLobby(lobby) {
     status: "waiting",
     players: new Map(),
     playerColors: { ...lobby.playerColors },
+
+    // نام هر رنگ برای ارسال به Canvas
+    playerNames: Object.fromEntries(
+      colorOrder.map((color) => [
+        color,
+        lobby.playerNamesByUserId?.[String(lobby.playerColors[color])] || "",
+      ])
+    ),
+
     game: null,
+
     turnDeadlineAt: 0,
     turnId: 0,
     pendingTurnTimer: null,
@@ -1028,7 +1044,9 @@ function broadcastState(match) {
     turnId: match.turnId,
     turnDeadlineAt: match.turnDeadlineAt || match.game.turnDeadlineAt || null,
     playerColors: match.playerColors,
+    playerNames: match.playerNames || {},
     activeColor,
+
   });
 }
 // ارسال وضعیت بازی فقط برای یک سوکت؛ مناسب بازگشت خودکار بازیکن
@@ -1045,7 +1063,9 @@ function emitStateToSocket(socket, match) {
     turnId: match.turnId,
     turnDeadlineAt: match.turnDeadlineAt || match.game.turnDeadlineAt || null,
     playerColors: match.playerColors,
+    playerNames: match.playerNames || {},
     activeColor,
+
   });
 }
 
@@ -1973,7 +1993,14 @@ io.on("connection", (socket) => {
 
         if (oldIndex !== -1) {
           oldLobby.playerUidsInOrder.splice(oldIndex, 1);
+
+          // نام کاربر هم همراه خودش از لابی قبلی پاک شود.
+          if (oldLobby.playerNamesByUserId) {
+            delete oldLobby.playerNamesByUserId[String(uid)];
+          }
+
           socket.leave(`match:${oldLobby.matchId}`);
+
 
           console.log("[LOBBY_STALE_USER_REMOVED]", {
             userId: uid,
@@ -2001,8 +2028,27 @@ io.on("connection", (socket) => {
           });
         }
 
+        // نام واقعی کاربر فقط یک‌بار، هنگام ورود به لابی خوانده می‌شود.
+        const lobbyUser = await prisma.user.findUnique({
+          where: { id: uid },
+          select: { username: true },
+        });
+
+        if (!lobbyUser?.username) {
+          return callback?.({
+            success: false,
+            message: "نام کاربری شما پیدا نشد. دوباره وارد حساب شوید.",
+          });
+        }
+
+        if (!lobby.playerNamesByUserId) {
+          lobby.playerNamesByUserId = {};
+        }
+
+        lobby.playerNamesByUserId[String(uid)] = lobbyUser.username;
         lobby.playerUidsInOrder.push(uid);
       }
+
 
       await socket.join(`match:${lobby.matchId}`);
 

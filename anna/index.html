@@ -869,47 +869,63 @@ function drawPieces() {
       });
     }
     drawPieces();
-        // تابع کمکی برای رسم وضعیت بازیکن
-    function drawPlayerStatus() {
-      if (!gameState || !gameState.players) return;
+    // نام کاربری بالای جایگاه رنگ اختصاصی هر بازیکن
+    // فقط نام بازیکنی که نوبتش است چشمک می‌زند.
+    function drawPlayerNames() {
+      if (!gameState || !gameState.playerNames) return;
 
-      for (const player of gameState.players) {
-        const piece = gameState.pieces.find(p => p.color === player.color);
-        if (!piece) continue;
+      const yardTitles = {
+        red:    { x: 2 * CELL,  y: 0.58 * CELL },
+        blue:   { x: 11 * CELL, y: 0.58 * CELL },
+        green:  { x: 11 * CELL, y: 9.58 * CELL },
+        yellow: { x: 2 * CELL,  y: 9.58 * CELL },
+      };
 
-        const pos = getPieceDrawPos(piece);
-        if (!pos) continue;
+      const turnColor =
+        gameState.currentTurnColor ??
+        colorOrder[gameState.currentTurn];
 
-        const { x, y } = pos;
+      // ۵۰۰ میلی‌ثانیه دیده شود و ۵۰۰ میلی‌ثانیه پنهان شود.
+      const blinkIsVisible = Math.floor(Date.now() / 500) % 2 === 0;
+
+      for (const color of colorOrder) {
+        const username = String(gameState.playerNames?.[color] || "").trim();
+        const titlePos = yardTitles[color];
+
+        // رنگی که بازیکن ندارد، هیچ نامی نمایش داده نمی‌دهد.
+        if (!username || !titlePos) continue;
+
+        const isCurrentTurn = color === turnColor;
+
+        // فقط نام بازیکن نوبت‌دار چشمک بزند.
+        if (isCurrentTurn && !blinkIsVisible) continue;
 
         ctx.save();
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
+        ctx.direction = "rtl";
 
-        // اگر بازیکن قطع شده باشد
-        if (!player.isConnected) {
-          ctx.fillStyle = "rgba(150, 150, 150, 0.8)"; // رنگ خاکستری برای وضعیت قطع شده
-          ctx.font = `bold ${Math.max(12, CELL * 0.4)}px sans-serif`;
-          ctx.fillText("●", x, y); // یک دایره توپر خاکستری
+        const fontSize = Math.max(12, Math.floor(CELL * 0.32));
+        ctx.font = `bold ${fontSize}px sans-serif`;
 
-          // اگر بازیکن فورفیت شده باشد، علامت X قرمز را هم رسم کن
-          if (player.forfeited) {
-            ctx.fillStyle = "rgba(255, 0, 0, 0.9)"; // رنگ قرمز برای فورفیت
-            ctx.font = `bold ${Math.max(10, CELL * 0.3)}px sans-serif`;
-            ctx.fillText("X", x, y); // علامت X قرمز روی دایره خاکستری
-          }
-        }
-        // اگر بازیکن فورفیت شده باشد (و به هر دلیلی isConnected هنوز true است، که بعید است)
-        else if (player.forfeited) {
-           ctx.fillStyle = "rgba(255, 0, 0, 0.9)"; // رنگ قرمز برای فورفیت
-           ctx.font = `bold ${Math.max(10, CELL * 0.3)}px sans-serif`;
-           ctx.fillText("X", x, y);
-        }
+        // نام نوبت‌دار روشن‌تر است؛ بقیه ثابت و کمی ملایم‌ترند.
+        ctx.fillStyle = isCurrentTurn
+          ? "#ffffff"
+          : "rgba(255,255,255,0.78)";
 
+        // برای جلوگیری از خروج نام‌های خیلی بلند از محدودهٔ جایگاه
+        const shownName =
+          username.length > 14
+            ? `${username.slice(0, 14)}…`
+            : username;
+
+        ctx.fillText(`👤 ${shownName}`, titlePos.x, titlePos.y);
         ctx.restore();
       }
     }
-    drawPlayerStatus(); // فراخوانی تابع برای نمایش وضعیت
+
+    drawPlayerNames();
+
 
   }
 
@@ -940,56 +956,73 @@ if (gameState.winner) {
 const isDoubleSix = (gameState.dice1 === 6 && gameState.dice2 === 6);
 const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.winner && (!gameState.rolled || isDoubleSix || (gameState.dice1 === 0 && gameState.dice2 === 0));
 
-    // --- مدیریت دکمه ریختن تاس ---
-    rollBtn.disabled = !canRoll;
-    // اگر نوبت من است و هنوز تاس نریخته‌ام، دکمه چشمک بزند
-    if (canRoll && !gameState.rolled) {
-      rollBtn.classList.add("blink-me");
-    } else {
+      // --- ابتدا همه افکت‌های چشمک‌زن پاک شوند ---
+      // این کار باعث می‌شود در نوبت بازیکن دیگر، هیچ تاسی چشمک نزند.
       rollBtn.classList.remove("blink-me");
-    }
+      dice1El.classList.remove("blink-me");
+      dice2El.classList.remove("blink-me");
 
-    const pendingDice = Array.isArray(gameState?.pendingDice) ? gameState.pendingDice : [];
-    const d1 = Number(gameState.dice1 ?? 0);
-    const d2 = Number(gameState.dice2 ?? 0);
+      // --- دکمه ریختن تاس ---
+      rollBtn.disabled = !canRoll;
 
-    const hasPendingDice = pendingDice.length > 0;
-    const hasResultDice = d1 > 0 || d2 > 0;
-
-    const show1 = hasPendingDice ? Number(pendingDice[0] ?? 0) : d1;
-    const show2 = hasPendingDice ? Number(pendingDice[1] ?? 0) : d2;
-
-    const canPickDice =
-      myColor === turnColor &&
-      gameState.rolled === true &&
-      hasPendingDice;
-
-    if (hasPendingDice || hasResultDice) {
-      dice1El.textContent = show1 > 0 ? String(show1) : "🎲";
-      dice2El.textContent = show2 > 0 ? String(show2) : "🎲";
-
-      // تاس ۱ زمانی چشمک می‌زند که موجود باشد، نوبت من باشد و فعلاً آن را انتخاب نکرده باشم
-      const isDice1Available = canPickDice && show1 > 0;
-      dice1El.style.pointerEvents = isDice1Available ? "auto" : "none";
-      if (isDice1Available && pickedDieIndex !== 0) {
-        dice1El.classList.add("blink-me");
-      } else {
-        dice1El.classList.remove("blink-me");
+      // فقط وقتی نوبت خودم است و هنوز تاس نریخته‌ام
+      if (myColor === turnColor && canRoll && !gameState.rolled) {
+        rollBtn.classList.add("blink-me");
       }
-      dice1El.style.opacity = isDice1Available ? "1" : "0.5";
 
-      // تاس ۲ زمانی چشمک می‌زند که موجود باشد، نوبت من باشد و فعلاً آن را انتخاب نکرده باشم
-      const isDice2Available = canPickDice && (pendingDice.length > 1 ? show2 > 0 : (pendingDice.length === 1 && pickedDieIndex === 0 ? false : show1 > 0));
-      // اصلاح ساده‌تر برای تاس دوم: اگر در لیست انتظار هست و انتخاب نشده، چشمک بزند
-      const d2ActualAvailable = canPickDice && pendingDice.length > 0 && ( (pendingDice.length === 2 && pickedDieIndex !== 1) || (pendingDice.length === 1 && pickedDieIndex === null) );
+      // --- تاس‌های باقی‌مانده ---
+      const pendingDice = Array.isArray(gameState?.pendingDice)
+        ? gameState.pendingDice
+        : [];
 
-      dice2El.style.pointerEvents = isDice2Available ? "auto" : "none";
-      if (d2ActualAvailable) {
-        dice2El.classList.add("blink-me");
-      } else {
-        dice2El.classList.remove("blink-me");
-      }
-      dice2El.style.opacity = isDice2Available ? "1" : "0.5";
+      const d1 = Number(gameState.dice1 ?? 0);
+      const d2 = Number(gameState.dice2 ?? 0);
+
+      const hasPendingDice = pendingDice.length > 0;
+      const hasResultDice = d1 > 0 || d2 > 0;
+
+      const show1 = hasPendingDice ? Number(pendingDice[0] ?? 0) : d1;
+      const show2 = pendingDice.length > 1 ? Number(pendingDice[1] ?? 0) : d2;
+
+      // فقط بازیکنی که نوبتش است بتواند تاس انتخاب کند
+      const canPickDice =
+        myColor === turnColor &&
+        gameState.rolled === true &&
+        hasPendingDice;
+
+      if (hasPendingDice || hasResultDice) {
+        dice1El.textContent = show1 > 0 ? String(show1) : "🎲";
+        dice2El.textContent = show2 > 0 ? String(show2) : "🎲";
+
+        // تاس اول: فقط اگر واقعاً در pendingDice باشد
+        const isDice1Available =
+          canPickDice &&
+          pendingDice.length >= 1 &&
+          show1 > 0;
+
+        dice1El.style.pointerEvents = isDice1Available ? "auto" : "none";
+        dice1El.style.opacity = isDice1Available ? "1" : "0.5";
+
+// تاس اول تا وقتی خودش انتخاب نشده، چشمک بزند
+if (isDice1Available && pickedDieIndex !== 0) {
+  dice1El.classList.add("blink-me");
+}
+
+
+        // تاس دوم: فقط در صورتی که واقعاً تاس دوم در pendingDice وجود داشته باشد
+        const isDice2Available =
+          canPickDice &&
+          pendingDice.length >= 2 &&
+          show2 > 0;
+
+        dice2El.style.pointerEvents = isDice2Available ? "auto" : "none";
+        dice2El.style.opacity = isDice2Available ? "1" : "0.5";
+
+// تاس دوم تا وقتی خودش انتخاب نشده، چشمک بزند
+if (isDice2Available && pickedDieIndex !== 1) {
+  dice2El.classList.add("blink-me");
+}
+
 
 
     if (pickedDieIndex != null) {
@@ -1034,11 +1067,15 @@ const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.winn
 }
 
   // آپدیت UI
-  setInterval(()=>{
-    if(gameState) {
-      try { updateUI(); } catch {}
+  setInterval(() => {
+    if (gameState) {
+      try {
+        updateUI();
+        draw();
+      } catch {}
     }
   }, 250);
+
 
   function canRollLocal(){
     if(!gameState || gameState.winner) return false;
