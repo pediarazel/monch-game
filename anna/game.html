@@ -474,10 +474,20 @@ function drawPieces() {
     const pos = getPieceDrawPos(piece);
     if (!pos) continue;
 
-    const isTurnPiece = !winner && piece.color === turnColor;
-    const opacity = isTurnPiece
-      ? (blinkIsBright ? 1 : 0.28)
-      : 1;
+/*
+  فقط روی صفحه بازیکنی که نوبتش است، مهره‌های خودش چشمک می‌زنند.
+  بازیکنان دیگر مهره‌های نوبت‌دار را به‌صورت ثابت می‌بینند.
+*/
+const isMyTurnPiece =
+  Boolean(myColor) &&
+  !winner &&
+  myColor === turnColor &&
+  piece.color === myColor;
+
+const opacity = isMyTurnPiece
+  ? (blinkIsBright ? 1 : 0.28)
+  : 1;
+
 
     drawSphereFill(
       pos.x,
@@ -503,13 +513,22 @@ function drawPieces() {
         const username = String(gameState.playerNames?.[color] || "").trim();
         const titlePos = yardTitles[color];
         if (!username || !titlePos) continue;
-        const isCurrentTurn = color === turnColor;
-        if (isCurrentTurn && !blinkIsVisible) continue;
+/*
+  فقط نام خود بازیکنی که نوبتش است روی گوشی خودش چشمک می‌زند.
+*/
+const isMyCurrentTurn =
+  Boolean(myColor) &&
+  color === myColor &&
+  myColor === turnColor;
+
+if (isMyCurrentTurn && !blinkIsVisible) continue;
+
         ctx.save();
         ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.direction = "rtl";
         const fontSize = Math.max(12, Math.floor(CELL * 0.32));
         ctx.font = `bold ${fontSize}px sans-serif`;
-        ctx.fillStyle = isCurrentTurn ? "#ffffff" : "rgba(255,255,255,0.78)";
+ctx.fillStyle = isMyCurrentTurn ? "#ffffff" : "rgba(255,255,255,0.78)";
+
         const shownName = username.length > 14 ? `${username.slice(0, 14)}…` : username;
         ctx.fillText(`👤 ${shownName}`, titlePos.x, titlePos.y);
         ctx.restore();
