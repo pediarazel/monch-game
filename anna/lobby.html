@@ -111,7 +111,8 @@ input, select{
         </button>
       </div>
 
-      <div class="muted" style="direction:ltr; margin-top:2px;" id="joinMeta">
+<div class="muted" style="margin-top:2px;" id="joinMeta">
+
         قیمت ورودی از موجودی شما کم می‌شود. جایزهٔ برنده ۹۰٪ مبلغ کل است.
       </div>
 
@@ -188,16 +189,35 @@ input, select{
       }
       function clearToken() { localStorage.removeItem(TOKEN_STORAGE_KEY); }
 
-      function isJwtExpired(token) {
-        if (!token) return true;
-        try {
-          const parts = token.split('.');
-          if (parts.length !== 3) return true;
-          const payload = JSON.parse(atob(parts[1]));
-          const currentTime = Math.floor(Date.now() / 1000);
-          return payload.exp < currentTime;
-        } catch (e) { console.error("JWT expiration check failed:", e); return true; }
-      }
+function isJwtExpired(token) {
+  if (!token) return true;
+
+  try {
+    const parts = token.split(".");
+
+    if (parts.length !== 3) {
+      return true;
+    }
+
+    const base64 = parts[1]
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
+
+    const paddedBase64 = base64.padEnd(
+      base64.length + ((4 - (base64.length % 4)) % 4),
+      "="
+    );
+
+    const payload = JSON.parse(atob(paddedBase64));
+    const currentTime = Math.floor(Date.now() / 1000);
+
+    return !payload.exp || payload.exp <= currentTime;
+  } catch (e) {
+    console.error("JWT expiration check failed:", e);
+    return true;
+  }
+}
+
 
       // --- Balance ---
       balanceValueEl.textContent = "0 تومان";
@@ -364,11 +384,12 @@ input, select{
         lobbyCountdownInterval = setInterval(updateCountdown, 1000);
       }
 function stopLobbyCountdown() {
-  if (lobbyCountdownInterval) clearInterval(lobbyCountdownInterval);
+  if (lobbyCountdownInterval) {
+    clearInterval(lobbyCountdownInterval);
+  }
   lobbyCountdownInterval = null;
 }
- // Corrected variable name here
-      }
+
 
       // --- Join Logic ---
       joinBtn.addEventListener("click", async () => {
@@ -394,16 +415,35 @@ function stopLobbyCountdown() {
           if (!newSocket) {
             joinInProgress = false; joinBtn.disabled = false; return;
           }
-          await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error("Connection timeout")), 10000);
-            if (newSocket.connected) { clearTimeout(timeout); resolve(); }
-            newSocket.once("connect", () => { clearTimeout(timeout); resolve(); });
-            newSocket.once("connect_error", (err) => { clearTimeout(timeout); reject(err); });
-          }).catch(err => {
-             serverMsgEl.textContent = `خطا در اتصال: ${err.message || err}`;
-             joinInProgress = false; joinBtn.disabled = false;
-             return;
-          });
+try {
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("مهلت اتصال تمام شد"));
+    }, 10000);
+
+    if (newSocket.connected) {
+      clearTimeout(timeout);
+      resolve();
+      return;
+    }
+
+    newSocket.once("connect", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+
+    newSocket.once("connect_error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
+} catch (err) {
+  serverMsgEl.textContent = `❌ خطا در اتصال: ${err.message || err}`;
+  joinInProgress = false;
+  joinBtn.disabled = false;
+  return;
+}
+
         }
 
         joinStatusEl.textContent = "✅ متصل شد. ارسال درخواست ورود...";
