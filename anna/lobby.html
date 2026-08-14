@@ -109,6 +109,15 @@ input, select{
         <button id="joinBtn" style="background:#3b82f6;color:#fff; font-weight:700;">
           ورود به بازی
         </button>
+        <button
+  id="leaveQueueBtn"
+  type="button"
+  hidden
+  style="background:#ef4444;color:#fff; font-weight:700;"
+>
+  خروج از صف
+</button>
+
       </div>
 
 <div class="muted" style="margin-top:2px;" id="joinMeta">
@@ -135,9 +144,11 @@ input, select{
       const peopleNewsEl = document.getElementById('peopleNews');
       const serverMsgEl = document.getElementById('serverMsg');
       const balanceValueEl = document.getElementById('balanceValue');
-      const logoutBtn = document.getElementById('logoutBtn');
-      const joinBtn = document.getElementById('joinBtn');
-      const tierInput = document.getElementById('tierInput');
+const logoutBtn = document.getElementById('logoutBtn');
+const joinBtn = document.getElementById('joinBtn');
+const leaveQueueBtn = document.getElementById('leaveQueueBtn');
+const tierInput = document.getElementById('tierInput');
+
       const joinMeta = document.getElementById('joinMeta');
 
       // --- Basic Setup ---
@@ -451,6 +462,10 @@ try {
           setDebug({ roomJoinResponse: resp });
           if (resp?.success) {
             currentMatchId = resp.matchId ? String(resp.matchId) : null;
+            leaveQueueBtn.hidden = !currentMatchId;
+leaveQueueBtn.disabled = !currentMatchId;
+tierInput.disabled = true;
+
             if (resp.waiting || resp.status === "waiting") {
               joinStatusEl.textContent = "⏳ منتظر نفرات بیشتر...";
               serverMsgEl.textContent = "در صف انتظار...";
@@ -468,8 +483,56 @@ try {
         });
       });
 
+      // --- Leave Queue ---
+      leaveQueueBtn.addEventListener("click", () => {
+        if (!currentMatchId) {
+          serverMsgEl.textContent = "شما در صف فعالی نیستید.";
+          leaveQueueBtn.hidden = true;
+          leaveQueueBtn.disabled = true;
+          tierInput.disabled = false;
+          joinBtn.disabled = false;
+          return;
+        }
+
+        if (!socket || !socket.connected) {
+          serverMsgEl.textContent = "❌ اتصال به سرور برقرار نیست.";
+          return;
+        }
+
+        leaveQueueBtn.disabled = true;
+        serverMsgEl.textContent = "در حال خروج از صف...";
+
+        socket.emit("game:leave", { matchId: currentMatchId }, (resp) => {
+          if (!resp?.success) {
+            serverMsgEl.textContent =
+              `❌ ${resp?.message || "خروج از صف ناموفق بود."}`;
+
+            leaveQueueBtn.disabled = false;
+            return;
+          }
+
+          stopLobbyCountdown();
+
+          currentMatchId = null;
+          joinInProgress = false;
+
+          leaveQueueBtn.hidden = true;
+          leaveQueueBtn.disabled = true;
+
+          joinBtn.disabled = false;
+          tierInput.disabled = false;
+
+          joinStatusEl.textContent = "";
+          peopleNewsEl.textContent = "";
+          serverMsgEl.textContent = "✅ از صف بازی خارج شدی.";
+
+          updateBalance().catch(() => {});
+        });
+      });
+
       // --- Logout ---
       logoutBtn.addEventListener("click", ()=>{
+
         stopBalanceAutoRefresh();
         stopLobbyCountdown();
         clearToken();
