@@ -63,14 +63,17 @@
 </head>
 <body>
   <div class="card">
-    <h1>پنل مدیریت موجودی</h1>
-    <p>افزایش/کاهش و مشاهده موجودی کاربر (با username)</p>
+<h1>پنل مدیریت موجودی (تومان)</h1>
+<p>افزایش، کاهش و مشاهدهٔ موجودی کاربر با تومان واقعی</p>
+
 
     <label for="username">نام کاربری</label>
     <input id="username" type="text" placeholder="مثلا ali" />
 
-    <label for="amount">مقدار</label>
-    <input id="amount" type="number" placeholder="مثلا 1000" />
+<label for="amount">مبلغ (تومان)</label>
+<input id="amount" type="number" inputmode="numeric" step="1000" min="1000" placeholder="مثلاً 100000" />
+<div class="small-note">فقط مضرب ۱٬۰۰۰ وارد کن؛ مثال: 100000 یعنی صد هزار تومان.</div>
+
 
     <label for="action">عملیات</label>
     <select id="action">
@@ -104,134 +107,172 @@
     <div class="result" id="treasuryResult">گزارش اینجا نمایش داده می‌شود</div>
   </div>
 
-  <script>
-    const usernameInput = document.getElementById("username");
-    const amountInput = document.getElementById("amount");
-    const actionInput = document.getElementById("action");
-    const noteInput = document.getElementById("note");
-    const adminSecretInput = document.getElementById("adminSecret");
+<script>
+  const usernameInput = document.getElementById("username");
+  const amountInput = document.getElementById("amount");
+  const actionInput = document.getElementById("action");
+  const noteInput = document.getElementById("note");
+  const adminSecretInput = document.getElementById("adminSecret");
 
-    const resultBox = document.getElementById("result");
-    const updateBtn = document.getElementById("updateBtn");
-    const getBtn = document.getElementById("getBtn");
+  const resultBox = document.getElementById("result");
+  const updateBtn = document.getElementById("updateBtn");
+  const getBtn = document.getElementById("getBtn");
 
-    function showResult(data) {
-      resultBox.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  function formatToman(value) {
+    return `${Number(value || 0).toLocaleString("en-US")} تومان`;
+  }
+
+  function showResult(data) {
+    resultBox.textContent =
+      typeof data === "string"
+        ? data
+        : JSON.stringify(data, null, 2);
+  }
+
+  function showUserBalance(data) {
+    resultBox.textContent = [
+      `نام کاربری: ${data.username}`,
+      `شناسه کاربر: ${data.userId}`,
+      `نقش: ${data.role}`,
+      `موجودی: ${formatToman(data.coinsToman ?? Number(data.coins || 0) * 1000)}`,
+    ].join("\n");
+  }
+
+  updateBtn.addEventListener("click", async () => {
+    const username = usernameInput.value.trim();
+    const amountRaw = amountInput.value.trim();
+    const action = actionInput.value;
+    const note = (noteInput.value || "").trim();
+    const adminSecret = adminSecretInput.value.trim();
+
+    if (!username || !amountRaw || !adminSecret) {
+      showResult("نام کاربری، مبلغ و رمز ادمین را کامل کن.");
+      return;
     }
 
-    updateBtn.addEventListener("click", async () => {
-      const username = usernameInput.value.trim();
-      const amountRaw = amountInput.value.trim();
-      const action = actionInput.value; // add | subtract
-      const note = (noteInput.value || "").trim();
-      const adminSecret = adminSecretInput.value.trim();
+    const amountToman = Number(amountRaw);
 
-      if (!username || !amountRaw || !adminSecret) {
-        showResult("لطفا username، amount و رمز ادمین را کامل کن");
-        return;
-      }
-
-      let amountValue = Number(amountRaw);
-      if (!Number.isFinite(amountValue) || amountValue <= 0) {
-        showResult("amount باید یک عدد معتبر و بزرگ‌تر از صفر باشد.");
-        return;
-      }
-
-      // ✅ کلید اصلی:
-      // بعضی سرورها برای subtract انتظار دارند amount منفی باشد.
-      // بنابراین add = مثبت، subtract = منفی
-      if (action === "subtract") {
-        amountValue = -amountValue;
-      }
-
-      try {
-        const res = await fetch("/admin/update-balance-by-username", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username,
-            amount: amountValue, // add مثبت / subtract منفی
-            action,              // هم action را هم می‌فرستیم
-            note,
-            adminSecret
-          })
-        });
-
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showResult(data.message || "خطا در تغییر موجودی");
-          return;
-        }
-        showResult(data);
-      } catch (err) {
-        showResult("خطا در ارتباط با سرور");
-      }
-    });
-
-    getBtn.addEventListener("click", async () => {
-      const username = usernameInput.value.trim();
-      const adminSecret = adminSecretInput.value.trim();
-
-      if (!username || !adminSecret) {
-        showResult("username و رمز ادمین را وارد کن");
-        return;
-      }
-
-      const url =
-        `/admin/user-balance/${encodeURIComponent(username)}?adminSecret=${encodeURIComponent(adminSecret)}&t=${Date.now()}`;
-
-      try {
-        const res = await fetch(url, {
-          method: "GET",
-          cache: "no-store",
-          headers: { "Cache-Control": "no-cache" }
-        });
-
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showResult(data.message || "خطا در دریافت موجودی");
-          return;
-        }
-        showResult(data);
-      } catch (err) {
-        showResult("خطا در ارتباط با سرور");
-      }
-    });
-
-    // Treasury report
-    const treasuryRangeEl = document.getElementById("treasuryRange");
-    const treasuryBtn = document.getElementById("treasuryBtn");
-    const treasuryResultBox = document.getElementById("treasuryResult");
-
-    function showTreasuryResult(data){
-      treasuryResultBox.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+    if (!Number.isInteger(amountToman) || amountToman <= 0) {
+      showResult("مبلغ باید یک عدد صحیح و بزرگ‌تر از صفر باشد.");
+      return;
     }
 
-    treasuryBtn.addEventListener("click", async () => {
-      const adminSecret = adminSecretInput.value.trim();
-      const range = treasuryRangeEl.value;
+    if (amountToman % 1000 !== 0) {
+      showResult("مبلغ باید مضرب ۱٬۰۰۰ تومان باشد؛ مثال: 50000 یا 100000.");
+      return;
+    }
 
-      if (!adminSecret) {
-        showTreasuryResult("adminSecret را وارد کن.");
+    try {
+      const res = await fetch("/admin/update-balance-by-username", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username,
+          amount: amountToman,
+          action,
+          note,
+          adminSecret
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        showResult(data.message || "خطا در تغییر موجودی");
         return;
       }
 
-      showTreasuryResult("در حال دریافت گزارش...");
-      try {
-        const res = await fetch(
-          `/admin/treasury-report?range=${encodeURIComponent(range)}&adminSecret=${encodeURIComponent(adminSecret)}`
-        );
+      const actionLabel = action === "add" ? "افزایش" : "کاهش";
 
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showTreasuryResult(data.message || "خطا در دریافت گزارش خزانه");
-          return;
-        }
-        showTreasuryResult(data);
-      } catch (e) {
-        showTreasuryResult("خطا در ارتباط با سرور");
+      resultBox.textContent = [
+        `عملیات با موفقیت انجام شد.`,
+        `کاربر: ${username}`,
+        `نوع عملیات: ${actionLabel}`,
+        `مبلغ عملیات: ${formatToman(amountToman)}`,
+        `موجودی جدید: ${formatToman(data.newCoinsToman ?? Number(data.newCoins || 0) * 1000)}`,
+      ].join("\n");
+
+      amountInput.value = "";
+    } catch (err) {
+      showResult("خطا در ارتباط با سرور");
+    }
+  });
+
+  getBtn.addEventListener("click", async () => {
+    const username = usernameInput.value.trim();
+    const adminSecret = adminSecretInput.value.trim();
+
+    if (!username || !adminSecret) {
+      showResult("نام کاربری و رمز ادمین را وارد کن.");
+      return;
+    }
+
+    const url =
+      `/admin/user-balance/${encodeURIComponent(username)}?adminSecret=${encodeURIComponent(adminSecret)}&t=${Date.now()}`;
+
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" }
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        showResult(data.message || "خطا در دریافت موجودی");
+        return;
       }
-    });
-  </script>
+
+      showUserBalance(data);
+    } catch (err) {
+      showResult("خطا در ارتباط با سرور");
+    }
+  });
+
+  const treasuryRangeEl = document.getElementById("treasuryRange");
+  const treasuryBtn = document.getElementById("treasuryBtn");
+  const treasuryResultBox = document.getElementById("treasuryResult");
+
+  function showTreasuryResult(data) {
+    treasuryResultBox.textContent =
+      typeof data === "string"
+        ? data
+        : JSON.stringify(data, null, 2);
+  }
+
+  treasuryBtn.addEventListener("click", async () => {
+    const adminSecret = adminSecretInput.value.trim();
+    const range = treasuryRangeEl.value;
+
+    if (!adminSecret) {
+      showTreasuryResult("رمز ادمین را وارد کن.");
+      return;
+    }
+
+    showTreasuryResult("در حال دریافت گزارش...");
+    try {
+      const res = await fetch(
+        `/admin/treasury-report?range=${encodeURIComponent(range)}&adminSecret=${encodeURIComponent(adminSecret)}`
+      );
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        showTreasuryResult(data.message || "خطا در دریافت گزارش خزانه");
+        return;
+      }
+
+      treasuryResultBox.textContent = [
+        `بازه: ${data.range}`,
+        `تعداد تراکنش‌ها: ${data.count}`,
+        `سهم کل خزانه: ${formatToman(data.totalToman ?? Number(data.total || 0) * 1000)}`,
+      ].join("\n");
+    } catch (e) {
+      showTreasuryResult("خطا در ارتباط با سرور");
+    }
+  });
+</script>
+
 </body>
 </html>

@@ -131,8 +131,11 @@ function verifyToken(token) {
 
 function assertValidTier(tier) {
   if (!Number.isFinite(tier)) throw new Error("tier نامعتبر است.");
-  if (![20, 50, 100].includes(tier)) throw new Error("tier باید یکی از 20/50/100 باشد.");
+  if (![20, 50, 100, 200].includes(tier)) {
+    throw new Error("tier باید یکی از 20/50/100/200 باشد.");
+  }
 }
+
 
 function safeJsonError(res, statusCode, message) {
   return res.status(statusCode).json({ success: false, message });
@@ -273,10 +276,32 @@ app.post("/admin/update-balance-by-username", authenticateAdminSecret, async (re
 
   async function attemptOnce() {
     const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
-    const amount = Number(req.body?.amount);
+    const amountToman = Number(req.body?.amount);
+    const action = String(req.body?.action || "").trim();
 
     if (!username) return safeJsonError(res, 400, "username لازم است.");
-    if (!Number.isFinite(amount)) return safeJsonError(res, 400, "amount باید عدد باشد.");
+
+    // پنل ادمین مبلغ را با تومان واقعی می‌فرستد.
+    // مثال: 100000 تومان => 100 واحد داخلی coins
+    if (!Number.isInteger(amountToman) || amountToman <= 0) {
+      return safeJsonError(res, 400, "مبلغ باید یک عدد صحیح و بزرگ‌تر از صفر باشد.");
+    }
+
+    if (amountToman % 1000 !== 0) {
+      return safeJsonError(
+        res,
+        400,
+        "مبلغ باید مضرب ۱٬۰۰۰ تومان باشد؛ مثال: 50000 یا 100000."
+      );
+    }
+
+    if (!["add", "subtract"].includes(action)) {
+      return safeJsonError(res, 400, "نوع عملیات نامعتبر است.");
+    }
+
+    const internalAmount = amountToman / 1000;
+    const amount = action === "subtract" ? -internalAmount : internalAmount;
+
 
     const user = await prisma.user.findUnique({
       where: { username },
@@ -303,7 +328,13 @@ app.post("/admin/update-balance-by-username", authenticateAdminSecret, async (re
       });
     }
 
-    return res.json({ success: true, newCoins: updatedUser.coins });
+    return res.json({
+      success: true,
+      newCoins: updatedUser.coins,
+      newCoinsToman: updatedUser.coins * 1000,
+      message: "موجودی با موفقیت به‌روزرسانی شد.",
+    });
+
   }
 
   for (let i = 1; i <= maxAttempts; i++) {
@@ -348,7 +379,9 @@ app.get("/admin/user-balance/:username", authenticateAdminSecret, async (req, re
       userId: user.id,
       username: user.username,
       coins: user.coins,
+      coinsToman: user.coins * 1000,
       role: user.role,
+
     });
   } catch (error) {
     console.error("[ADMIN BALANCE ERROR]", error);
@@ -382,7 +415,9 @@ app.get("/admin/treasury-report", authenticateAdminSecret, async (req, res) => {
       from: bounds.from,
       to: bounds.to,
       total,
+      totalToman: total * 1000,
       count: items.length,
+
       items: items.slice(0, 200),
     });
   } catch (e) {

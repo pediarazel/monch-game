@@ -184,12 +184,14 @@
 
       <div style="display:flex; gap:10px; width:100%; justify-content:center; flex-wrap:wrap; margin-top:6px;">
         <div style="max-width:260px; width:100%;">
-          <label class="muted" for="tierInput" style="display:block; margin-bottom:6px; text-align:center;">Tier</label>
-          <select id="tierInput">
-            <option value="20">20</option>
-            <option value="50" selected>50</option>
-            <option value="100">100</option>
-          </select>
+<label class="muted" for="tierInput" style="display:block; margin-bottom:6px; text-align:center;">قیمت اتاق</label>
+<select id="tierInput">
+  <option value="20">20,000 تومان</option>
+  <option value="50" selected>50,000 تومان</option>
+  <option value="100">100,000 تومان</option>
+  <option value="200">200,000 تومان</option>
+</select>
+
         </div>
 
         <button id="joinBtn" style="background:#3b82f6;color:#fff; font-weight:700;">
@@ -198,7 +200,8 @@
       </div>
 
       <div class="muted" style="direction:ltr; margin-top:2px;" id="joinMeta">
-        فقط tier ارسال می‌شود، matchId توسط سرور ساخته می‌شود.
+قیمت ورودی از موجودی شما کم می‌شود. جایزهٔ برنده ۹۰٪ مبلغ کل است.
+
       </div>
 
       <div class="muted" id="socketStatus" style="margin-top:6px;"></div>
@@ -336,7 +339,13 @@
 
   // UI refs
   const balanceValueEl = document.getElementById("balanceValue");
-  balanceValueEl.textContent = "0";
+  function formatTomanFromCoins(coins) {
+    const value = Number(coins || 0) * 1000;
+    return `${value.toLocaleString("en-US")} تومان`;
+  }
+
+  balanceValueEl.textContent = formatTomanFromCoins(0);
+
 
   const usernameInput = document.getElementById("username");
   const passwordInput = document.getElementById("password");
@@ -357,7 +366,10 @@
       cache: "no-store"
     });
     const data = await res.json().catch(()=>null);
-    if (data && data.success && data.coins != null) balanceValueEl.textContent = String(data.coins);
+    if (data && data.success && data.coins != null) {
+      balanceValueEl.textContent = formatTomanFromCoins(data.coins);
+    }
+
   }
 
   let balanceIntervalId = null;
@@ -1540,7 +1552,8 @@ setMsg("ریست لوکال (کنترل اصلی با سرور است).");
     stopLobbyCountdown();
 
     clearToken();
-    balanceValueEl.textContent = "0";
+    balanceValueEl.textContent = formatTomanFromCoins(0);
+
     setAuthResult("خروج شد. دوباره ورود کن.");
     serverMsgEl.textContent = "";
     joinStatusEl.textContent = "";
@@ -1689,7 +1702,11 @@ leaveGameBtn.addEventListener("click", () => {
     const tier = Number(tierInput.value);
 
     if(!token){ setAuthResult("ابتدا ورود کن."); return; }
-    if(!Number.isFinite(tier) || ![20,50,100].includes(tier)){ setAuthResult("tier نامعتبر است."); return; }
+    if (!Number.isFinite(tier) || ![20, 50, 100, 200].includes(tier)) {
+      setAuthResult("قیمت اتاق نامعتبر است.");
+      return;
+    }
+
 
     joinInProgress = true;
     currentMatchId = null;
