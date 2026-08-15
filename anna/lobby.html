@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
-<>
+<head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Monopoly Online - لابی</title>
@@ -95,466 +95,17 @@ input, select{
   font-size:13px;
   font-weight:normal;
 }
-/* ========== آموزش تصویری بازی ========== */
-#helpBtn{
-  width:100%;
-  margin-top:10px;
-  background:#222;
-  color:#fff;
-  border:1px solid #444;
-}
-
-#gameHelpModal{
-  position:fixed;
-  inset:0;
-  z-index:5000;
-  display:none;
-  align-items:center;
-  justify-content:center;
-  padding:16px;
-  background:rgba(0,0,0,0.84);
-}
-
-#gameHelpModal.show{
-  display:flex;
-}
-
-.help-card{
-  position:relative;
-  width:min(94vw,410px);
-  min-height:500px;
-  overflow:hidden;
-  border:1px solid #3b3b3b;
-  border-radius:20px;
-  background:linear-gradient(160deg,#171717,#090909);
-  box-shadow:0 18px 60px rgba(0,0,0,.65);
-  padding:22px 16px 16px;
-  text-align:center;
-}
-
-.help-close{
-  position:absolute;
-  top:10px;
-  left:10px;
-  width:38px;
-  height:38px;
-  min-width:38px;
-  padding:0;
-  border-radius:50%;
-  background:#2a2a2a;
-  color:#fff;
-  font-size:22px;
-  line-height:1;
-}
-
-.help-title{
-  font-size:20px;
-  font-weight:900;
-  color:#fff;
-  margin:4px 42px 8px;
-}
-
-.help-dots{
-  direction:ltr;
-  display:flex;
-  justify-content:center;
-  gap:7px;
-  margin:12px 0 18px;
-}
-
-.help-dot{
-  width:8px;
-  height:8px;
-  border-radius:50%;
-  background:#555;
-  transition:.2s;
-}
-
-.help-dot.active{
-  width:24px;
-  border-radius:8px;
-  background:#3b82f6;
-}
-
-.help-visual{
-  height:230px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  margin:0 auto 14px;
-  border:1px solid #303030;
-  border-radius:18px;
-  background:radial-gradient(circle at top,#242424,#111);
-  overflow:hidden;
-}
-
-.help-text{
-  min-height:66px;
-  padding:0 10px;
-  color:#e5e7eb;
-  font-size:16px;
-  font-weight:700;
-  line-height:2;
-}
-
-.help-actions{
-  display:flex;
-  direction:rtl;
-  gap:10px;
-  margin-top:14px;
-}
-
-.help-actions button{
-  flex:1;
-  min-height:48px;
-  font-size:15px;
-}
-
-#helpPrevBtn{
-  background:#292929;
-  color:#fff;
-}
-
-#helpNextBtn{
-  background:#3b82f6;
-  color:#fff;
-}
-
-/* تصویر مرحله ۱: صفحه بازی */
-.help-board{
-  display:grid;
-  grid-template-columns:repeat(4,42px);
-  grid-template-rows:repeat(4,42px);
-  gap:4px;
-  padding:10px;
-  transform:rotate(45deg);
-}
-
-.help-cell{
-  border:1px solid #555;
-  background:#222;
-  border-radius:7px;
-}
-
-.help-cell.red{background:#ef4444;}
-.help-cell.green{background:#22c55e;}
-.help-cell.yellow{background:#eab308;}
-.help-cell.blue{background:#3b82f6;}
-
-/* تصویر مرحله ۲: تاس و مهره */
-.help-turn{
-  display:flex;
-  align-items:center;
-  gap:20px;
-  direction:ltr;
-}
-
-.help-dice{
-  display:flex;
-  width:75px;
-  height:75px;
-  align-items:center;
-  justify-content:center;
-  border:3px solid #fff;
-  border-radius:15px;
-  background:#1d4ed8;
-  color:#fff;
-  font-size:42px;
-  box-shadow:0 0 25px rgba(59,130,246,.6);
-}
-
-.help-piece{
-  width:54px;
-  height:54px;
-  border:5px solid #fff;
-  border-radius:50%;
-  background:#ef4444;
-  box-shadow:0 0 0 8px rgba(239,68,68,.2),0 0 28px #ef4444;
-  animation:helpBlink 1s infinite alternate;
-}
-
-@keyframes helpBlink{
-  from{transform:scale(.9);opacity:.55;}
-  to{transform:scale(1.1);opacity:1;}
-}
-
-/* تصویر مرحله ۳: تاس ۶ و خروج مهره */
-.help-six{
-  position:relative;
-  width:240px;
-  height:155px;
-}
-
-.help-home{
-  position:absolute;
-  right:8px;
-  top:46px;
-  width:70px;
-  height:70px;
-  border:3px solid #ef4444;
-  border-radius:14px;
-  background:rgba(239,68,68,.18);
-}
-
-.help-home::after{
-  content:"●";
-  position:absolute;
-  inset:0;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  color:#ef4444;
-  font-size:48px;
-}
-
-.help-arrow{
-  position:absolute;
-  right:84px;
-  top:68px;
-  color:#fff;
-  font-size:42px;
-  direction:ltr;
-}
-
-.help-six-dice{
-  position:absolute;
-  left:4px;
-  top:39px;
-  width:70px;
-  height:70px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  border-radius:14px;
-  background:#fff;
-  color:#111;
-  font-size:38px;
-  font-weight:900;
-}
-
-/* تصویر مرحله ۴: زدن مهره */
-.help-hit{
-  position:relative;
-  width:245px;
-  height:145px;
-}
-
-.help-hit .red-piece,
-.help-hit .blue-piece{
-  position:absolute;
-  width:55px;
-  height:55px;
-  border:4px solid #fff;
-  border-radius:50%;
-}
-
-.help-hit .red-piece{
-  right:25px;
-  top:44px;
-  background:#ef4444;
-}
-
-.help-hit .blue-piece{
-  left:25px;
-  top:44px;
-  background:#3b82f6;
-  opacity:.55;
-}
-
-.help-hit .boom{
-  position:absolute;
-  inset:42px 0 auto;
-  text-align:center;
-  font-size:55px;
-}
-
-/* تصویر مرحله ۵: برد */
-.help-win{
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  gap:10px;
-}
-
-.help-trophy{
-  font-size:90px;
-  filter:drop-shadow(0 0 18px rgba(234,179,8,.65));
-}
-
-.help-finish-pieces{
-  display:flex;
-  gap:8px;
-}
-
-.help-finish-pieces i{
-  width:25px;
-  height:25px;
-  border:2px solid #fff;
-  border-radius:50%;
-  background:#22c55e;
-}
-
-/* تصویر مرحله ۶: زمان و اتصال */
-.help-time{
-  display:flex;
-  align-items:center;
-  gap:18px;
-  font-size:70px;
-}
-
-.help-time span:last-child{
-  font-size:62px;
-}
-.finish-pieces{
-  display:flex;
-  gap:8px;
-}
-
-.finish-pieces i{
-  width:25px;
-  height:25px;
-  border:2px solid #fff;
-  border-radius:50%;
-  background:#22c55e;
-}
-/* تصویر مرحله لابی */
-.help-lobby{
-  width:245px;
-  display:flex;
-  flex-direction:column;
-  gap:11px;
-  direction:rtl;
-}
-
-.help-lobby-balance{
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:7px;
-  padding:9px;
-  border:1px solid #424242;
-  border-radius:11px;
-  background:#191919;
-  color:#facc15;
-  font-size:15px;
-  font-weight:900;
-}
-
-.help-lobby-select{
-  padding:11px;
-  border:1px solid #505050;
-  border-radius:11px;
-  background:#252525;
-  color:#f1f5f9;
-  font-size:14px;
-}
-
-.help-lobby-join{
-  padding:11px;
-  border-radius:11px;
-  background:#2563eb;
-  color:#fff;
-  font-size:15px;
-  font-weight:900;
-  box-shadow:0 6px 18px rgba(37,99,235,.35);
-}
-
-.help-lobby-wait{
-  color:#d1d5db;
-  font-size:14px;
-  font-weight:700;
-}
-
-.help-lobby-wait strong{
-  color:#fbbf24;
-  font-size:20px;
-}
-/* تصویر مرحله قطع اینترنت و ربات */
-.help-disconnect{
-  width:240px;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  gap:12px;
-}
-
-.help-wifi{
-  font-size:64px;
-  opacity:.95;
-}
-
-.help-disconnect-text{
-  padding:8px 14px;
-  border:1px solid #ef4444;
-  border-radius:10px;
-  background:rgba(239,68,68,.16);
-  color:#fca5a5;
-  font-weight:900;
-}
-
-.help-disconnect-pieces{
-  display:flex;
-  gap:9px;
-}
-
-.help-disconnect-pieces .red-piece,
-.help-disconnect-pieces .blue-piece,
-.help-disconnect-pieces .green-piece,
-.help-disconnect-pieces .yellow-piece{
-  width:30px;
-  height:30px;
-  border:3px solid #fff;
-  border-radius:50%;
-}
-
-.help-disconnect-pieces .red-piece{background:#ef4444;}
-.help-disconnect-pieces .blue-piece{background:#3b82f6;}
-.help-disconnect-pieces .green-piece{background:#22c55e;}
-.help-disconnect-pieces .yellow-piece{background:#eab308;}
-
-.help-disconnect-note{
-  color:#d1d5db;
-  font-size:13px;
-  font-weight:700;
-}
-
-/* تصویر مرحله پایان بازی */
-.help-end{
-  width:230px;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  gap:13px;
-}
-
-.help-end .help-trophy{
-  font-size:80px;
-}
-
-.help-end-btn{
-  width:100%;
-  padding:12px;
-  border-radius:12px;
-  background:#ef4444;
-  color:#fff;
-  font-size:15px;
-  font-weight:900;
-}
-
-.help-end-coins{
-  color:#facc15;
-  font-size:15px;
-  font-weight:900;
-}
 
     </style>
-
+</head>
 <body>
-    <!-- باکس نمایش آیدی و دکمه کپی -->
-    <div id="userInfoBar" style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; padding:8px 12px; border-radius:8px; margin:10px 15px;">
-      <span style="font-size:13px; color:#94a3b8;">آیدی: <span id="usernameText" style="color:#fff; font-weight:700;">در حال اتصال...</span></span>
-      <button id="copyBtn" type="button" style="background:transparent; border:1px solid #475569; padding:4px 8px; border-radius:6px; color:#fff; font-size:16px; cursor:pointer; line-height:1;">⧉</button>
-    </div>
+  <!-- باکس نمایش آیدی و دکمه کپی -->
+  <div id="userInfoBar" style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; padding:8px 12px; border-radius:8px; margin:0 auto 12px auto; max-width:430px;">
+    <span style="font-size:13px; color:#94a3b8;">آیدی: <span id="usernameText" style="color:#fff; font-weight:700;">در حال اتصال...</span></span>
+    <button id="copyBtn" type="button" style="background:transparent; border:1px solid #475569; padding:4px 10px; border-radius:6px; color:#fff; font-size:16px; cursor:pointer; line-height:1;">⧉</button>
+  </div>
+
+  <div class="card">
 
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
@@ -595,7 +146,6 @@ input, select{
 >
   خروج از صف
 </button>
-<button id="helpBtn" type="button">❔ آموزش تصویری بازی</button>
 
       </div>
 
@@ -614,37 +164,6 @@ input, select{
     ⏳ ۶۰ ثانیه
     <small>زمان باقی‌مانده برای تکمیل بازیکنان</small>
   </div>
-<!-- ========== پنجره آموزش تصویری ========== -->
-<div id="gameHelpModal" aria-hidden="true">
-  <div class="help-card" role="dialog" aria-modal="true" aria-label="آموزش بازی منچ">
-    <button id="helpCloseBtn" class="help-close" type="button" aria-label="بستن آموزش">×</button>
-
-    <div class="help-title">آموزش سریع منچ</div>
-
-<div class="help-dots" aria-hidden="true">
-  <span class="help-dot active"></span>
-  <span class="help-dot"></span>
-  <span class="help-dot"></span>
-  <span class="help-dot"></span>
-  <span class="help-dot"></span>
-  <span class="help-dot"></span>
-  <span class="help-dot"></span>
-    <span class="help-dot"></span>
-  <span class="help-dot"></span>
-
-</div>
-
-
-    <div id="helpVisual" class="help-visual"></div>
-    <div id="helpText" class="help-text"></div>
-
-    <div class="help-actions">
-      <button id="helpPrevBtn" type="button">قبلی</button>
-      <button id="helpNextBtn" type="button">بعدی</button>
-    </div>
-  </div>
-</div>
-<!-- ========== پایان پنجره آموزش تصویری ========== -->
 
   <pre id="debug" aria-label="debug" style="display:none;"></pre>
 
@@ -786,6 +305,46 @@ function isJwtExpired(token) {
         } catch (e) { console.error("Balance update error:", e); }
       }
 
+      // --- Username & Copy Logic ---
+      const usernameTextEl = document.getElementById('usernameText');
+      const copyBtn = document.getElementById('copyBtn');
+      let currentUsername = "";
+
+      async function updateUsernameDisplay() {
+        if (!usernameTextEl) return;
+        const token = getToken();
+        if (!token || isJwtExpired(token)) {
+          usernameTextEl.textContent = "مهمان";
+          return;
+        }
+        try {
+          const res = await fetch(api("/api/me/balance"), {
+            method: "GET", headers: { "Authorization": "Bearer " + token }, cache: "no-store"
+          });
+          let data;
+          try { data = await res.json(); } catch { data = null; }
+          if (res.ok && data && data.username) {
+            currentUsername = String(data.username);
+            usernameTextEl.textContent = currentUsername;
+            copyBtn.onclick = () => {
+              navigator.clipboard.writeText(currentUsername).then(() => {
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = "✅";
+                setTimeout(() => copyBtn.textContent = originalText, 1500);
+              }).catch(err => {
+                console.error('خطا در کپی:', err);
+              });
+            };
+          } else {
+            usernameTextEl.textContent = "نام نامشخص";
+          }
+        } catch (e) {
+          console.error("Error loading username:", e);
+          usernameTextEl.textContent = "خطا در دریافت نام";
+        }
+      }
+
+
       // --- Lobby Logic ---
       let currentMatchId = null;
       let lobbyCountdownInterval = null;
@@ -812,7 +371,7 @@ function isJwtExpired(token) {
         socket.on("connect", () => {
           socketStatusEl.textContent = `✅ متصل به سرور (${socket.id})`;
           updateBalance();
-             updateUsernameDisplay();
+                    updateUsernameDisplay();
 
           socket.emit("game:restoreSession", {}, (resp) => {
              if (resp?.success && resp?.restored && resp?.matchId) {
@@ -976,6 +535,26 @@ function stopLobbyCountdown() {
           serverMsgEl.textContent = "قیمت اتاق نامعتبر است."; return;
         }
 
+        // --- بررسی موجودی قبل از ورود ---
+        try {
+          const balRes = await fetch(api("/api/me/balance"), {
+            method: "GET", headers: { "Authorization": "Bearer " + token }, cache: "no-store"
+          });
+          let balData;
+          try { balData = await balRes.json(); } catch { balData = null; }
+          const coins = balRes.ok && balData && balData.coins != null ? Number(balData.coins) : 0;
+          if (coins < tier) {
+            serverMsgEl.textContent = "❌ موجودی شما برای ورود به این اتاق کافی نیست.";
+            return;
+          }
+        } catch (e) {
+          serverMsgEl.textContent = "❌ خطا در بررسی موجودی. لطفاً دوباره تلاش کنید.";
+          return;
+        }
+        // --- پایان بررسی موجودی ---
+
+        joinInProgress = true;
+
         joinInProgress = true;
         joinBtn.disabled = true;
         serverMsgEl.textContent = ""; joinStatusEl.textContent = ""; peopleNewsEl.textContent = "";
@@ -1107,238 +686,13 @@ tierInput.disabled = true;
       } else {
         startBalanceAutoRefresh();
         connectSocketForLobby();
-           updateUsernameDisplay();
-
-      }
-      // ========== آموزش تصویری بازی ==========
-      const helpBtn = document.getElementById("helpBtn");
-      const gameHelpModal = document.getElementById("gameHelpModal");
-      const helpCloseBtn = document.getElementById("helpCloseBtn");
-      const helpVisual = document.getElementById("helpVisual");
-      const helpText = document.getElementById("helpText");
-      const helpPrevBtn = document.getElementById("helpPrevBtn");
-      const helpNextBtn = document.getElementById("helpNextBtn");
-      const helpDots = Array.from(document.querySelectorAll(".help-dot"));
-
-      let helpStep = 0;
-
-      const helpSlides = [
-                {
-          text: "مبلغ ورود را انتخاب کنید و روی «ورود به بازی» بزنید.<br>پس از تکمیل بازیکنان، بازی خودکار شروع می‌شود.",
-          visual: `
-            <div class="help-lobby">
-              <div class="help-lobby-balance">🪙 موجودی شما: ۱۵۰٬۰۰۰ تومان</div>
-              <div class="help-lobby-select">انتخاب مبلغ: ۵۰٬۰۰۰ تومان ▾</div>
-              <div class="help-lobby-join">ورود به بازی</div>
-              <div class="help-lobby-wait">👤 👤 &nbsp; ⏳ <strong>۳۰</strong> ثانیه</div>
-            </div>
-          `
-        },
-
-        {
-          text: "هر بازیکن یک رنگ دارد.<br>بازی با ۲ تا ۴ نفر شروع می‌شود.",
-          visual: `
-            <div class="help-board">
-              <span class="help-cell red"></span><span class="help-cell"></span><span class="help-cell"></span><span class="help-cell green"></span>
-              <span class="help-cell"></span><span class="help-cell"></span><span class="help-cell"></span><span class="help-cell"></span>
-              <span class="help-cell"></span><span class="help-cell"></span><span class="help-cell"></span><span class="help-cell"></span>
-              <span class="help-cell yellow"></span><span class="help-cell"></span><span class="help-cell"></span><span class="help-cell blue"></span>
-            </div>
-          `
-        },
-        {
-          text: "وقتی نوبت شماست، تاس را انتخاب کنید.<br>بعد روی مهرهٔ قابل‌حرکت بزنید.",
-          visual: `
-            <div class="help-turn">
-              <div class="help-dice">🎲</div>
-              <div class="help-piece"></div>
-            </div>
-          `
-        },
-        {
-          text: "برای بیرون‌آوردن مهره از خانه،<br>باید عدد ۶ بیاورید.",
-          visual: `
-            <div class="help-six">
-              <div class="help-home"></div>
-              <div class="help-arrow">←</div>
-              <div class="help-six-dice">۶</div>
-            </div>
-          `
-        },
-        {
-          text: "اگر روی مهرهٔ حریف فرود بیایید،<br>مهرهٔ او به خانه برمی‌گردد.",
-          visual: `
-            <div class="help-hit">
-              <div class="red-piece"></div>
-              <div class="blue-piece"></div>
-              <div class="boom">💥</div>
-            </div>
-          `
-        },
-        {
-          text: "هرکس زودتر همهٔ مهره‌های خود را<br>به پایان برساند، برنده است.",
-          visual: `
-            <div class="help-win">
-              <div class="help-trophy">🏆</div>
-              <div class="finish-pieces">
-                <i></i><i></i><i></i><i></i>
-              </div>
-            </div>
-          `
-        },
-        {
-          text: "قبل از تمام‌شدن زمان حرکت کنید.<br>در صورت قطع اینترنت، با اتصال دوباره برگردید.",
-          visual: `
-            <div class="help-time">
-              <span>⏳</span>
-              <span>📶</span>
-            </div>
-          `
-        },
-        {
-          text: "اگر اینترنت شما قطع شود، نگران نباشید!<br>بازی ادامه دارد؛ ربات تا برگشت شما بازی را پیش می‌برد.",
-          visual: `
-            <div class="help-disconnect">
-              <div class="help-wifi">📶</div>
-              <div class="help-disconnect-text">اینترنت قطع شد</div>
-              <div class="help-disconnect-pieces">
-                <span class="red-piece"></span>
-                <span class="blue-piece"></span>
-                <span class="green-piece"></span>
-                <span class="yellow-piece"></span>
-              </div>
-              <div class="help-disconnect-note">ربات موقتاً جای شما بازی می‌کند</div>
-            </div>
-          `
-        },
-        {
-          text: "بازی تمام شد؟ روی دکمهٔ «خروج از بازی» بزنید.<br>جایزه به برنده می‌رسد و به لابی برمی‌گردید.",
-          visual: `
-            <div class="help-end">
-              <div class="help-trophy">🏆</div>
-              <div class="help-end-btn">خروج از بازی / صف</div>
-              <div class="help-end-coins">🪙 جایزه به برنده رسید</div>
-            </div>
-          `
-        }
-      ];
-
-
-      function renderHelpSlide() {
-        const slide = helpSlides[helpStep];
-        helpVisual.innerHTML = slide.visual;
-        helpText.innerHTML = slide.text;
-
-        helpDots.forEach((dot, index) => {
-          dot.classList.toggle("active", index === helpStep);
-        });
-
-        helpPrevBtn.disabled = helpStep === 0;
-        helpNextBtn.textContent = helpStep === helpSlides.length - 1
-          ? "متوجه شدم ✓"
-          : "بعدی";
       }
 
-      function openGameHelp() {
-        helpStep = 0;
-        renderHelpSlide();
-        gameHelpModal.classList.add("show");
-        gameHelpModal.setAttribute("aria-hidden", "false");
-      }
-
-      function closeGameHelp() {
-        gameHelpModal.classList.remove("show");
-        gameHelpModal.setAttribute("aria-hidden", "true");
-      }
-
-      helpBtn.addEventListener("click", openGameHelp);
-      helpCloseBtn.addEventListener("click", closeGameHelp);
-
-      helpPrevBtn.addEventListener("click", () => {
-        if (helpStep <= 0) return;
-        helpStep -= 1;
-        renderHelpSlide();
-      });
-
-      helpNextBtn.addEventListener("click", () => {
-        if (helpStep >= helpSlides.length - 1) {
-          closeGameHelp();
-          return;
-        }
-        helpStep += 1;
-        renderHelpSlide();
-      });
-
-      gameHelpModal.addEventListener("click", event => {
-        if (event.target === gameHelpModal) {
-          closeGameHelp();
-        }
-      });
-      // ========== پایان آموزش تصویری بازی ==========
-
-
-
-          // --- Username Copy Logic ---
-          const usernameTextEl = document.getElementById('usernameText');
-          const copyBtn = document.getElementById('copyBtn');
-          const userInfoBarEl = document.getElementById('userInfoBar');
-
-            // --- Username Copy Logic ---
-            const usernameTextEl = document.getElementById('usernameText');
-            const copyBtn = document.getElementById('copyBtn');
-
-            async function updateUsernameDisplay() {
-              if (!usernameTextEl) return;
-              try {
-                const token = getToken();
-                if (!token) { usernameTextEl.textContent = "مهمان"; return; }
-                  const res = await fetch(api("/api/me/balance"), {
-
-                  method: "GET",
-                  headers: { "Authorization": "Bearer " + token },
-                  cache: "no-store"
-                });
-                let data;
-                try { data = await res.json(); } catch { data = null; }
-                  if (res.ok && data && data.username) {
-                    const uname = data.username;
-                    usernameTextEl.textContent = uname;
-                    copyBtn.onclick = () => {
-                      navigator.clipboard.writeText(String(uname)).then(() => {
-                        const originalText = copyBtn.textContent;
-                        copyBtn.textContent = "✅";
-                        setTimeout(() => copyBtn.textContent = originalText, 1500);
-                      }).catch(err => {
-                        console.error('خطا در کپی:', err);
-                      });
-                    };
-                  } else {
-                    // اگر پاسخ نامی نداشت، آیدی سوکت را نشان بده
-                    if (socket?.id) {
-                      usernameTextEl.textContent = socket.id;
-                    } else {
-                      usernameTextEl.textContent = "در حال اتصال...";
-                    }
-                  }
-
-              } catch (e) {
-                console.error("Error loading username:", e);
-                if (socket?.id) usernameTextEl.textContent = socket.id;
-              }
-            }
-
-
-          // فراخوانی اولیه
-          updateUsernameDisplay();
-
-          // اتصال به منطق سوکت موجود (در صورت وجود تابع connect)
-          // ما در اینجا تابع را تعریف کردیم، حالا باید در توابع اصلی فراخوانی شود.
-          // اگر در کد اصلی تو تابعی برای اتصال وجود دارد، باید آن را در آنجا هم صدا بزنی.
-          // فعلاً برای تست، چک کن که آیا در جایی از کد، `socket.on("connect")` وجود دارد؟
+      // نمایش نام کاربری هنگام بارگذاری صفحه
+      updateUsernameDisplay();
 
     })(); // End of IIFE
+
   </script>
 </body>
 </html>
-
-
