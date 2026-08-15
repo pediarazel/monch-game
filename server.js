@@ -1253,6 +1253,11 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
       match.game.rolled = true;
       match.game.turnMoved = false;
 
+      // این مقدار تا مصرف هر دو تاس باقی می‌ماند.
+      // اگر هر دو تاس ۶ باشند، ربات پس از حرکت‌ها یک تاس‌ریزی جایزه دارد.
+      match.game.isDoubleSixRoll = d1 === 6 && d2 === 6;
+
+
       console.log("[DISCONNECTED_BOT_ROLL]", {
         matchId: match.matchId,
         turnId: expectedTurnId,
@@ -1408,30 +1413,56 @@ nextTurn(match);
       broadcastState(match);
     }
 
-    // هر دو تاس مصرف شده‌اند؛ نوبت به بازیکن بعدی منتقل می‌شود.
+    // هر دو تاس مصرف شده‌اند.
     if (
       match.game &&
       !match.game.winner &&
       match.turnId === expectedTurnId
     ) {
+      const wasDoubleSix = match.game.isDoubleSixRoll === true;
+
       match.game.rolled = false;
       match.game.pendingDice = [];
       match.game.dice1 = 0;
       match.game.dice2 = 0;
       match.game.dice = 0;
+      match.game.turnMoved = false;
+      match.game.isDoubleSixRoll = false;
+      match.game.transitioning = false;
+
+      // جفت ۶: نوبت عوض نمی‌شود و ربات دوباره تاس می‌ریزد.
+      if (wasDoubleSix) {
+        console.log("[DISCONNECTED_BOT_DOUBLE_SIX_BONUS]", {
+          matchId: match.matchId,
+          turnId: expectedTurnId,
+          userId: expectedUserId,
+          color: currentColor,
+        });
+
+        broadcastState(match);
+
+        // مکث کوتاه تا بازیکنان نتیجه حرکت جفت ۶ را ببینند.
+        await new Promise(resolve => setTimeout(resolve, 1200));
+
+        // همان نوبت و همان رنگ، تاس جایزه را اجرا می‌کند.
+        return runDisconnectedPlayerBot(
+          match,
+          expectedTurnId,
+          expectedUserId
+        );
+      }
+
+      console.log("[DISCONNECTED_BOT_TURN_FINISHED]", {
+        matchId: match.matchId,
+        turnId: expectedTurnId,
+        userId: expectedUserId,
+        color: currentColor,
+      });
+
       match.game.turnMoved = true;
-
-console.log("[DISCONNECTED_BOT_TURN_FINISHED]", {
-  matchId: match.matchId,
-  turnId: expectedTurnId,
-  userId: expectedUserId,
-  color: currentColor,
-});
-
-match.game.transitioning = false;
-nextTurn(match);
-
+      nextTurn(match);
     }
+
   } catch (error) {
     console.error("[DISCONNECTED_BOT_ERROR]", {
       matchId: match?.matchId,
@@ -1739,33 +1770,35 @@ async function onLobbyPlayerJoined(tier) {
       status: "SEARCHING_3",
     });
 
-    setLobbyDeadline(lobby, 60);
+setLobbyDeadline(lobby, 30);
 
-    emitLobbyStatus(lobby, {
-      phase: 2,
-      searchingFor: 3,
-      deadlineAt: lobby.lobbyDeadlineAt,
-      deadlineMs: 60000,
-      message: "در حال جستجوی نفر سوم... (۶۰ ثانیه)",
-      status: "SEARCHING_3",
-    });
+emitLobbyStatus(lobby, {
+  phase: 2,
+  searchingFor: 3,
+  deadlineAt: lobby.lobbyDeadlineAt,
+  deadlineMs: 30000,
+  message: "در حال جستجوی نفر سوم... (۳۰ ثانیه)",
+  status: "SEARCHING_3",
+});
+
     return;
   }
 
-  if (count === 3) {
-    lobby.lobbyPhase = 3;
-    setLobbyDeadline(lobby, 60);
+if (count === 3) {
+  lobby.lobbyPhase = 3;
+  setLobbyDeadline(lobby, 30);
 
-    emitLobbyStatus(lobby, {
-      phase: 3,
-      searchingFor: 4,
-      deadlineAt: lobby.lobbyDeadlineAt,
-      deadlineMs: 60000,
-      message: "در حال جستجوی نفر چهارم...",
-      status: "SEARCHING_4",
-    });
-    return;
-  }
+  emitLobbyStatus(lobby, {
+    phase: 3,
+    searchingFor: 4,
+    deadlineAt: lobby.lobbyDeadlineAt,
+    deadlineMs: 30000,
+    message: "در حال جستجوی نفر چهارم... (۳۰ ثانیه)",
+    status: "SEARCHING_4",
+  });
+  return;
+}
+
 
   if (count >= 4) {
     lobby.lobbyPhase = 4;
@@ -2153,7 +2186,8 @@ io.on("connection", (socket) => {
           tier,
           filledColors: 2,
           status: "SEARCHING_3",
-          startAfterMs: 60000,
+startAfterMs: 30000,
+
         });
       }
 
@@ -2165,7 +2199,8 @@ io.on("connection", (socket) => {
           tier,
           filledColors: 3,
           status: "SEARCHING_4",
-          startAfterMs: 60000,
+startAfterMs: 30000,
+
         });
       }
 
@@ -2442,23 +2477,33 @@ io.on("connection", (socket) => {
       const uid = socket.data.uid;
       if (!uid) return;
 
-      // جستجو در مسابقات برای پیدا کردن اتاقی که بازیکن در آن حضور دارد
+      // پیدا کردن مسابقه فعال بازیکن.
+      // String برای جلوگیری از تفاوت نوع userId (عدد/رشته) استفاده شده است.
       for (const match of matches.values()) {
-        if (match.status === "playing" && match.playerColors) {
-          if (Object.values(match.playerColors).includes(uid)) {
-            
-            // پیدا کردن رنگ بازیکن
-            const playerColor = Object.keys(match.playerColors).find(color => match.playerColors[color] === uid);
-            
-            // ارسال به همه بازیکنان در همان اتاق
-            io.to(`match:${match.matchId}`).emit("player:emoji_sent", {
-              playerColor: playerColor,
-              emoji: emoji
-            });
-            break;
-          }
-        }
+        if (match.status !== "playing" || !match.playerColors) continue;
+
+        const playerColor = Object.keys(match.playerColors).find(
+          (color) => String(match.playerColors[color]) === String(uid)
+        );
+
+        if (!playerColor) continue;
+
+        // به همه اعضای اتاق، از جمله خود ارسال‌کننده، فرستاده می‌شود.
+        io.to(`match:${match.matchId}`).emit("player:emoji_sent", {
+          playerColor,
+          emoji: String(emoji),
+        });
+
+        console.log("[EMOJI_SENT]", {
+          matchId: match.matchId,
+          userId: uid,
+          playerColor,
+          emoji: String(emoji),
+        });
+
+        break;
       }
+
     } catch (e) {
       console.error("[EMOJI_SEND_ERROR]", e);
     }

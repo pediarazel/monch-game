@@ -493,7 +493,8 @@ function drawPieces() {
     مهره‌های رنگ نوبت‌دار هر نیم‌ثانیه کم‌رنگ/پررنگ می‌شوند.
     رنگ اصلی مهره تغییر نمی‌کند.
   */
-  const blinkIsBright = Math.floor(Date.now() / 500) % 2 === 0;
+const blinkIsBright = Math.floor(Date.now() / 900) % 2 === 0;
+
   const normalRadius = Math.min(CELL * 0.35, CELL * 0.50 - 2);
 
   for (const piece of gameState.pieces) {
@@ -534,7 +535,8 @@ const opacity = isMyTurnPiece
         yellow: { x: 2 * CELL,  y: 9.58 * CELL },
       };
       const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-      const blinkIsVisible = Math.floor(Date.now() / 500) % 2 === 0;
+const blinkIsVisible = Math.floor(Date.now() / 900) % 2 === 0;
+
       for (const color of colorOrder) {
         const username = String(gameState.playerNames?.[color] || "").trim();
         const titlePos = yardTitles[color];
@@ -935,7 +937,7 @@ setInterval(() => {
   if (gameState && !gameState.winner) {
     draw();
   }
-}, 500);
+}, 150);
 
     // اتصال خودکار Socket در صورت وجود توکن
     if (getToken()) {
