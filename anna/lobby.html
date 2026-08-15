@@ -548,53 +548,13 @@ input, select{
 }
 
     </style>
-    <style>
-      /* استایل باکس نام کاربری و آیکن کپی */
-      .username-container {
-        display: flex;
-        align-items: center;
-        gap: 8px; /* فاصله بین نام کاربری و آیکن */
-        margin-right: 15px; /* فاصله از سمت راست صفحه */
-        padding: 6px 10px;
-        background-color: #2a2a2a; /* رنگ پس‌زمینه */
-        border-radius: 8px;
-        font-size: 14px;
-        font-weight: 500;
-        color: #e0e0e0;
-        cursor: pointer; /* نشانگر موس به شکل دست */
-        transition: background-color 0.2s ease;
-      }
-      .username-container:hover {
-        background-color: #3a3a3a; /* تغییر رنگ پس‌زمینه در هاور */
-      }
-      .username-container .copy-icon {
-        font-size: 16px; /* اندازه آیکن */
-        color: #aaaaaa;
-      }
-      .username-container .copy-feedback {
-        position: absolute; /* برای نمایش موقت */
-        background-color: rgba(0,0,0,0.7);
-        color: white;
-        padding: 5px 10px;
-        border-radius: 5px;
-        font-size: 12px;
-        opacity: 0;
-        transition: opacity 0.3s ease-in-out;
-        white-space: nowrap;
-      }
-    </style>
-</head>
 
 <body>
-<body>
-  <!-- باکس نمایش نام کاربری و آیکن کپی -->
-  <div id="usernameDisplay" class="username-container" hidden>
-    <span id="usernameText"></span>
-    <span class="copy-icon" id="copyUsernameIcon">⧉</span>
-    <div id="copyFeedback" class="copy-feedback">نام کاربری کپی شد!</div>
-  </div>
-
-  <div class="card">
+    <!-- باکس نمایش آیدی و دکمه کپی -->
+    <div id="userInfoBar" style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; padding:8px 12px; border-radius:8px; margin:10px 15px;">
+      <span style="font-size:13px; color:#94a3b8;">آیدی: <span id="usernameText" style="color:#fff; font-weight:700;">در حال اتصال...</span></span>
+      <button id="copyBtn" type="button" style="background:transparent; border:1px solid #475569; padding:4px 8px; border-radius:6px; color:#fff; font-size:16px; cursor:pointer; line-height:1;">⧉</button>
+    </div>
 
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
@@ -852,6 +812,8 @@ function isJwtExpired(token) {
         socket.on("connect", () => {
           socketStatusEl.textContent = `✅ متصل به سرور (${socket.id})`;
           updateBalance();
+             updateUsernameDisplay();
+
           socket.emit("game:restoreSession", {}, (resp) => {
              if (resp?.success && resp?.restored && resp?.matchId) {
                 currentMatchId = String(resp.matchId);
@@ -1145,6 +1107,8 @@ tierInput.disabled = true;
       } else {
         startBalanceAutoRefresh();
         connectSocketForLobby();
+           updateUsernameDisplay();
+
       }
       // ========== آموزش تصویری بازی ==========
       const helpBtn = document.getElementById("helpBtn");
@@ -1312,85 +1276,65 @@ tierInput.disabled = true;
       });
       // ========== پایان آموزش تصویری بازی ==========
 
-      // --- Username and Copy Functionality ---
-      const usernameDisplayEl = document.getElementById('usernameDisplay');
-      const usernameTextEl = document.getElementById('usernameText');
-      const copyUsernameIconEl = document.getElementById('copyUsernameIcon');
-      const copyFeedbackEl = document.getElementById('copyFeedback');
-      let username = null; // برای نگهداری نام کاربری
 
-      // تابعی برای دریافت نام کاربری از توکن (نیاز به backend دارد)
-      // فعلا یک نام کاربری نمونه تنظیم می‌کنیم.
-      // در آینده این بخش با دریافت نام کاربری از سمت سرور تکمیل خواهد شد.
-      function decodeJwtUsername(token) {
-        if (!token) return null;
-        try {
-          const parts = token.split(".");
-          if (parts.length === 3) {
-            const payloadBase64 = parts[1];
-            const payload = JSON.parse(atob(payloadBase64));
-            // نام کاربری معمولا در فیلدهایی مثل 'sub', 'name', 'username', 'user_id' است
-            return payload.sub || payload.name || payload.username || payload.user_id || null;
-          }
-        } catch (e) {
-          console.error("Failed to decode JWT payload:", e);
-        }
-        return null;
-      }
 
-      // نمایش نام کاربری و فعال کردن آیکن کپی
-      function displayUsername() {
-        const token = getToken();
-        if (!token) return;
+          // --- Username Copy Logic ---
+          const usernameTextEl = document.getElementById('usernameText');
+          const copyBtn = document.getElementById('copyBtn');
+          const userInfoBarEl = document.getElementById('userInfoBar');
 
-        // اگر نام کاربری از قبل استخراج نشده، تلاش برای استخراج آن
-        if (!username) {
-          username = decodeJwtUsername(token);
-        }
+            // --- Username Copy Logic ---
+            const usernameTextEl = document.getElementById('usernameText');
+            const copyBtn = document.getElementById('copyBtn');
 
-        if (username) {
-          usernameTextEl.textContent = username;
-          usernameDisplayEl.hidden = false; // نمایش باکس نام کاربری
+            async function updateUsernameDisplay() {
+              if (!usernameTextEl) return;
+              try {
+                const token = getToken();
+                if (!token) { usernameTextEl.textContent = "مهمان"; return; }
+                  const res = await fetch(api("/api/me/balance"), {
 
-          // اضافه کردن Event Listener برای آیکن کپی
-          copyUsernameIconEl.onclick = () => {
-            navigator.clipboard.writeText(username).then(() => {
-              // نمایش پیام موقت "کپی شد"
-              copyFeedbackEl.style.opacity = '1';
-              setTimeout(() => {
-                copyFeedbackEl.style.opacity = '0';
-              }, 1500); // نمایش برای ۱.۵ ثانیه
-            }).catch(err => {
-              console.error('Failed to copy username: ', err);
-              copyFeedbackEl.textContent = 'خطا در کپی!';
-              copyFeedbackEl.style.opacity = '1';
-              setTimeout(() => {
-                copyFeedbackEl.style.opacity = '0';
-                copyFeedbackEl.textContent = 'نام کاربری کپی شد!'; // بازگرداندن متن پیش‌فرض
-              }, 1500);
-            });
-          };
-        } else {
-          usernameDisplayEl.hidden = true; // اگر نام کاربری نبود، باکس را مخفی کن
-        }
-      }
+                  method: "GET",
+                  headers: { "Authorization": "Bearer " + token },
+                  cache: "no-store"
+                });
+                let data;
+                try { data = await res.json(); } catch { data = null; }
+                  if (res.ok && data && data.username) {
+                    const uname = data.username;
+                    usernameTextEl.textContent = uname;
+                    copyBtn.onclick = () => {
+                      navigator.clipboard.writeText(String(uname)).then(() => {
+                        const originalText = copyBtn.textContent;
+                        copyBtn.textContent = "✅";
+                        setTimeout(() => copyBtn.textContent = originalText, 1500);
+                      }).catch(err => {
+                        console.error('خطا در کپی:', err);
+                      });
+                    };
+                  } else {
+                    // اگر پاسخ نامی نداشت، آیدی سوکت را نشان بده
+                    if (socket?.id) {
+                      usernameTextEl.textContent = socket.id;
+                    } else {
+                      usernameTextEl.textContent = "در حال اتصال...";
+                    }
+                  }
 
-      // فراخوانی تابع نمایش نام کاربری هنگام بارگذاری لابی
-      // این باید بعد از دریافت توکن و اتصال socket انجام شود
-      // بهترین جا برای فراخوانی این تابع، داخل event listener 'connect' سوکت است
-      // یا پس از اولین فراخوانی updateBalance که توکن را چک می‌کند
+              } catch (e) {
+                console.error("Error loading username:", e);
+                if (socket?.id) usernameTextEl.textContent = socket.id;
+              }
+            }
 
-      //--- اصلاح: فراخوانی displayUsername در بخش connect سوکت ---
-      //--- و همچنین هنگام بارگذاری اولیه اگر توکن معتبر بود ---
 
-      // در تابع connectSocketForLobby:
-      // socket.on("connect", () => { ... });
-      //   --> داخل این بخش، بعد از updateBalance()، displayUsername() را فراخوانی کنید
+          // فراخوانی اولیه
+          updateUsernameDisplay();
 
-      // در بخش Initial Load:
-      // if (!token || isJwtExpired(token)) { ... } else { ... }
-      //   --> در قسمت else، بعد از connectSocketForLobby();، displayUsername(); را فراخوانی کنید
-
+          // اتصال به منطق سوکت موجود (در صورت وجود تابع connect)
+          // ما در اینجا تابع را تعریف کردیم، حالا باید در توابع اصلی فراخوانی شود.
+          // اگر در کد اصلی تو تابعی برای اتصال وجود دارد، باید آن را در آنجا هم صدا بزنی.
+          // فعلاً برای تست، چک کن که آیا در جایی از کد، `socket.on("connect")` وجود دارد؟
 
     })(); // End of IIFE
   </script>
