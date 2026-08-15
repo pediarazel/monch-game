@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
-<head>
+<>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Monopoly Online - لابی</title>
@@ -469,10 +469,132 @@ input, select{
   color:#fbbf24;
   font-size:20px;
 }
+/* تصویر مرحله قطع اینترنت و ربات */
+.help-disconnect{
+  width:240px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:12px;
+}
+
+.help-wifi{
+  font-size:64px;
+  opacity:.95;
+}
+
+.help-disconnect-text{
+  padding:8px 14px;
+  border:1px solid #ef4444;
+  border-radius:10px;
+  background:rgba(239,68,68,.16);
+  color:#fca5a5;
+  font-weight:900;
+}
+
+.help-disconnect-pieces{
+  display:flex;
+  gap:9px;
+}
+
+.help-disconnect-pieces .red-piece,
+.help-disconnect-pieces .blue-piece,
+.help-disconnect-pieces .green-piece,
+.help-disconnect-pieces .yellow-piece{
+  width:30px;
+  height:30px;
+  border:3px solid #fff;
+  border-radius:50%;
+}
+
+.help-disconnect-pieces .red-piece{background:#ef4444;}
+.help-disconnect-pieces .blue-piece{background:#3b82f6;}
+.help-disconnect-pieces .green-piece{background:#22c55e;}
+.help-disconnect-pieces .yellow-piece{background:#eab308;}
+
+.help-disconnect-note{
+  color:#d1d5db;
+  font-size:13px;
+  font-weight:700;
+}
+
+/* تصویر مرحله پایان بازی */
+.help-end{
+  width:230px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:13px;
+}
+
+.help-end .help-trophy{
+  font-size:80px;
+}
+
+.help-end-btn{
+  width:100%;
+  padding:12px;
+  border-radius:12px;
+  background:#ef4444;
+  color:#fff;
+  font-size:15px;
+  font-weight:900;
+}
+
+.help-end-coins{
+  color:#facc15;
+  font-size:15px;
+  font-weight:900;
+}
 
     </style>
+    <style>
+      /* استایل باکس نام کاربری و آیکن کپی */
+      .username-container {
+        display: flex;
+        align-items: center;
+        gap: 8px; /* فاصله بین نام کاربری و آیکن */
+        margin-right: 15px; /* فاصله از سمت راست صفحه */
+        padding: 6px 10px;
+        background-color: #2a2a2a; /* رنگ پس‌زمینه */
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        color: #e0e0e0;
+        cursor: pointer; /* نشانگر موس به شکل دست */
+        transition: background-color 0.2s ease;
+      }
+      .username-container:hover {
+        background-color: #3a3a3a; /* تغییر رنگ پس‌زمینه در هاور */
+      }
+      .username-container .copy-icon {
+        font-size: 16px; /* اندازه آیکن */
+        color: #aaaaaa;
+      }
+      .username-container .copy-feedback {
+        position: absolute; /* برای نمایش موقت */
+        background-color: rgba(0,0,0,0.7);
+        color: white;
+        padding: 5px 10px;
+        border-radius: 5px;
+        font-size: 12px;
+        opacity: 0;
+        transition: opacity 0.3s ease-in-out;
+        white-space: nowrap;
+      }
+    </style>
 </head>
+
 <body>
+<body>
+  <!-- باکس نمایش نام کاربری و آیکن کپی -->
+  <div id="usernameDisplay" class="username-container" hidden>
+    <span id="usernameText"></span>
+    <span class="copy-icon" id="copyUsernameIcon">⧉</span>
+    <div id="copyFeedback" class="copy-feedback">نام کاربری کپی شد!</div>
+  </div>
+
+  <div class="card">
 
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
@@ -547,6 +669,9 @@ input, select{
   <span class="help-dot"></span>
   <span class="help-dot"></span>
   <span class="help-dot"></span>
+    <span class="help-dot"></span>
+  <span class="help-dot"></span>
+
 </div>
 
 
@@ -1105,8 +1230,35 @@ tierInput.disabled = true;
               <span>📶</span>
             </div>
           `
+        },
+        {
+          text: "اگر اینترنت شما قطع شود، نگران نباشید!<br>بازی ادامه دارد؛ ربات تا برگشت شما بازی را پیش می‌برد.",
+          visual: `
+            <div class="help-disconnect">
+              <div class="help-wifi">📶</div>
+              <div class="help-disconnect-text">اینترنت قطع شد</div>
+              <div class="help-disconnect-pieces">
+                <span class="red-piece"></span>
+                <span class="blue-piece"></span>
+                <span class="green-piece"></span>
+                <span class="yellow-piece"></span>
+              </div>
+              <div class="help-disconnect-note">ربات موقتاً جای شما بازی می‌کند</div>
+            </div>
+          `
+        },
+        {
+          text: "بازی تمام شد؟ روی دکمهٔ «خروج از بازی» بزنید.<br>جایزه به برنده می‌رسد و به لابی برمی‌گردید.",
+          visual: `
+            <div class="help-end">
+              <div class="help-trophy">🏆</div>
+              <div class="help-end-btn">خروج از بازی / صف</div>
+              <div class="help-end-coins">🪙 جایزه به برنده رسید</div>
+            </div>
+          `
         }
       ];
+
 
       function renderHelpSlide() {
         const slide = helpSlides[helpStep];
@@ -1160,7 +1312,89 @@ tierInput.disabled = true;
       });
       // ========== پایان آموزش تصویری بازی ==========
 
+      // --- Username and Copy Functionality ---
+      const usernameDisplayEl = document.getElementById('usernameDisplay');
+      const usernameTextEl = document.getElementById('usernameText');
+      const copyUsernameIconEl = document.getElementById('copyUsernameIcon');
+      const copyFeedbackEl = document.getElementById('copyFeedback');
+      let username = null; // برای نگهداری نام کاربری
+
+      // تابعی برای دریافت نام کاربری از توکن (نیاز به backend دارد)
+      // فعلا یک نام کاربری نمونه تنظیم می‌کنیم.
+      // در آینده این بخش با دریافت نام کاربری از سمت سرور تکمیل خواهد شد.
+      function decodeJwtUsername(token) {
+        if (!token) return null;
+        try {
+          const parts = token.split(".");
+          if (parts.length === 3) {
+            const payloadBase64 = parts[1];
+            const payload = JSON.parse(atob(payloadBase64));
+            // نام کاربری معمولا در فیلدهایی مثل 'sub', 'name', 'username', 'user_id' است
+            return payload.sub || payload.name || payload.username || payload.user_id || null;
+          }
+        } catch (e) {
+          console.error("Failed to decode JWT payload:", e);
+        }
+        return null;
+      }
+
+      // نمایش نام کاربری و فعال کردن آیکن کپی
+      function displayUsername() {
+        const token = getToken();
+        if (!token) return;
+
+        // اگر نام کاربری از قبل استخراج نشده، تلاش برای استخراج آن
+        if (!username) {
+          username = decodeJwtUsername(token);
+        }
+
+        if (username) {
+          usernameTextEl.textContent = username;
+          usernameDisplayEl.hidden = false; // نمایش باکس نام کاربری
+
+          // اضافه کردن Event Listener برای آیکن کپی
+          copyUsernameIconEl.onclick = () => {
+            navigator.clipboard.writeText(username).then(() => {
+              // نمایش پیام موقت "کپی شد"
+              copyFeedbackEl.style.opacity = '1';
+              setTimeout(() => {
+                copyFeedbackEl.style.opacity = '0';
+              }, 1500); // نمایش برای ۱.۵ ثانیه
+            }).catch(err => {
+              console.error('Failed to copy username: ', err);
+              copyFeedbackEl.textContent = 'خطا در کپی!';
+              copyFeedbackEl.style.opacity = '1';
+              setTimeout(() => {
+                copyFeedbackEl.style.opacity = '0';
+                copyFeedbackEl.textContent = 'نام کاربری کپی شد!'; // بازگرداندن متن پیش‌فرض
+              }, 1500);
+            });
+          };
+        } else {
+          usernameDisplayEl.hidden = true; // اگر نام کاربری نبود، باکس را مخفی کن
+        }
+      }
+
+      // فراخوانی تابع نمایش نام کاربری هنگام بارگذاری لابی
+      // این باید بعد از دریافت توکن و اتصال socket انجام شود
+      // بهترین جا برای فراخوانی این تابع، داخل event listener 'connect' سوکت است
+      // یا پس از اولین فراخوانی updateBalance که توکن را چک می‌کند
+
+      //--- اصلاح: فراخوانی displayUsername در بخش connect سوکت ---
+      //--- و همچنین هنگام بارگذاری اولیه اگر توکن معتبر بود ---
+
+      // در تابع connectSocketForLobby:
+      // socket.on("connect", () => { ... });
+      //   --> داخل این بخش، بعد از updateBalance()، displayUsername() را فراخوانی کنید
+
+      // در بخش Initial Load:
+      // if (!token || isJwtExpired(token)) { ... } else { ... }
+      //   --> در قسمت else، بعد از connectSocketForLobby();، displayUsername(); را فراخوانی کنید
+
+
     })(); // End of IIFE
   </script>
 </body>
 </html>
+
+

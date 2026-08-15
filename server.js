@@ -2129,12 +2129,16 @@ io.on("connection", (socket) => {
           });
         }
 
-        // نام واقعی کاربر فقط یک‌بار، هنگام ورود به لابی خوانده می‌شود.
+        // نام کاربری و موجودی کاربر را قبل از ورود به لابی می‌گیریم.
         const lobbyUser = await prisma.user.findUnique({
           where: { id: uid },
-          select: { username: true },
+          select: {
+            username: true,
+            coins: true,
+          },
         });
 
+        // اگر کاربر پیدا نشد یا نام کاربری نداشت، وارد لابی نشود.
         if (!lobbyUser?.username) {
           return callback?.({
             success: false,
@@ -2142,12 +2146,26 @@ io.on("connection", (socket) => {
           });
         }
 
+        // تبدیل موجودی و مبلغ ورود به عدد مطمئن
+        const userCoins = Number(lobbyUser.coins);
+        const entryAmount = Number(tier);
+
+        // بررسی موجودی قبل از اضافه‌شدن به صف
+        if (!Number.isFinite(userCoins) || userCoins < entryAmount) {
+          return callback?.({
+            success: false,
+            message: "موجودی شما برای این مبلغ ورودی کافی نیست.",
+          });
+        }
+
+        // ذخیره نام کاربر در لابی
         if (!lobby.playerNamesByUserId) {
           lobby.playerNamesByUserId = {};
         }
 
         lobby.playerNamesByUserId[String(uid)] = lobbyUser.username;
         lobby.playerUidsInOrder.push(uid);
+
       }
 
 
