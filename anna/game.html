@@ -937,7 +937,8 @@ setInterval(() => {
   if (gameState && !gameState.winner) {
     draw();
   }
-}, 150);
+}, 300);
+
 
     // اتصال خودکار Socket در صورت وجود توکن
     if (getToken()) {
@@ -965,7 +966,8 @@ function drawPlayerEmoji(playerColor, nameX, nameY) {
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.font = '24px serif';
-    ctx.fillText(emojiData.emoji, nameX + 60, nameY - 20);
+    ctx.fillText(emojiData.emoji, nameX, nameY - 40);
+
     ctx.restore();
 }
 
