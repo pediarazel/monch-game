@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Balance Panel</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0f172a;
+      color: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: #111827;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+    h1 { margin-top: 0; font-size: 22px; text-align: center; }
+    p { color: #cbd5e1; font-size: 14px; text-align: center; margin-bottom: 20px; }
+    label { display: block; margin: 12px 0 6px; font-size: 14px; }
+    input, select, button {
+      width: 100%;
+      box-sizing: border-box;
+      border: none;
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 15px;
+    }
+    input, select { background: #1f2937; color: #fff; outline: none; }
+    button { margin-top: 14px; background: #22c55e; color: #fff; cursor: pointer; font-weight: bold; }
+    button:hover { background: #16a34a; }
+    .secondary { background: #3b82f6; margin-top: 10px; }
+    .secondary:hover { background: #2563eb; }
+    .result {
+      margin-top: 18px;
+      background: #0b1220;
+      padding: 12px;
+      border-radius: 10px;
+      min-height: 52px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 14px;
+      color: #e2e8f0;
+    }
+    .section-title{
+      margin-top: 18px;
+      font-size: 16px;
+      font-weight: 800;
+      text-align: center;
+      color: #e5e7eb;
+    }
+    .divider{ height: 1px; background: #22314f; margin: 14px 0; border-radius: 999px; }
+    .small-note{ color:#cbd5e1; font-size:12px; text-align:center; margin-top:-6px; margin-bottom:10px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>پنل مدیریت موجودی</h1>
+    <p>افزایش/کاهش و مشاهده موجودی کاربر (با username)</p>
+
+    <label for="username">نام کاربری</label>
+    <input id="username" type="text" placeholder="مثلا ali" />
+
+    <label for="amount">مقدار</label>
+    <input id="amount" type="number" placeholder="مثلا 1000" />
+
+    <label for="action">عملیات</label>
+    <select id="action">
+      <option value="add">افزایش موجودی</option>
+      <option value="subtract">کاهش موجودی</option>
+    </select>
+
+    <label for="note">توضیح (اختیاری)</label>
+    <input id="note" type="text" placeholder="مثلا admin adjustment" />
+
+    <label for="adminSecret">رمز ادمین</label>
+    <input id="adminSecret" type="password" placeholder="رمز ادمین" />
+
+    <button id="updateBtn">ثبت تغییر موجودی</button>
+    <button id="getBtn" class="secondary">دریافت موجودی</button>
+
+    <div class="result" id="result">نتیجه اینجا نمایش داده می‌شود</div>
+
+    <div class="divider"></div>
+    <div class="section-title">گزارش خزانه (Treasury Report)</div>
+    <div class="small-note">range را انتخاب کن و گزارش را بگیر.</div>
+
+    <label for="treasuryRange">بازه زمانی</label>
+    <select id="treasuryRange">
+      <option value="day">day</option>
+      <option value="week" selected>week</option>
+      <option value="month">month</option>
+    </select>
+
+    <button id="treasuryBtn" class="secondary" style="margin-top:10px;">گرفتن گزارش خزانه</button>
+    <div class="result" id="treasuryResult">گزارش اینجا نمایش داده می‌شود</div>
+  </div>
+
+  <script>
+    const usernameInput = document.getElementById("username");
+    const amountInput = document.getElementById("amount");
+    const actionInput = document.getElementById("action");
+    const noteInput = document.getElementById("note");
+    const adminSecretInput = document.getElementById("adminSecret");
+
+    const resultBox = document.getElementById("result");
+    const updateBtn = document.getElementById("updateBtn");
+    const getBtn = document.getElementById("getBtn");
+
+    function showResult(data) {
+      resultBox.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+    }
+
+    updateBtn.addEventListener("click", async () => {
+      const username = usernameInput.value.trim();
+      const amountRaw = amountInput.value.trim();
+      const action = actionInput.value; // add | subtract
+      const note = (noteInput.value || "").trim();
+      const adminSecret = adminSecretInput.value.trim();
+
+      if (!username || !amountRaw || !adminSecret) {
+        showResult("لطفا username، amount و رمز ادمین را کامل کن");
+        return;
+      }
+
+      let amountValue = Number(amountRaw);
+      if (!Number.isFinite(amountValue) || amountValue <= 0) {
+        showResult("amount باید یک عدد معتبر و بزرگ‌تر از صفر باشد.");
+        return;
+      }
+
+      // ✅ کلید اصلی:
+      // بعضی سرورها برای subtract انتظار دارند amount منفی باشد.
+      // بنابراین add = مثبت، subtract = منفی
+      if (action === "subtract") {
+        amountValue = -amountValue;
+      }
+
+      try {
+        const res = await fetch("/admin/update-balance-by-username", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username,
+            amount: amountValue, // add مثبت / subtract منفی
+            action,              // هم action را هم می‌فرستیم
+            note,
+            adminSecret
+          })
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showResult(data.message || "خطا در تغییر موجودی");
+          return;
+        }
+        showResult(data);
+      } catch (err) {
+        showResult("خطا در ارتباط با سرور");
+      }
+    });
+
+    getBtn.addEventListener("click", async () => {
+      const username = usernameInput.value.trim();
+      const adminSecret = adminSecretInput.value.trim();
+
+      if (!username || !adminSecret) {
+        showResult("username و رمز ادمین را وارد کن");
+        return;
+      }
+
+      const url =
+        `/admin/user-balance/${encodeURIComponent(username)}?adminSecret=${encodeURIComponent(adminSecret)}&t=${Date.now()}`;
+
+      try {
+        const res = await fetch(url, {
+          method: "GET",
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" }
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showResult(data.message || "خطا در دریافت موجودی");
+          return;
+        }
+        showResult(data);
+      } catch (err) {
+        showResult("خطا در ارتباط با سرور");
+      }
+    });
+
+    // Treasury report
+    const treasuryRangeEl = document.getElementById("treasuryRange");
+    const treasuryBtn = document.getElementById("treasuryBtn");
+    const treasuryResultBox = document.getElementById("treasuryResult");
+
+    function showTreasuryResult(data){
+      treasuryResultBox.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+    }
+
+    treasuryBtn.addEventListener("click", async () => {
+      const adminSecret = adminSecretInput.value.trim();
+      const range = treasuryRangeEl.value;
+
+      if (!adminSecret) {
+        showTreasuryResult("adminSecret را وارد کن.");
+        return;
+      }
+
+      showTreasuryResult("در حال دریافت گزارش...");
+      try {
+        const res = await fetch(
+          `/admin/treasury-report?range=${encodeURIComponent(range)}&adminSecret=${encodeURIComponent(adminSecret)}`
+        );
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showTreasuryResult(data.message || "خطا در دریافت گزارش خزانه");
+          return;
+        }
+        showTreasuryResult(data);
+      } catch (e) {
+        showTreasuryResult("خطا در ارتباط با سرور");
+      }
+    });
+  </script>
+</body>
+</html>

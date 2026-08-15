@@ -93,22 +93,8 @@
     #joinStatus{font-size:12px;text-align:center;color:#888;min-height:16px;}
     #peopleNews{font-size:12px;text-align:center;color:#888;min-height:16px;}
     #serverMsg{font-size:12px;text-align:center;color:#888;min-height:16px;}
-    #emojiMenu .emoji-item {
-    font-size: 24px;
-    margin: 5px;
-    cursor: pointer;
-    padding: 3px;
-    display: inline-block;
-}
-#emojiMenu .emoji-item:hover {
-    transform: scale(1.3);
-    background-color: #444;
-    border-radius: 5px;
-}
-
   </style>
 </head>
-
 <body>
   <div id="app">
     <canvas id="board" width="600" height="600"></canvas>
@@ -128,18 +114,6 @@
         <div style="display:flex; flex-direction:column; gap:8px; align-items:center; min-width:260px;">
           <button id="rollBtn" disabled>ریختن تاس</button>
           <button id="leaveGameBtn" style="background:#ef4444;color:#fff;">خروج از بازی/صف</button>
-<button id="emojiBtn" style="background:#666;color:#fff; margin-left: 10px; padding: 5px 10px; border: none; border-radius: 5px; cursor: pointer; font-size: 1.2em;">😊</button>
-
-<div id="emojiMenu" style="display: none; position: absolute; background-color: #333; border: 1px solid #555; border-radius: 8px; padding: 10px; z-index: 1000; box-shadow: 0 4px 8px rgba(0,0,0,0.3);">
-    <span class="emoji-item" data-emoji="😂">😂</span>
-    <span class="emoji-item" data-emoji="👍">👍</span>
-    <span class="emoji-item" data-emoji="🤔">🤔</span>
-    <span class="emoji-item" data-emoji="😠">😠</span>
-    <span class="emoji-item" data-emoji="🥳">🥳</span>
-    <span class="emoji-item" data-emoji="👀">👀</span>
-    <span class="emoji-item" data-emoji="👋">👋</span>
-    <span class="emoji-item" data-emoji="😭">😭</span>
-</div>
 
         </div>
       </div>
@@ -557,8 +531,6 @@ ctx.fillStyle = isMyCurrentTurn ? "#ffffff" : "rgba(255,255,255,0.78)";
 
         const shownName = username.length > 14 ? `${username.slice(0, 14)}…` : username;
         ctx.fillText(`👤 ${shownName}`, titlePos.x, titlePos.y);
-                drawPlayerEmoji(color, titlePos.x, titlePos.y);
-
         ctx.restore();
       }
     }
@@ -941,71 +913,6 @@ setInterval(() => {
     if (getToken()) {
       connectSocketOnce();
     }
-    // ========== بخش اموجی ==========
-const emojiBtn = document.getElementById('emojiBtn');
-const emojiMenu = document.getElementById('emojiMenu');
-const emojiItems = document.querySelectorAll('.emoji-item');
-
-// ذخیره اموجی فعال برای هر بازیکن
-const activeEmojis = {};
-
-// نمایش اموجی روی Canvas
-function drawPlayerEmoji(playerColor, nameX, nameY) {
-    const emojiData = activeEmojis[playerColor];
-    if (!emojiData) return;
-    const elapsed = Date.now() - emojiData.sentAt;
-    if (elapsed > 5000) { delete activeEmojis[playerColor]; return; }
-    const fadeDuration = 1000;
-    let alpha = 1;
-    if (elapsed > (5000 - fadeDuration)) {
-        alpha = Math.max(0, 1 - (elapsed - (5000 - fadeDuration)) / fadeDuration);
-    }
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.font = '24px serif';
-    ctx.fillText(emojiData.emoji, nameX + 60, nameY - 20);
-    ctx.restore();
-}
-
-
-// باز و بسته کردن منو
-emojiBtn.addEventListener('click', (event) => {
-    event.stopPropagation();
-    if (emojiMenu.style.display === 'block') {
-        emojiMenu.style.display = 'none';
-    } else {
-        const rect = emojiBtn.getBoundingClientRect();
-        emojiMenu.style.left = `${rect.left + window.scrollX}px`;
-        emojiMenu.style.top = `${rect.bottom + window.scrollY + 5}px`;
-        emojiMenu.style.display = 'block';
-    }
-});
-
-// انتخاب اموجی و ارسال به سرور
-emojiItems.forEach(item => {
-    item.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const emoji = item.getAttribute('data-emoji');
-        socket.emit('player:emoji_sent', { emoji: emoji });
-        emojiMenu.style.display = 'none';
-    });
-});
-
-// بستن منو با کلیک بیرون
-document.addEventListener('click', (event) => {
-    if (emojiMenu.style.display === 'block' && !emojiMenu.contains(event.target) && !emojiBtn.contains(event.target)) {
-        emojiMenu.style.display = 'none';
-    }
-});
-
-// دریافت اموجی از سرور
-socket.on('player:emoji_sent', ({ playerColor, emoji }) => {
-    if (playerColor && emoji) {
-        activeEmojis[playerColor] = { emoji: emoji, sentAt: Date.now() };
-    }
-});
-// ========== پایان بخش اموجی ==========
-
   </script>
 </body>
 </html>

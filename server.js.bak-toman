@@ -42,8 +42,7 @@ const TURN_MS = 30000;
 const matchTimers = new Map(); // matchId -> { timeout }
 const connectedUsers = new Map(); // userId -> socketId
 
-// userId -> { matchId, disconnectedAt, isBotPlaying }
-
+// userId -> { timer, matchId, disconnectedAt }
 const disconnectionTimers = new Map();
 
 
@@ -1088,18 +1087,22 @@ function resetMatchGame(match) {
 }
 
 function broadcastState(match) {
-  if (!match.game) return;
-
   console.log("[BROADCAST_STATE]", {
-    matchId: match.matchId,
-    currentTurn: match.game.currentTurn,
-    activeColor: colorOrder[match.game.currentTurn],
-    dice1: match.game.dice1,
-    dice2: match.game.dice2,
-    dice: match.game.dice,
-    pendingDice: match.game.pendingDice,
-    rolled: match.game.rolled,
-  });
+  matchId: match.matchId,
+  currentTurn: match.game.currentTurn,
+  activeColor: colorOrder[match.game.currentTurn],
+  dice1: match.game.dice1,
+  dice2: match.game.dice2,
+  dice: match.game.dice,
+  pendingDice: match.game.pendingDice,
+  rolled: match.game.rolled,
+});
+  console.log("[BROADCAST_STATE]", {
+  matchId: match.matchId,
+  currentTurn: match.game.currentTurn,
+  dice: match.game.dice,
+});
+  if (!match.game) return;
 
   const activeColor = colorOrder[match.game.currentTurn];
 
@@ -1113,9 +1116,9 @@ function broadcastState(match) {
     playerColors: match.playerColors,
     playerNames: match.playerNames || {},
     activeColor,
+
   });
 }
-
 // ارسال وضعیت بازی فقط برای یک سوکت؛ مناسب بازگشت خودکار بازیکن
 function emitStateToSocket(socket, match) {
   if (!socket || !match || !match.game) return;
@@ -1925,12 +1928,11 @@ io.on("connection", (socket) => {
 
   connectedUsers.set(String(uid), socket.id);
 
-  // سیستم Reconnect: اگر این کاربر قبلاً در حالت قطع اتصال بوده،
-  // وضعیت موقت کنترل خودکار او حذف می‌شود.
+  // سیستم Reconnect: بررسی وجود تایمر فعال قطع اتصال برای این کاربر
   if (disconnectionTimers.has(uid)) {
-    const { matchId } = disconnectionTimers.get(uid);
+    const { timer, matchId } = disconnectionTimers.get(uid);
+    clearTimeout(timer);
     disconnectionTimers.delete(uid);
-
 
     const match = matches.get(matchId);
     if (match) {
@@ -1985,12 +1987,12 @@ io.on("connection", (socket) => {
           });
         }
 
-        // اگر این کاربر در وضعیت قطع اتصال ثبت شده باشد،
-        // با بازگشت او کنترل خودکار حذف می‌شود.
+        // اگر تایمر ۹۰ ثانیه‌ای قطع اتصال وجود دارد، لغو شود.
         if (disconnectionTimers.has(uid)) {
+          const { timer } = disconnectionTimers.get(uid);
+          clearTimeout(timer);
           disconnectionTimers.delete(uid);
         }
-
 
         // اگر ربات موقت برای این بازیکن زمان‌بندی شده، متوقف شود.
         if (
@@ -2287,11 +2289,11 @@ io.on("connection", (socket) => {
           });
         }
 
-        // اگر برای این کاربر وضعیت قطع اتصال قبلی باقی مانده باشد، حذف شود.
+        // اگر برای این کاربر تایمر قطع اتصال قبلی باقی مانده باشد، حذف شود.
         if (disconnectionTimers.has(uid)) {
+          clearTimeout(disconnectionTimers.get(uid).timer);
           disconnectionTimers.delete(uid);
         }
-
 
         // خروج دستی در بازیِ در حال اجرا = فورفیت فوری؛ بدون انتظار ۹۰ ثانیه.
         await handleForfeit(match, uid, "manual_leave");
@@ -2389,9 +2391,7 @@ io.on("connection", (socket) => {
         }
 
 
-        // ۲. مدیریت قطع اتصال در حین مسابقه
-        // بازیکن بازنده نمی‌شود؛ تا زمان بازگشت، کنترل نوبت‌هایش با منطق خودکار ادامه پیدا می‌کند.
-
+        // ۲. مدیریت قطع اتصال در حین مسابقه (شروع تایمر ۹۰ ثانیه‌ای)
         for (const match of matches.values()) {
           if (match.status === "playing" && match.playerColors) {
             const hasPlayer = Object.values(match.playerColors).includes(uid);
@@ -2401,22 +2401,26 @@ io.on("connection", (socket) => {
               // اطلاع به روم مسابقه
               io.to(`match:${match.matchId}`).emit("player:disconnected", { userId: uid });
 
-                // اگر از قبل برای این کاربر وضعیت قطع اتصال ثبت شده بود، پاکسازی شود.
-                if (disconnectionTimers.has(uid)) {
-                  disconnectionTimers.delete(uid);
-                }
+              // پاکسازی تایمر قبلی در صورت وجود همزمان
+              if (disconnectionTimers.has(uid)) {
+                clearTimeout(disconnectionTimers.get(uid).timer);
+              }
 
+              // تایمر ۹۰ ثانیه‌ای (۹۰۰۰۰ میلی‌ثانیه)
+              const timer = setTimeout(() => {
+                handleForfeit(match, uid);
+                disconnectionTimers.delete(uid);
+              }, 90000);
 
-                // ثبت زمان دیسکانکت بدون تایمر حذف (فقط برای آمار یا لاگ)
-                disconnectionTimers.set(uid, {
-                  matchId: match.matchId,
-                  disconnectedAt: Date.now(),
-                  isBotPlaying: true
-                });
+              disconnectionTimers.set(uid, {
+                timer,
+                matchId: match.matchId,
+                disconnectedAt: Date.now(),
+              });
 
-                // فعال کردن بلافاصله ربات برای این مسابقه
-                scheduleDisconnectedPlayerBot(match);
-
+              // اگر همین حالا نوبت بازیکن قطع‌شده باشد، ربات بدون
+              // منتظرماندن تا پایان تایمر نوبت وارد عمل می‌شود.
+              scheduleDisconnectedPlayerBot(match);
               break; // چون فقط در یک مسابقه می‌توان حضور داشت
             }
           }
@@ -2433,37 +2437,6 @@ io.on("connection", (socket) => {
 
 
   // ---------------- Game: roll ----------------
-    // ---------------- Game: Emoji ----------------
-  socket.on("player:emoji_sent", (payload) => {
-    try {
-      const emoji = payload?.emoji;
-      if (!emoji) return;
-
-      const uid = socket.data.uid;
-      if (!uid) return;
-
-      // جستجو در مسابقات برای پیدا کردن اتاقی که بازیکن در آن حضور دارد
-      for (const match of matches.values()) {
-        if (match.status === "playing" && match.playerColors) {
-          if (Object.values(match.playerColors).includes(uid)) {
-            
-            // پیدا کردن رنگ بازیکن
-            const playerColor = Object.keys(match.playerColors).find(color => match.playerColors[color] === uid);
-            
-            // ارسال به همه بازیکنان در همان اتاق
-            io.to(`match:${match.matchId}`).emit("player:emoji_sent", {
-              playerColor: playerColor,
-              emoji: emoji
-            });
-            break;
-          }
-        }
-      }
-    } catch (e) {
-      console.error("[EMOJI_SEND_ERROR]", e);
-    }
-  });
-
   socket.on("game:roll", (payload, callback) => {
     let m;
     try {
