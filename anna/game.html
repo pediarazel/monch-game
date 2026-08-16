@@ -956,20 +956,43 @@ const activeEmojis = {};
 function drawPlayerEmoji(playerColor, nameX, nameY) {
     const emojiData = activeEmojis[playerColor];
     if (!emojiData) return;
+
     const elapsed = Date.now() - emojiData.sentAt;
-    if (elapsed > 5000) { delete activeEmojis[playerColor]; return; }
+
+    if (elapsed > 5000) {
+        delete activeEmojis[playerColor];
+        return;
+    }
+
     const fadeDuration = 1000;
     let alpha = 1;
+
     if (elapsed > (5000 - fadeDuration)) {
-        alpha = Math.max(0, 1 - (elapsed - (5000 - fadeDuration)) / fadeDuration);
+        alpha = Math.max(
+            0,
+            1 - (elapsed - (5000 - fadeDuration)) / fadeDuration
+        );
     }
+
+    // جایگاه‌های red و blue بالای صفحه هستند.
+    // برای آن‌ها ایموجی پایین نام قرار می‌گیرد.
+    const isTopPlayer =
+        playerColor === "red" ||
+        playerColor === "blue";
+
+    const emojiY = isTopPlayer
+        ? nameY + 42
+        : nameY - 42;
+
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.font = '24px serif';
-    ctx.fillText(emojiData.emoji, nameX, nameY - 40);
-
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "30px serif";
+    ctx.fillText(emojiData.emoji, nameX, emojiY);
     ctx.restore();
 }
+
 
 
 // باز و بسته کردن منو
