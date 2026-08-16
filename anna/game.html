@@ -1005,9 +1005,16 @@ document.addEventListener('click', (event) => {
 // دریافت اموجی از سرور
 socket.on('player:emoji_sent', ({ playerColor, emoji }) => {
     if (playerColor && emoji) {
-        activeEmojis[playerColor] = { emoji: emoji, sentAt: Date.now() };
+        activeEmojis[playerColor] = {
+            emoji: String(emoji),
+            sentAt: Date.now()
+        };
+
+        // Canvas باید فوراً دوباره رسم شود تا ایموجی نمایش داده شود.
+        draw();
     }
 });
+
 // ========== پایان بخش اموجی ==========
 
   </script>

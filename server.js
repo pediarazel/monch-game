@@ -2492,8 +2492,9 @@ startAfterMs: 30000,
       const emoji = payload?.emoji;
       if (!emoji) return;
 
-const uid = socket.user?.userId ?? socket.data?.uid;
-if (!uid) return;
+      const uid = socket.user?.userId ?? socket.data?.uid;
+      if (!uid) return;
+
 
 
       // پیدا کردن مسابقه فعال بازیکن.
