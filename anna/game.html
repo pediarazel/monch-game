@@ -955,45 +955,9 @@ const activeEmojis = {};
 // نمایش اموجی روی Canvas
 function drawPlayerEmoji(playerColor, nameX, nameY) {
     const emojiData = activeEmojis[playerColor];
-
-    if (!emojiData) {
-        return;
-    }
-
+    if (!emojiData) return;
     const elapsed = Date.now() - emojiData.sentAt;
-
-    if (elapsed > 5000) {
-        delete activeEmojis[playerColor];
-        return;
-    }
-
-    // در ۱ ثانیه آخر، ایموجی به‌تدریج محو می‌شود
-    const fadeStart = 4000;
-    const opacity = elapsed > fadeStart
-        ? Math.max(0, 1 - ((elapsed - fadeStart) / 1000))
-        : 1;
-
-    ctx.save();
-
-    ctx.globalAlpha = opacity;
-    ctx.font = '32px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    ctx.fillText(
-        emojiData.emoji,
-        nameX,
-        nameY - 40
-    );
-
-    ctx.restore();
-
-    // تا پایان ۵ ثانیه، Canvas برای انیمیشن و محوشدن دوباره رسم شود
-    requestAnimationFrame(() => {
-        draw();
-    });
-}
-
+    if (elapsed > 5000) { delete activeEmojis[playerColor]; return; }
     const fadeDuration = 1000;
     let alpha = 1;
     if (elapsed > (5000 - fadeDuration)) {
@@ -1025,28 +989,11 @@ emojiBtn.addEventListener('click', (event) => {
 emojiItems.forEach(item => {
     item.addEventListener('click', (event) => {
         event.stopPropagation();
-
         const emoji = item.getAttribute('data-emoji');
-
-        if (!emoji) {
-            emojiMenu.style.display = 'none';
-            return;
-        }
-
-        if (!socket || !socket.connected) {
-            console.warn('[EMOJI] socket is not connected');
-            emojiMenu.style.display = 'none';
-            return;
-        }
-
-        socket.emit('player:emoji_sent', {
-            emoji: emoji
-        });
-
+        socket.emit('player:emoji_sent', { emoji: emoji });
         emojiMenu.style.display = 'none';
     });
 });
-
 
 // بستن منو با کلیک بیرون
 document.addEventListener('click', (event) => {
@@ -1056,28 +1003,11 @@ document.addEventListener('click', (event) => {
 });
 
 // دریافت اموجی از سرور
-socket.on('player:emoji_sent', (data) => {
-    const playerColor = data?.playerColor;
-    const emoji = data?.emoji;
-
-    if (!playerColor || !emoji) {
-        return;
+socket.on('player:emoji_sent', ({ playerColor, emoji }) => {
+    if (playerColor && emoji) {
+        activeEmojis[playerColor] = { emoji: emoji, sentAt: Date.now() };
     }
-
-    activeEmojis[playerColor] = {
-        emoji: String(emoji),
-        sentAt: Date.now()
-    };
-
-    // رسم فوری ایموجی برای همه بازیکنان اتاق
-    draw();
-
-    // ادامه رسم برای انیمیشن محوشدن ایموجی
-    requestAnimationFrame(() => {
-        draw();
-    });
 });
-
 // ========== پایان بخش اموجی ==========
 
   </script>
