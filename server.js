@@ -1896,8 +1896,9 @@ io = new Server(httpServer, {
   },
   transports: ["polling", "websocket"],
   allowEIO3: false,
-  pingTimeout: 20000,
-  pingInterval: 25000,
+  pingTimeout: 30000, // اجازه بده پینگ ۳۰ ثانیه معطل بمونه
+  pingInterval: 10000, // هر ۱۰ ثانیه چک کن که اتصال زنده‌ست
+
 });
 
 io.use((socket, next) => {
@@ -1982,8 +1983,13 @@ io.on("connection", (socket) => {
         });
       }
 
-      socket.join(`match:${matchId}`);
-      console.log("[PLAYER_RECONNECTED]", { userId: uid, matchId });
+      // توقف ربات در صورت ریکانکت بازیکن
+      if (match.pendingBotTimer) {
+        clearTimeout(match.pendingBotTimer);
+        match.pendingBotTimer = null;
+        console.log("[ROBOT_STOPPED_ON_RECONNECT]", { matchId });
+      }
+
 
       // اطلاع به سایر کاربران روم
       io.to(`match:${matchId}`).emit("player:reconnected", { userId: uid });

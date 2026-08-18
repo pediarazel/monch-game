@@ -552,13 +552,34 @@ const isMyCurrentTurn =
 if (isMyCurrentTurn && !blinkIsVisible) continue;
 
         ctx.save();
-        ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.direction = "rtl";
+        ctx.textBaseline = "middle";
+        ctx.direction = "rtl";
+
         const fontSize = Math.max(12, Math.floor(CELL * 0.32));
-        ctx.font = `bold ${fontSize}px sans-serif`;
-ctx.fillStyle = isMyCurrentTurn ? "#ffffff" : "rgba(255,255,255,0.78)";
+        const emojiSize = Math.floor(fontSize * 1.35); // ایموجی ۳۵ درصد بزرگ‌تر و متناسب با صفحه
+        const gap = 6;
 
         const shownName = username.length > 14 ? `${username.slice(0, 14)}…` : username;
-        ctx.fillText(`👤 ${shownName}`, titlePos.x, titlePos.y);
+
+        // محاسبه پهنای نام و ایموجی برای وسط‌چین ماندن کل ترکیب
+        ctx.font = `bold ${fontSize}px sans-serif`;
+        const nameWidth = ctx.measureText(shownName).width;
+        ctx.font = `${emojiSize}px sans-serif`;
+        const emojiWidth = ctx.measureText("👤").width;
+
+        const totalWidth = nameWidth + gap + emojiWidth;
+        const startX = titlePos.x - (totalWidth / 2);
+
+        // ۱. رسم ایموجی کاربر (سمت راست - با فونت بزرگ‌تر)
+        ctx.textAlign = "left";
+        ctx.font = `${emojiSize}px sans-serif`;
+        ctx.fillStyle = isMyCurrentTurn ? "#ffffff" : "rgba(255,255,255,0.78)";
+        ctx.fillText("👤", startX, titlePos.y);
+
+        // ۲. رسم نام کاربر (سمت چپ ایموجی)
+        ctx.font = `bold ${fontSize}px sans-serif`;
+        ctx.fillText(shownName, startX + emojiWidth + gap, titlePos.y);
+
                 drawPlayerEmoji(color, titlePos.x, titlePos.y);
 
         ctx.restore();
@@ -844,10 +865,11 @@ window.location.replace("/lobby.html");
       if (socket && socket.connected) return socket;
       if (socket) { try { socket.removeAllListeners(); socket.disconnect(); } catch {} socket = null; }
       socket = io(SOCKET_URL, {
-        autoConnect: false, transports: ["websocket", "polling"], timeout: 15000,
+        autoConnect: false, transports: ["websocket", "polling"], timeout: 30000,
         auth: (callback) => { callback({ token: getToken() }); },
-        reconnection: true, reconnectionAttempts: 10, reconnectionDelay: 1000, reconnectionDelayMax: 5000
+        reconnection: true, reconnectionAttempts: Infinity, reconnectionDelay: 1000, reconnectionDelayMax: 5000
       });
+
       socket.on("connect", async () => {
         socketStatusEl.textContent = "✅ سوکت متصل شد (" + socket.id + ")";
         serverMsgEl.textContent = "✅ اتصال آنلاین برقرار شد.";
@@ -920,6 +942,16 @@ window.location.replace("/lobby.html");
           gameState.players = gameState.players.map(p => p.userId === userId ? { ...p, forfeited: true, isConnected: false } : p);
         } updateUI();
       });
+            socket.on("player:emoji_sent", ({ playerColor, emoji }) => {
+        if (playerColor && emoji) {
+          activeEmojis[playerColor] = {
+            emoji: String(emoji),
+            sentAt: Date.now()
+          };
+          draw();
+        }
+      });
+
       socket.connect();
       return socket;
     }
@@ -928,16 +960,14 @@ window.location.replace("/lobby.html");
 draw();
 updateUI();
 
-/*
-  چشمک‌زدن نام بازیکن نوبت‌دار:
-  Canvas باید هر نیم‌ثانیه دوباره رسم شود؛
-  در غیر این صورت نام یک‌بار پاک می‌شود و تا state بعدی برنمی‌گردد.
-*/
-setInterval(() => {
+function gameLoop() {
   if (gameState && !gameState.winner) {
     draw();
   }
-}, 300);
+  requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+
 
 
     // اتصال خودکار Socket در صورت وجود توکن
@@ -1025,18 +1055,6 @@ document.addEventListener('click', (event) => {
     }
 });
 
-// دریافت اموجی از سرور
-socket.on('player:emoji_sent', ({ playerColor, emoji }) => {
-    if (playerColor && emoji) {
-        activeEmojis[playerColor] = {
-            emoji: String(emoji),
-            sentAt: Date.now()
-        };
-
-        // Canvas باید فوراً دوباره رسم شود تا ایموجی نمایش داده شود.
-        draw();
-    }
-});
 
 // ========== پایان بخش اموجی ==========
 
