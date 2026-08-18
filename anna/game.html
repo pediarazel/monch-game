@@ -535,56 +535,37 @@ const opacity = isMyTurnPiece
         yellow: { x: 2 * CELL,  y: 9.58 * CELL },
       };
       const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-const blinkIsVisible = Math.floor(Date.now() / 900) % 2 === 0;
+      const blinkIsVisible = Math.floor(Date.now() / 900) % 2 === 0;
 
       for (const color of colorOrder) {
         const username = String(gameState.playerNames?.[color] || "").trim();
         const titlePos = yardTitles[color];
         if (!username || !titlePos) continue;
-/*
-  فقط نام خود بازیکنی که نوبتش است روی گوشی خودش چشمک می‌زند.
-*/
-const isMyCurrentTurn =
-  Boolean(myColor) &&
-  color === myColor &&
-  myColor === turnColor;
 
-if (isMyCurrentTurn && !blinkIsVisible) continue;
+        const isMyCurrentTurn =
+          Boolean(myColor) &&
+          color === myColor &&
+          myColor === turnColor;
+
+        if (isMyCurrentTurn && !blinkIsVisible) continue;
 
         ctx.save();
         ctx.textBaseline = "middle";
-        ctx.direction = "rtl";
+        ctx.textAlign = "center";
 
         const fontSize = Math.max(12, Math.floor(CELL * 0.32));
-        const emojiSize = Math.floor(fontSize * 1.35); // ایموجی ۳۵ درصد بزرگ‌تر و متناسب با صفحه
-        const gap = 6;
+        const shownName = username.length > 12 ? `${username.slice(0, 12)}…` : username;
 
-        const shownName = username.length > 14 ? `${username.slice(0, 14)}…` : username;
-
-        // محاسبه پهنای نام و ایموجی برای وسط‌چین ماندن کل ترکیب
-        ctx.font = `bold ${fontSize}px sans-serif`;
-        const nameWidth = ctx.measureText(shownName).width;
-        ctx.font = `${emojiSize}px sans-serif`;
-        const emojiWidth = ctx.measureText("👤").width;
-
-        const totalWidth = nameWidth + gap + emojiWidth;
-        const startX = titlePos.x - (totalWidth / 2);
-
-        // ۱. رسم ایموجی کاربر (سمت راست - با فونت بزرگ‌تر)
-        ctx.textAlign = "left";
-        ctx.font = `${emojiSize}px sans-serif`;
+        ctx.font = `bold ${fontSize}px sans-serif, "Segoe UI Emoji", "Apple Color Emoji", AndroidEmoji`;
         ctx.fillStyle = isMyCurrentTurn ? "#ffffff" : "rgba(255,255,255,0.78)";
-        ctx.fillText("👤", startX, titlePos.y);
+        ctx.fillText(`👤 ${shownName}`, titlePos.x, titlePos.y);
 
-        // ۲. رسم نام کاربر (سمت چپ ایموجی)
-        ctx.font = `bold ${fontSize}px sans-serif`;
-        ctx.fillText(shownName, startX + emojiWidth + gap, titlePos.y);
-
-                drawPlayerEmoji(color, titlePos.x, titlePos.y);
+        drawPlayerEmoji(color, titlePos.x, titlePos.y);
 
         ctx.restore();
       }
     }
+
     function draw(){
       ctx.clearRect(0,0,SIZE,SIZE);
       ctx.fillStyle = COLORS.board; ctx.fillRect(0,0,SIZE,SIZE);
@@ -942,13 +923,12 @@ window.location.replace("/lobby.html");
           gameState.players = gameState.players.map(p => p.userId === userId ? { ...p, forfeited: true, isConnected: false } : p);
         } updateUI();
       });
-            socket.on("player:emoji_sent", ({ playerColor, emoji }) => {
+      socket.on("player:emoji_sent", ({ playerColor, emoji }) => {
         if (playerColor && emoji) {
           activeEmojis[playerColor] = {
             emoji: String(emoji),
             sentAt: Date.now()
           };
-          draw();
         }
       });
 
@@ -960,13 +940,18 @@ window.location.replace("/lobby.html");
 draw();
 updateUI();
 
-function gameLoop() {
-  if (gameState && !gameState.winner) {
-    draw();
+let lastRenderTime = 0;
+function gameLoop(timestamp) {
+  if (timestamp - lastRenderTime >= 33) {
+    lastRenderTime = timestamp;
+    try {
+      draw();
+    } catch (err) {}
   }
   requestAnimationFrame(gameLoop);
 }
 requestAnimationFrame(gameLoop);
+
 
 
 
