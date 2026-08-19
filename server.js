@@ -1555,9 +1555,16 @@ if (currentMatch.game.transitioning) {
     userId: expectedUserId,
   });
 
+  // هنگام transition، تایمر نوبت را هم متوقف کن تا با ربات/ترنزیشن تداخل نکند
+  if (currentMatch.pendingTurnTimer) {
+    clearTimeout(currentMatch.pendingTurnTimer);
+    currentMatch.pendingTurnTimer = null;
+  }
+
   // تلاش بعدی با تأخیر کوتاه، بدون دست‌کاری turnId
   currentMatch.pendingBotTimer = setTimeout(() => {
     currentMatch.pendingBotTimer = null;
+    currentMatch.pendingBotUserId = null;
 
     runDisconnectedPlayerBot(
       currentMatch,
@@ -1577,6 +1584,7 @@ if (currentMatch.game.transitioning) {
 }
 
 
+
     runDisconnectedPlayerBot(
       currentMatch,
       expectedTurnId,
@@ -1592,14 +1600,39 @@ if (currentMatch.game.transitioning) {
 }, 1500);
 
 }
-
-function startTurnTimeout(match) {
-  if (!match.game || match.game.winner) return;
+function clearGameTimers(match) {
+  if (!match) return;
 
   if (match.pendingTurnTimer) {
     clearTimeout(match.pendingTurnTimer);
     match.pendingTurnTimer = null;
   }
+
+  if (match.pendingBotTimer) {
+    clearTimeout(match.pendingBotTimer);
+    match.pendingBotTimer = null;
+  }
+
+  match.pendingBotTurnId = null;
+  match.pendingBotUserId = null;
+}
+function clearBotTimers(match) {
+  if (!match) return;
+
+  if (match.pendingBotTimer) {
+    clearTimeout(match.pendingBotTimer);
+    match.pendingBotTimer = null;
+  }
+  match.pendingBotTurnId = null;
+  match.pendingBotUserId = null;
+}
+
+function startTurnTimeout(match) {
+  if (!match || !match.game || match.game.winner) return;
+
+  // فقط تایمرهای قبلی را پاک می‌کنیم.
+  // سپس برای نوبت فعلی تایمر جدید ساخته می‌شود.
+  clearGameTimers(match);
 
   const myTurnId = match.turnId;
 
@@ -1608,49 +1641,55 @@ function startTurnTimeout(match) {
 
   broadcastState(match);
 
-match.pendingTurnTimer = setTimeout(() => {
-  const m = matches.get(match.matchId);
+  match.pendingTurnTimer = setTimeout(() => {
+    match.pendingTurnTimer = null;
 
-  if (!m) return;
-  if (m.turnId !== myTurnId) return;
-  if (!m.game || m.game.winner) return;
+    const m = matches.get(String(match.matchId));
 
-  console.log("[TURN_TIMEOUT_FIRE]", {
-    matchId: m.matchId,
-    turnId: m.turnId,
-    currentTurn: m.game.currentTurn,
-    currentColor: colorOrder[m.game.currentTurn],
-    transitioningBeforeReset: m.game.transitioning,
-  });
+    if (!m) return;
+    if (m.turnId !== myTurnId) return;
+    if (!m.game || m.game.winner) return;
 
-  // تایمر سرور نباید به‌خاطر قفل باقی‌مانده متوقف شود.
-  // قبل از انتقال نوبت، قفل قبلی را آزاد می‌کنیم.
-  m.game.transitioning = false;
+    console.log("[TURN_TIMEOUT_FIRE]", {
+      matchId: m.matchId,
+      turnId: m.turnId,
+      currentTurn: m.game.currentTurn,
+      currentColor: colorOrder[m.game.currentTurn],
+      transitioningBeforeReset: m.game.transitioning,
+    });
 
-  m.game.rolled = false;
-  m.game.pendingDice = [];
-  m.game.dice1 = 0;
-  m.game.dice2 = 0;
-  m.game.dice = 0;
-  m.game.turnMoved = true;
-  m.game.turnDeadlineAt = null;
-  m.turnDeadlineAt = null;
+    m.game.transitioning = false;
 
-  nextTurn(m);
-}, TURN_MS);
+    m.game.rolled = false;
+    m.game.pendingDice = [];
+    m.game.dice1 = 0;
+    m.game.dice2 = 0;
+    m.game.dice = 0;
+    m.game.turnMoved = true;
+    m.game.turnDeadlineAt = null;
+    m.turnDeadlineAt = null;
 
+    nextTurn(m);
+  }, TURN_MS);
 
   scheduleDisconnectedPlayerBot(match);
 }
 
 function nextTurn(match) {
   console.log("[NEXT_TURN] start", {
-  matchId: match?.matchId,
-  turnId: match?.turnId,
-  currentTurnBefore: match?.game?.currentTurn,
-  currentTurnColorBefore: match?.game ? colorOrder[match.game.currentTurn] : null,
-});
-  if (!match.game || match.game.winner) return;
+    matchId: match?.matchId,
+    turnId: match?.turnId,
+    currentTurnBefore: match?.game?.currentTurn,
+    currentTurnColorBefore: match?.game
+      ? colorOrder[match.game.currentTurn]
+      : null,
+  });
+
+  if (!match || !match.game || match.game.winner) return;
+
+  // جلوگیری از اجرای تایمرهای مربوط به نوبت قبلی
+  clearGameTimers(match);
+
 
   let attempts = 0;
   do {
@@ -1961,46 +2000,42 @@ io.on("connection", (socket) => {
 
   // سیستم Reconnect: اگر این کاربر قبلاً در حالت قطع اتصال بوده،
   // وضعیت موقت کنترل خودکار او حذف می‌شود.
-  if (disconnectionTimers.has(uid)) {
-    const { matchId } = disconnectionTimers.get(uid);
-    disconnectionTimers.delete(uid);
+if (disconnectionTimers.has(uid)) {
+  const { matchId } = disconnectionTimers.get(uid);
+  disconnectionTimers.delete(uid);
 
+  const match = matches.get(matchId);
 
-    const match = matches.get(matchId);
-    if (match) {
-      if (
-        match.pendingBotTimer &&
-        match.pendingBotUserId === uid
-      ) {
-        clearTimeout(match.pendingBotTimer);
-        match.pendingBotTimer = null;
-        match.pendingBotTurnId = null;
-        match.pendingBotUserId = null;
+  if (match) {
+    // فقط کنترل خودکار مربوط به همین بازیکن متوقف می‌شود.
+    if (
+      match.pendingBotTimer &&
+      match.pendingBotUserId === uid
+    ) {
+      clearBotTimers(match);
 
-        console.log("[DISCONNECTED_BOT_CANCELLED_BY_RECONNECT]", {
-          userId: uid,
-          matchId,
-        });
-      }
-
-      // توقف ربات در صورت ریکانکت بازیکن
-      if (match.pendingBotTimer) {
-        clearTimeout(match.pendingBotTimer);
-        match.pendingBotTimer = null;
-        console.log("[ROBOT_STOPPED_ON_RECONNECT]", { matchId });
-      }
-
-
-      // اطلاع به سایر کاربران روم
-      io.to(`match:${matchId}`).emit("player:reconnected", { userId: uid });
-
-      // ارسال آخرین وضعیت بازی به کاربر برگشته با تاخیر کوچک
-      setTimeout(() => {
-        broadcastState(match);
-      }, 500);
+      console.log("[DISCONNECTED_BOT_CANCELLED_BY_RECONNECT]", {
+        userId: uid,
+        matchId,
+      });
     }
+
+    // اطلاع به سایر کاربران روم
+    io.to(`match:${matchId}`).emit("player:reconnected", {
+      userId: uid,
+    });
+
+    // ارسال آخرین وضعیت بازی به کاربر برگشته با تأخیر کوچک
+    setTimeout(() => {
+      const currentMatch = matches.get(String(matchId));
+
+      if (!currentMatch) return;
+
+      broadcastState(currentMatch);
+    }, 500);
   }
-    // بازگرداندن خودکار بازیکن به مسابقه فعال پس از قطع و وصل اینترنت
+}
+
     socket.on("game:restoreSession", (payload, callback) => {
       try {
         // در همه مسابقه‌های در حال بازی جستجو می‌کنیم.
@@ -2031,21 +2066,19 @@ io.on("connection", (socket) => {
         }
 
 
-        // اگر ربات موقت برای این بازیکن زمان‌بندی شده، متوقف شود.
-        if (
-          activeMatch.pendingBotTimer &&
-          activeMatch.pendingBotUserId === uid
-        ) {
-          clearTimeout(activeMatch.pendingBotTimer);
-          activeMatch.pendingBotTimer = null;
-          activeMatch.pendingBotTurnId = null;
-          activeMatch.pendingBotUserId = null;
+// اگر کنترل خودکار برای همین بازیکن فعال است، متوقف شود.
+if (
+  activeMatch.pendingBotTimer &&
+  activeMatch.pendingBotUserId === uid
+) {
+  clearBotTimers(activeMatch);
 
-          console.log("[DISCONNECTED_BOT_CANCELLED_BY_RESTORE]", {
-            userId: uid,
-            matchId: activeMatch.matchId,
-          });
-        }
+  console.log("[DISCONNECTED_BOT_CANCELLED_BY_RESTORE]", {
+    userId: uid,
+    matchId: activeMatch.matchId,
+  });
+}
+
 
         // سوکت جدید وارد روم همان مسابقه می‌شود.
         socket.join(`match:${activeMatch.matchId}`);

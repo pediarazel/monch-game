@@ -900,7 +900,10 @@ window.location.replace("/lobby.html");
           pickedDieIndex = null; pickedDieValue = null; clearDiePickUI();
         } else { pickedDieValue = pendingDice[pickedDieIndex]; }
         stopLobbyCountdown(); joinStatusEl.textContent = "✅ وضعیت دریافت شد";
-        serverMsgEl.textContent = "✅ state دریافت شد."; updateUI(); draw(); startTurnTimer();
+serverMsgEl.textContent = "✅ state دریافت شد.";
+updateUI();
+startTurnTimer();
+
       });
       socket.io.on("reconnect_attempt", n => { socketStatusEl.textContent = `🔄 تلاش مجدد (${n})...`; });
       socket.io.on("reconnect", () => { socketStatusEl.textContent = "✅ اتصال مجدد برقرار شد"; });
@@ -944,9 +947,16 @@ let lastRenderTime = 0;
 function gameLoop(timestamp) {
   if (timestamp - lastRenderTime >= 33) {
     lastRenderTime = timestamp;
-    try {
-      draw();
-    } catch (err) {}
+try {
+  draw();
+} catch (err) {
+  console.error("[Canvas draw error]", err);
+  if (!window.__lastCanvasDrawErrorAt || Date.now() - window.__lastCanvasDrawErrorAt > 3000) {
+    window.__lastCanvasDrawErrorAt = Date.now();
+    setMsg("خطای رسم بازی؛ کنسول را بررسی کن.");
+  }
+}
+
   }
   requestAnimationFrame(gameLoop);
 }
