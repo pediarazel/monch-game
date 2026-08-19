@@ -111,6 +111,17 @@ input, select{
 <button id="copyBtn" type="button" style="background:transparent; border:1px solid #475569; padding:3px 7px; border-radius:6px; color:#fff; font-size:12px; cursor:pointer; line-height:1;">⧉</button>
 
   </div>
+  <div class="card" id="lobbyStatsCard" style="background:#0f172a; border:1px solid #1e293b; padding:10px 14px; margin-bottom:12px;">
+    <div style="font-size:14px; font-weight:700; margin-bottom:8px; color:#22c55e; display:flex; align-items:center; gap:6px;">
+      🟢 <span id="statsOnlineCount">0</span> بازیکن آنلاین
+    </div>
+    <div style="display:flex; flex-direction:column; gap:6px; font-size:13px; color:#cbd5e1;">
+      <div style="display:flex; justify-content:space-between; align-items:center;"><span>💰 20,000تومنی</span><span style="font-weight:600;" id="statsTier20">👥 0 نفر</span></div>
+      <div style="display:flex; justify-content:space-between; align-items:center;"><span>💰 50,000تومنی</span><span style="font-weight:600;" id="statsTier50">👥 0 نفر</span></div>
+      <div style="display:flex; justify-content:space-between; align-items:center;"><span>💰 100,000تومنی</span><span style="font-weight:600;" id="statsTier100">👥 0 نفر</span></div>
+      <div style="display:flex; justify-content:space-between; align-items:center;"><span>💰 200,000تومنی</span><span style="font-weight:600;" id="statsTier200">👥 0 نفر</span></div>
+    </div>
+  </div>
 
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
@@ -695,6 +706,14 @@ tierInput.disabled = true;
 
       // نمایش نام کاربری هنگام بارگذاری صفحه
       updateUsernameDisplay();
+      socket.on("lobby:stats", (data) => {
+        if (!data) return;
+        document.getElementById('statsOnlineCount').textContent = Number(data.online || 0).toLocaleString('en-US');
+        [20, 50, 100, 200].forEach(tier => {
+          const el = document.getElementById(`statsTier${tier}`);
+          if (el) el.textContent = `👥 ${Number(data.tiers?.[tier]?.inGame || 0).toLocaleString('en-US')} نفر`;
+        });
+      });
 
     })(); // End of IIFE
 

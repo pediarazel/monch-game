@@ -741,6 +741,25 @@ function createLobby(tier) {
     ready: false,
   };
 }
+const LOBBY_TIERS = [20, 50, 100, 200];
+function computeLobbyStats() {
+  const stats = { online: connectedUsers ? connectedUsers.size : 0, tiers: {} };
+  for (const tier of LOBBY_TIERS) stats.tiers[tier] = { inGame: 0, waiting: 0 };
+  for (const match of matches.values()) {
+    if (!match || !match.tier) continue;
+    const tierStats = stats.tiers[match.tier];
+    if (!tierStats) continue;
+    const isActiveGame = match.status === "playing" && match.game && !match.game.winner;
+    const count = getActivePlayersCount(match);
+    if (isActiveGame) tierStats.inGame += count;
+    else if (match.status === "waiting") tierStats.waiting += count;
+  }
+  return stats;
+}
+function emitLobbyStats() {
+  if (!io) return;
+  io.emit("lobby:stats", computeLobbyStats());
+}
 
 function getTierLobby(tier) {
   if (!tierLobbies.has(tier)) tierLobbies.set(tier, createLobby(tier));
@@ -998,7 +1017,7 @@ async function handleForfeit(match, uid, reason = "disconnect_forfeit") {
         match.game.winner = winnerColor;
         match.game.rolled = false;
         match.game.pendingDice = [];
-
+emitLobbyStats();
         broadcastState(match);
 
         const dbMatchId = String(match.matchId);
@@ -1063,6 +1082,7 @@ function createMatchFromLobby(lobby) {
 function getActivePlayersCount(match) {
   return activePlayersCountFromPlayerColors(match.playerColors);
 }
+
 
 function resetMatchGame(match) {
   const initialTurn = colorOrder.findIndex((color) => match.playerColors[color] != null);
@@ -1865,7 +1885,9 @@ async function startMatchFromLobby(lobby, filledColors) {
   assignColorsToLobbyPlayers(lobby);
 
   const match = createMatchFromLobby(lobby);
-  matches.set(match.matchId, match);
+      matches.set(match.matchId, match);
+      emitLobbyStats(); // اضافه شد
+
 
   lobby.status = "matching";
   if (lobby.lobbyTimer) clearTimeout(lobby.lobbyTimer);
@@ -2001,7 +2023,7 @@ io.on("connection", (socket) => {
   if (!Number.isInteger(uid) || uid <= 0) return;
 
   connectedUsers.set(String(uid), socket.id);
-
+emitLobbyStats();
   // سیستم Reconnect: اگر این کاربر قبلاً در حالت قطع اتصال بوده،
   // وضعیت موقت کنترل خودکار او حذف می‌شود.
 if (disconnectionTimers.has(uid)) {
@@ -2391,6 +2413,8 @@ startAfterMs: 30000,
 
         // خروج دستی در بازیِ در حال اجرا = فورفیت فوری؛ بدون انتظار ۹۰ ثانیه.
         await handleForfeit(match, uid, "manual_leave");
+        emitLobbyStats(); // اضافه شد
+
 
 
         await socket.leave(`match:${match.matchId}`);
@@ -2454,6 +2478,8 @@ startAfterMs: 30000,
         // کاربر باید پیش از بررسی مسابقه آفلاین علامت‌گذاری شود تا
         // زمان‌بندی ربات بتواند نبودن او در connectedUsers را تشخیص دهد.
         connectedUsers.delete(String(uid));
+        emitLobbyStats();
+
 
         // ۱. بررسی لابی‌ها
         for (const [tier, lobby] of tierLobbies.entries()) {
