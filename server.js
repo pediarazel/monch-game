@@ -758,7 +758,7 @@ function computeLobbyStats() {
 }
 function emitLobbyStats() {
   if (!io) return;
-  io.emit("lobby:stats", computeLobbyStats());
+  io.to('lobby').emit("lobby:stats", computeLobbyStats()); // فقط برای کسانی که در اتاق 'lobby' هستند
 }
 
 function getTierLobby(tier) {
@@ -1898,6 +1898,8 @@ for (const uid of lobby.playerUidsInOrder) {
   if (sid) {
     const targetSocket = io.sockets.sockets.get(sid);
     if (targetSocket) await targetSocket.join(`match:${match.matchId}`);
+await targetSocket.leave('lobby'); // اضافه کن: خروج از لابی
+      }
     match.players.set(uid, sid);
   }
 }
@@ -2023,6 +2025,7 @@ io.on("connection", (socket) => {
   if (!Number.isInteger(uid) || uid <= 0) return;
 
   connectedUsers.set(String(uid), socket.id);
+  socket.join('lobby'); // اضافه کن: ورود به اتاق لابی
 emitLobbyStats();
   // سیستم Reconnect: اگر این کاربر قبلاً در حالت قطع اتصال بوده،
   // وضعیت موقت کنترل خودکار او حذف می‌شود.
