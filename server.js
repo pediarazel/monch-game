@@ -1690,7 +1690,6 @@ function nextTurn(match) {
   // جلوگیری از اجرای تایمرهای مربوط به نوبت قبلی
   clearGameTimers(match);
 
-
   let attempts = 0;
   do {
     match.game.currentTurn = (match.game.currentTurn + 1) % colorOrder.length;
@@ -1703,16 +1702,21 @@ function nextTurn(match) {
   match.game.pendingDice = [];
   match.game.rolled = false;
   match.game.turnMoved = false;
+  match.game.turnDeadlineAt = null;
 
   match.turnId = (match.turnId || 0) + 1;
-console.log("[NEXT_TURN] after change", {
-  matchId: match?.matchId,
-  turnId: match?.turnId,
-  currentTurnAfter: match?.game?.currentTurn,
-  currentTurnColorAfter: match?.game ? colorOrder[match.game.currentTurn] : null,
-});
+
+  console.log("[NEXT_TURN] after change", {
+    matchId: match?.matchId,
+    turnId: match?.turnId,
+    currentTurnAfter: match?.game?.currentTurn,
+    currentTurnColorAfter: match?.game ? colorOrder[match.game.currentTurn] : null,
+  });
+
+
   startTurnTimeout(match);
 }
+
 
 function getNextDiceValueFromMatch() {
   return Math.floor(Math.random() * 6) + 1;

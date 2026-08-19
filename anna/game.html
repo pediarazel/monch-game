@@ -628,35 +628,52 @@ const opacity = isMyTurnPiece
       const show1 = hasPendingDice ? Number(pendingDice[0] ?? 0) : d1;
       const show2 = pendingDice.length > 1 ? Number(pendingDice[1] ?? 0) : d2;
       const canPickDice = myColor === turnColor && gameState.rolled === true && hasPendingDice;
+      // === نمایش تاس‌ها (نسخه ضد لرزش) ===
       if (hasPendingDice || hasResultDice) {
+        // تاس‌ها فقط از یک منبع مشخص می‌آیند: اگر pendingDice هست از آن، وگرنه از dice1/dice2
         dice1El.textContent = show1 > 0 ? String(show1) : "🎲";
         dice2El.textContent = show2 > 0 ? String(show2) : "🎲";
+
+        // تعیین اینکه هر تاس قابل کلیک است یا نه
         const isDice1Available = canPickDice && pendingDice.length >= 1 && show1 > 0;
         dice1El.style.pointerEvents = isDice1Available ? "auto" : "none";
         dice1El.style.opacity = isDice1Available ? "1" : "0.5";
         if (isDice1Available && pickedDieIndex !== 0) dice1El.classList.add("blink-me");
+
         const isDice2Available = canPickDice && pendingDice.length >= 2 && show2 > 0;
         dice2El.style.pointerEvents = isDice2Available ? "auto" : "none";
         dice2El.style.opacity = isDice2Available ? "1" : "0.5";
         if (isDice2Available && pickedDieIndex !== 1) dice2El.classList.add("blink-me");
+
+        // اگر تاس انتخاب شده دیگر معتبر نیست، انتخاب را پاک کن
         if (pickedDieIndex != null) {
           const pendingLen = pendingDice.length;
           if (!canPickDice || pendingLen <= pickedDieIndex) {
             pickedDieValue = null; pickedDieIndex = null; clearDiePickUI();
+          } else {
+            // اگر معتبر است، مقدارش را به‌روز نگه دار
+            pickedDieValue = pendingDice[pickedDieIndex];
           }
         }
         syncDiePickUI();
-        if (canPickDice) setMsg(pickedDieValue == null ? "تاس خودت را انتخاب کن." : "حالا یک مهره را بزن.");
-        else if (d1 === 6 && d2 === 6 && !gameState.rolled) setMsg("جفت ۶ آمد. تاس جایزه داری.");
-        else if (myColor !== turnColor) setMsg("هنوز نوبت شما نیست.");
-        else setMsg("تاس بیندازید.");
+
+        // پیام‌های راهنما (بدون تداخل)
+        if (canPickDice) {
+          setMsg(pickedDieValue == null ? "تاس خودت را انتخاب کن." : "حالا یک مهره را بزن.");
+        } else if (myColor !== turnColor) {
+          setMsg("هنوز نوبت شما نیست.");
+        } else {
+          setMsg("تاس بیندازید.");
+        }
       } else {
+        // بدون تاس
         dice1El.textContent = "🎲"; dice2El.textContent = "🎲";
         dice1El.style.pointerEvents = "none"; dice1El.style.opacity = "0.5";
         dice2El.style.pointerEvents = "none"; dice2El.style.opacity = "0.5";
         pickedDieValue = null; pickedDieIndex = null; clearDiePickUI();
         setMsg(myColor === turnColor ? "تاس بیندازید." : "هنوز نوبت شما نیست.");
       }
+
     }
     function clearDiePickUI(){
       dice1El.classList.remove("selected"); dice2El.classList.remove("selected");
@@ -696,21 +713,47 @@ const opacity = isMyTurnPiece
       rollBtn.disabled = true; moveInFlight = false; pickedDieValue = null; pickedDieIndex = null; clearDiePickUI();
       let animationCount = 0;
       dice1El.classList.add("rolling"); dice2El.classList.add("rolling");
-      const animation = setInterval(() => {
-        dice1El.textContent = String(Math.floor(Math.random() * 6) + 1);
-        dice2El.textContent = String(Math.floor(Math.random() * 6) + 1);
-        animationCount++; if (animationCount > 12) clearInterval(animation);
+      // شروع انیمیشن بصری (فقط کلاس اضافه می‌شود)
+      dice1El.classList.add("rolling");
+      dice2El.classList.add("rolling");
+
+      // یک انیمیشن ساده برای نمایش اعداد تصادفی تا زمانی که پاسخ سرور برسد
+      const animInterval = setInterval(() => {
+        dice1El.textContent = Math.floor(Math.random() * 6) + 1;
+        dice2El.textContent = Math.floor(Math.random() * 6) + 1;
       }, 70);
+
       socket.emit("game:roll", { matchId: currentMatchId }, (response) => {
-        clearInterval(animation); dice1El.classList.remove("rolling"); dice2El.classList.remove("rolling");
+        // ۱. بلافاصله انیمیشن را متوقف کن تا از لرزش جلوگیری شود
+        clearInterval(animInterval);
+        dice1El.classList.remove("rolling");
+        dice2El.classList.remove("rolling");
+
         if (response?.success) {
-          dice1El.textContent = String(response.dice1 ?? "🎲"); dice2El.textContent = String(response.dice2 ?? "🎲");
+          // ۲. حالا داده‌های واقعی سرور را در gameState قرار بده
+          if (gameState) {
+            gameState.dice1 = Number(response.dice1 ?? 0);
+            gameState.dice2 = Number(response.dice2 ?? 0);
+            gameState.dice = gameState.dice1 + gameState.dice2;
+            gameState.pendingDice = Array.isArray(response.pendingDice) && response.pendingDice.length
+              ? response.pendingDice.map(Number)
+              : [gameState.dice1, gameState.dice2].filter((v) => v > 0);
+            gameState.rolled = true;
+            gameState.turnMoved = false;
+          }
           pickedDieValue = null; pickedDieIndex = null; clearDiePickUI();
+
+          // ۳. حالا updateUI همه چیز را بر اساس داده‌های واقعی و بدون لرزش نمایش می‌دهد
+          updateUI();
           setMsg(response.noLegalMoves || response.turnSkipped ? "هیچ حرکت مجازی وجود نداشت." : "تاس را انتخاب کن، سپس مهره را بزن.");
-          return;
+        } else {
+          // اگر خطا داد، فقط وضعیت را آپدیت کن (مثلاً اگر نوبت نبود)
+          rollBtn.disabled = false;
+          updateUI();
+          setMsg(response?.message || "خطا در ریختن تاس.");
         }
-        rollBtn.disabled = false; setMsg(response?.message || "خطا در ریختن تاس.");
       });
+
     }
     function onBoardClick(e){
       if (!socket || !gameState || !gameState.rolled || gameState.winner) return;
