@@ -328,6 +328,22 @@
     let pickedDieValue = null;
     let pickedDieIndex = null;
     let moveInFlight = false;
+    let diceAnimationInterval = null;
+    const activeEmojis = {};
+
+    function stopDiceAnimation() {
+      if (diceAnimationInterval) {
+        clearInterval(diceAnimationInterval);
+        diceAnimationInterval = null;
+      }
+      dice1El.classList.remove("rolling");
+      dice2El.classList.remove("rolling");
+      const d1 = Number(gameState?.dice1 || 0);
+      const d2 = Number(gameState?.dice2 || 0);
+      dice1El.textContent = d1 >= 1 && d1 <= 6 ? String(d1) : "🎲";
+      dice2El.textContent = d2 >= 1 && d2 <= 6 ? String(d2) : "🎲";
+    }
+
 
     // ====== توابع کمکی ======
     function formatRemainingMs(deadlineAt) {
@@ -487,7 +503,12 @@ function drawPieces() {
   if (!gameState || !Array.isArray(gameState.pieces) || !ctx) return;
 
   const winner = gameState.winner;
-  const turnColor = gameState.currentTurnColor ?? gameState.turnColor;
+const turnColor =
+  gameState.activeColor ??
+  gameState.currentTurnColor ??
+  gameState.turnColor ??
+  colorOrder[gameState.currentTurn];
+
 
   /*
     مهره‌های رنگ نوبت‌دار هر نیم‌ثانیه کم‌رنگ/پررنگ می‌شوند.
@@ -527,44 +548,72 @@ const opacity = isMyTurnPiece
 }
 
     function drawPlayerNames() {
-      if (!gameState || !gameState.playerNames) return;
-      const yardTitles = {
-        red:    { x: 2 * CELL,  y: 0.58 * CELL },
-        blue:   { x: 11 * CELL, y: 0.58 * CELL },
-        green:  { x: 11 * CELL, y: 9.58 * CELL },
-        yellow: { x: 2 * CELL,  y: 9.58 * CELL },
-      };
-      const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
-      const blinkIsVisible = Math.floor(Date.now() / 900) % 2 === 0;
+  if (!gameState || !gameState.playerNames) return;
 
-      for (const color of colorOrder) {
-        const username = String(gameState.playerNames?.[color] || "").trim();
-        const titlePos = yardTitles[color];
-        if (!username || !titlePos) continue;
+  const yardTitles = {
+    red:    { x: 2 * CELL,  y: 0.58 * CELL },
+    blue:   { x: 11 * CELL, y: 0.58 * CELL },
+    green:  { x: 11 * CELL, y: 9.58 * CELL },
+    yellow: { x: 2 * CELL,  y: 9.58 * CELL },
+  };
 
-        const isMyCurrentTurn =
-          Boolean(myColor) &&
-          color === myColor &&
-          myColor === turnColor;
+  // نام فیلد سرور activeColor است، نه currentTurnColor
+  const turnColor =
+    gameState.activeColor ?? colorOrder[gameState.currentTurn];
 
-        if (isMyCurrentTurn && !blinkIsVisible) continue;
+  const blinkIsVisible = Math.floor(Date.now() / 900) % 2 === 0;
 
-        ctx.save();
-        ctx.textBaseline = "middle";
-        ctx.textAlign = "center";
+  for (const color of colorOrder) {
+    const username = String(
+      gameState.playerNames?.[color] || ""
+    ).trim();
 
-        const fontSize = Math.max(12, Math.floor(CELL * 0.32));
-        const shownName = username.length > 12 ? `${username.slice(0, 12)}…` : username;
+    const titlePos = yardTitles[color];
 
-        ctx.font = `bold ${fontSize}px sans-serif, "Segoe UI Emoji", "Apple Color Emoji", AndroidEmoji`;
-        ctx.fillStyle = isMyCurrentTurn ? "#ffffff" : "rgba(255,255,255,0.78)";
-        ctx.fillText(`👤 ${shownName}`, titlePos.x, titlePos.y);
+    if (!username || !titlePos) continue;
 
-        drawPlayerEmoji(color, titlePos.x, titlePos.y);
+    const isMyCurrentTurn =
+      Boolean(myColor) &&
+      color === myColor &&
+      myColor === turnColor;
 
-        ctx.restore();
-      }
-    }
+    // فقط نام بازیکن خودِ کاربر هنگام نوبتش چشمک بزند
+    if (isMyCurrentTurn && !blinkIsVisible) continue;
+
+    ctx.save();
+
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+
+    const fontSize = Math.max(12, Math.floor(CELL * 0.32));
+    const shownName =
+      username.length > 12
+        ? `${username.slice(0, 12)}…`
+        : username;
+
+    ctx.font = `bold ${fontSize}px sans-serif, "Segoe UI Emoji", "Apple Color Emoji", AndroidEmoji`;
+    ctx.fillStyle = isMyCurrentTurn
+      ? "#ffffff"
+      : "rgba(255,255,255,0.78)";
+
+    // ایموجی هویت همیشه کنار نام باقی می‌ماند
+    ctx.fillText(
+      `👤 ${shownName}`,
+      titlePos.x,
+      titlePos.y
+    );
+
+    // ایموجی انتخابی بازیکن همچنان جداگانه و با افکت محو نمایش داده می‌شود
+    drawPlayerEmoji(
+      color,
+      titlePos.x,
+      titlePos.y
+    );
+
+    ctx.restore();
+  }
+}
+
 
     function draw(){
       ctx.clearRect(0,0,SIZE,SIZE);
@@ -616,7 +665,9 @@ const opacity = isMyTurnPiece
         pickedDieValue = null; clearDiePickUI();
         return;
       }
-      const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+
+      const turnColor = gameState.activeColor ?? colorOrder[gameState.currentTurn];
+
       const isDoubleSix = (gameState.dice1 === 6 && gameState.dice2 === 6);
       const canRoll = (myColor === turnColor) && !gameState.rolling && !gameState.winner && (!gameState.rolled || isDoubleSix || (gameState.dice1 === 0 && gameState.dice2 === 0));
       rollBtn.classList.remove("blink-me"); dice1El.classList.remove("blink-me"); dice2El.classList.remove("blink-me");
@@ -630,11 +681,9 @@ const opacity = isMyTurnPiece
       const canPickDice = myColor === turnColor && gameState.rolled === true && hasPendingDice;
       // === نمایش تاس‌ها (نسخه ضد لرزش) ===
       if (hasPendingDice || hasResultDice) {
-        // تاس‌ها فقط از یک منبع مشخص می‌آیند: اگر pendingDice هست از آن، وگرنه از dice1/dice2
         dice1El.textContent = show1 > 0 ? String(show1) : "🎲";
         dice2El.textContent = show2 > 0 ? String(show2) : "🎲";
 
-        // تعیین اینکه هر تاس قابل کلیک است یا نه
         const isDice1Available = canPickDice && pendingDice.length >= 1 && show1 > 0;
         dice1El.style.pointerEvents = isDice1Available ? "auto" : "none";
         dice1El.style.opacity = isDice1Available ? "1" : "0.5";
@@ -645,19 +694,16 @@ const opacity = isMyTurnPiece
         dice2El.style.opacity = isDice2Available ? "1" : "0.5";
         if (isDice2Available && pickedDieIndex !== 1) dice2El.classList.add("blink-me");
 
-        // اگر تاس انتخاب شده دیگر معتبر نیست، انتخاب را پاک کن
         if (pickedDieIndex != null) {
           const pendingLen = pendingDice.length;
           if (!canPickDice || pendingLen <= pickedDieIndex) {
             pickedDieValue = null; pickedDieIndex = null; clearDiePickUI();
           } else {
-            // اگر معتبر است، مقدارش را به‌روز نگه دار
             pickedDieValue = pendingDice[pickedDieIndex];
           }
         }
         syncDiePickUI();
 
-        // پیام‌های راهنما (بدون تداخل)
         if (canPickDice) {
           setMsg(pickedDieValue == null ? "تاس خودت را انتخاب کن." : "حالا یک مهره را بزن.");
         } else if (myColor !== turnColor) {
@@ -666,15 +712,14 @@ const opacity = isMyTurnPiece
           setMsg("تاس بیندازید.");
         }
       } else {
-        // بدون تاس
         dice1El.textContent = "🎲"; dice2El.textContent = "🎲";
         dice1El.style.pointerEvents = "none"; dice1El.style.opacity = "0.5";
         dice2El.style.pointerEvents = "none"; dice2El.style.opacity = "0.5";
         pickedDieValue = null; pickedDieIndex = null; clearDiePickUI();
         setMsg(myColor === turnColor ? "تاس بیندازید." : "هنوز نوبت شما نیست.");
       }
-
     }
+
     function clearDiePickUI(){
       dice1El.classList.remove("selected"); dice2El.classList.remove("selected");
     }
@@ -692,7 +737,9 @@ const opacity = isMyTurnPiece
       const renderCountdown = () => {
         if (!gameState || !gameState.turnDeadlineAt || gameState.winner) { stopTurnTimer(); return; }
         const secs = formatRemainingMs(gameState.turnDeadlineAt);
-        const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+const turnColor =
+  gameState.activeColor ?? colorOrder[gameState.currentTurn];
+
         const myColorText = myColor ? colorLabel[myColor] : "تماشاچی";
         const turnColorText = turnColor ? colorLabel[turnColor] : "نامشخص";
         turnInfo.innerHTML = `نوبت: <span class="tag ${turnColor}">${turnColorText}</span> | ${myColorText} | زمان: <b style="color:#ef4444;font-size:16px;">${secs !== null ? secs : "-"}</b> ثانیه`;
@@ -703,34 +750,28 @@ const opacity = isMyTurnPiece
     // ====== توابع بازی ======
     function canRollLocal(){
       if(!gameState || gameState.winner) return false;
-      const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+const turnColor =
+  gameState.activeColor ?? colorOrder[gameState.currentTurn];
+
       return myColor && myColor === turnColor && !gameState.rolled;
     }
     function rollDice() {
       if (!socket || !socket.connected) { setMsg("اتصال به سرور برقرار نیست."); return; }
       if (!currentMatchId) { setMsg("هنوز matchId ساخته نشده است."); return; }
       if (!canRollLocal()) { setMsg("الان اجازه ریختن تاس را نداری."); return; }
+      stopDiceAnimation();
       rollBtn.disabled = true; moveInFlight = false; pickedDieValue = null; pickedDieIndex = null; clearDiePickUI();
-      let animationCount = 0;
       dice1El.classList.add("rolling"); dice2El.classList.add("rolling");
-      // شروع انیمیشن بصری (فقط کلاس اضافه می‌شود)
-      dice1El.classList.add("rolling");
-      dice2El.classList.add("rolling");
 
-      // یک انیمیشن ساده برای نمایش اعداد تصادفی تا زمانی که پاسخ سرور برسد
-      const animInterval = setInterval(() => {
-        dice1El.textContent = Math.floor(Math.random() * 6) + 1;
-        dice2El.textContent = Math.floor(Math.random() * 6) + 1;
+      diceAnimationInterval = setInterval(() => {
+        dice1El.textContent = String(Math.floor(Math.random() * 6) + 1);
+        dice2El.textContent = String(Math.floor(Math.random() * 6) + 1);
       }, 70);
 
       socket.emit("game:roll", { matchId: currentMatchId }, (response) => {
-        // ۱. بلافاصله انیمیشن را متوقف کن تا از لرزش جلوگیری شود
-        clearInterval(animInterval);
-        dice1El.classList.remove("rolling");
-        dice2El.classList.remove("rolling");
+        stopDiceAnimation();
 
         if (response?.success) {
-          // ۲. حالا داده‌های واقعی سرور را در gameState قرار بده
           if (gameState) {
             gameState.dice1 = Number(response.dice1 ?? 0);
             gameState.dice2 = Number(response.dice2 ?? 0);
@@ -742,23 +783,22 @@ const opacity = isMyTurnPiece
             gameState.turnMoved = false;
           }
           pickedDieValue = null; pickedDieIndex = null; clearDiePickUI();
-
-          // ۳. حالا updateUI همه چیز را بر اساس داده‌های واقعی و بدون لرزش نمایش می‌دهد
           updateUI();
           setMsg(response.noLegalMoves || response.turnSkipped ? "هیچ حرکت مجازی وجود نداشت." : "تاس را انتخاب کن، سپس مهره را بزن.");
         } else {
-          // اگر خطا داد، فقط وضعیت را آپدیت کن (مثلاً اگر نوبت نبود)
           rollBtn.disabled = false;
           updateUI();
           setMsg(response?.message || "خطا در ریختن تاس.");
         }
       });
-
     }
+
     function onBoardClick(e){
       if (!socket || !gameState || !gameState.rolled || gameState.winner) return;
       if (currentTurnId == null) { setMsg("لحظه‌ای صبر کن..."); return; }
-      const turnColor = gameState.currentTurnColor ?? colorOrder[gameState.currentTurn];
+const turnColor =
+  gameState.activeColor ?? colorOrder[gameState.currentTurn];
+
       if (myColor !== turnColor) return;
       const pendingDice = Array.isArray(gameState.pendingDice) ? gameState.pendingDice : [];
       if (pendingDice.length === 0) return;
@@ -911,8 +951,10 @@ window.location.replace("/lobby.html");
         setDebug({ socketConnectError: { message: error?.message || String(error) } });
       });
       socket.on("disconnect", reason => {
+        stopDiceAnimation();
         stopLobbyCountdown(); socketStatusEl.textContent = "⚠️ قطع شد: " + (reason || "نامشخص");
       });
+
       socket.on("lobby:status", data => {
         if (!data) return;
         renderLobbyByDeadline(data);
@@ -931,7 +973,9 @@ window.location.replace("/lobby.html");
         if (payload?.matchId) currentMatchId = String(payload.matchId);
       });
       socket.on("game:state", state => {
+        stopDiceAnimation();
         gameState = state;
+
         const payload = getTokenPayload(); const myUserId = getMyUserIdFromPayload(payload);
         if (state?.playerColors && myUserId != null) {
           myColor = colorOrder.find(color => String(state.playerColors[color]) === String(myUserId)) || null;
@@ -949,7 +993,23 @@ startTurnTimer();
 
       });
       socket.io.on("reconnect_attempt", n => { socketStatusEl.textContent = `🔄 تلاش مجدد (${n})...`; });
-      socket.io.on("reconnect", () => { socketStatusEl.textContent = "✅ اتصال مجدد برقرار شد"; });
+      socket.io.on("reconnect", () => {
+        stopDiceAnimation();
+        socketStatusEl.textContent = "✅ اتصال مجدد برقرار شد";
+
+        socket.emit("game:restoreSession", {}, (resp) => {
+          if (resp?.success && resp?.restored && resp?.matchId) {
+            currentMatchId = String(resp.matchId);
+            socketStatusEl.textContent = "✅ بازیابی خودکار بازی";
+            joinStatusEl.textContent = "🎮 بازگشت به بازی";
+            serverMsgEl.textContent = "✅ بازی فعال بازیابی شد.";
+            setMsg("بازیابی شد.");
+            updateUI();
+            startTurnTimer();
+          }
+        });
+      });
+
       socket.io.on("reconnect_failed", () => { socketStatusEl.textContent = "❌ تلاش‌ها ناموفق"; });
       socket.on("player:disconnected", ({ userId, matchId, forfeitReason }) => {
         setMsg(`بازیکن ${userId} قطع شد.`);
@@ -1018,7 +1078,7 @@ const emojiMenu = document.getElementById('emojiMenu');
 const emojiItems = document.querySelectorAll('.emoji-item');
 
 // ذخیره اموجی فعال برای هر بازیکن
-const activeEmojis = {};
+
 
 // نمایش اموجی روی Canvas
 function drawPlayerEmoji(playerColor, nameX, nameY) {
