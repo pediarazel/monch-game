@@ -133,10 +133,20 @@ input, select{
     <div style="height:10px;"></div>
     <div class="muted" style="text-align:center; width:100%; display:flex; align-items:center; justify-content:center; gap:8px;">
       <span>موجودی: <b id="balanceValue">0 تومان</b></span>
-      <svg onclick="updateBalance()" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffd700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="cursor:pointer;" title="به‌روزرسانی موجودی">
-        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.73-5.73"></path>
-      </svg>
+
+      <button
+        id="refreshBalanceBtn"
+        type="button"
+        title="به‌روزرسانی موجودی"
+        aria-label="به‌روزرسانی موجودی"
+        style="display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; padding:0; border:0; background:transparent; color:#ffd700; cursor:pointer;"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.73-5.73"></path>
+        </svg>
+      </button>
     </div>
+
 
   </div>
 
@@ -287,39 +297,80 @@ function isJwtExpired(token) {
 
       // --- Balance (Manual Refresh) ---
       balanceValueEl.textContent = "0 تومان";
-      function startBalanceAutoRefresh(){
-        updateBalance().catch(()=>{});
+
+      function startBalanceAutoRefresh() {
+        // دیگر setInterval نداریم؛ فقط یک بار در ورود به لابی موجودی خوانده می‌شود.
+        updateBalance().catch(() => {});
       }
-      function stopBalanceAutoRefresh(){
-        // رفرش خودکار غیرفعال شد، فقط دستی با کلیک روی آیکون انجام می‌شود
+
+      function stopBalanceAutoRefresh() {
+        // رفرش خودکار غیرفعال است.
       }
 
       async function updateBalance() {
         const token = getToken();
+
         if (!token || isJwtExpired(token)) {
-           balanceValueEl.textContent = "0 تومان";
-           stopBalanceAutoRefresh();
-           return;
+          balanceValueEl.textContent = "0 تومان";
+          stopBalanceAutoRefresh();
+          return;
         }
+
         try {
           const res = await fetch(api("/api/me/balance"), {
-            method: "GET", headers: { "Authorization": "Bearer " + token }, cache: "no-store"
+            method: "GET",
+            headers: {
+              "Authorization": "Bearer " + token
+            },
+            cache: "no-store"
           });
+
           let data;
-          try { data = await res.json(); } catch { data = null; }
+          try {
+            data = await res.json();
+          } catch {
+            data = null;
+          }
 
           if (res.ok && data && data.coins != null) {
             const value = Number(data.coins || 0) * 1000;
             balanceValueEl.textContent = `${value.toLocaleString("en-US")} تومان`;
-          } else if (!res.ok && res.status === 401) {
-             console.log("Balance fetch failed: 401 Unauthorized. Clearing token.");
-             clearToken();
-             stopBalanceAutoRefresh();
-             balanceValueEl.textContent = "0 تومان";
-             window.location.href = "/index.html";
+            return;
           }
-        } catch (e) { console.error("Balance update error:", e); }
+
+          if (!res.ok && res.status === 401) {
+            console.log("Balance fetch failed: 401 Unauthorized. Clearing token.");
+            clearToken();
+            stopBalanceAutoRefresh();
+            balanceValueEl.textContent = "0 تومان";
+            window.location.href = "/index.html";
+            return;
+          }
+
+          console.error("Balance fetch failed:", res.status, data);
+        } catch (e) {
+          console.error("Balance update error:", e);
+        }
       }
+
+      const refreshBalanceBtn = document.getElementById("refreshBalanceBtn");
+
+      if (refreshBalanceBtn) {
+        refreshBalanceBtn.addEventListener("click", async () => {
+          refreshBalanceBtn.disabled = true;
+          refreshBalanceBtn.style.opacity = "0.55";
+
+          try {
+            await updateBalance();
+          } finally {
+            setTimeout(() => {
+              refreshBalanceBtn.disabled = false;
+              refreshBalanceBtn.style.opacity = "1";
+            }, 350);
+          }
+        });
+      }
+
 
       // --- Username & Copy Logic ---
       const usernameTextEl = document.getElementById('usernameText');
