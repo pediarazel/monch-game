@@ -1885,39 +1885,41 @@ async function startMatchFromLobby(lobby, filledColors) {
   assignColorsToLobbyPlayers(lobby);
 
   const match = createMatchFromLobby(lobby);
-      matches.set(match.matchId, match);
-      emitLobbyStats(); // اضافه شد
-
+  matches.set(match.matchId, match);
+  emitLobbyStats();
 
   lobby.status = "matching";
   if (lobby.lobbyTimer) clearTimeout(lobby.lobbyTimer);
   lobby.lobbyTimer = null;
 
-for (const uid of lobby.playerUidsInOrder) {
-  const sid = connectedUsers.get(String(uid));
-  if (sid) {
-    const targetSocket = io.sockets.sockets.get(sid);
-    if (targetSocket) await targetSocket.join(`match:${match.matchId}`);
-await targetSocket.leave('lobby'); // اضافه کن: خروج از لابی
+  for (const uid of lobby.playerUidsInOrder) {
+    const sid = connectedUsers.get(String(uid));
+    if (sid) {
+      const targetSocket = io.sockets.sockets.get(sid);
+      if (targetSocket) {
+        await targetSocket.join(`match:${match.matchId}`);
+        await targetSocket.leave('lobby');
       }
-    match.players.set(uid, sid);
+      match.players.set(uid, sid);
+    }
+  }
+
+  // بعد از join room ها
+  const ok = await startMatch(match);
+  if (ok) {
+    // ✅ اصلاحیه مهم: وقتی بازی شروع شد، لابی را پاک کن تا لابی بعدی تازه ساخته شود
+    tierLobbies.delete(lobby.tier);
+    console.log(`[LOBBY_CLEANUP] Tier ${lobby.tier} cleared after match start.`);
+  } else {
+    lobby.status = "lobby";
+    lobby.playerUidsInOrder = [];
+    lobby.playerColors = { red: null, green: null, yellow: null, blue: null };
+    lobby.lobbyPhase = 1;
+    lobby.lobbyDeadlineAt = null;
+    stopLobbyTimer(lobby);
   }
 }
-// بعد از join room ها
-    const ok = await startMatch(match);
-    if (ok) {
-      // ✅ اصلاحیه مهم: وقتی بازی شروع شد، لابی را پاک کن تا لابی بعدی تازه ساخته شود
-      tierLobbies.delete(lobby.tier);
-      console.log(`[LOBBY_CLEANUP] Tier ${lobby.tier} cleared after match start.`);
-    } else {
-      lobby.status = "lobby";
-      lobby.playerUidsInOrder = [];
-      lobby.playerColors = { red: null, green: null, yellow: null, blue: null };
-      lobby.lobbyPhase = 1;
-      lobby.lobbyDeadlineAt = null;
-      stopLobbyTimer(lobby);
-    }
-}
+
 
 //
 // ------------------------------------------------------------
