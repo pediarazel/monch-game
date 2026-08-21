@@ -131,9 +131,13 @@ input, select{
       <button id="logoutBtn" style="background:#ef4444;color:#fff;">خروج</button>
     </div>
     <div style="height:10px;"></div>
-    <div class="muted" style="text-align:center; width:100%;">
-      موجودی: <b id="balanceValue">0</b>
+    <div class="muted" style="text-align:center; width:100%; display:flex; align-items:center; justify-content:center; gap:8px;">
+      <span>موجودی: <b id="balanceValue">0 تومان</b></span>
+      <svg onclick="updateBalance()" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffd700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="cursor:pointer;" title="به‌روزرسانی موجودی">
+        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.73-5.73"></path>
+      </svg>
     </div>
+
   </div>
 
   <div class="panel">
@@ -281,19 +285,15 @@ function isJwtExpired(token) {
 }
 
 
-      // --- Balance ---
+      // --- Balance (Manual Refresh) ---
       balanceValueEl.textContent = "0 تومان";
-      let balanceIntervalId = null;
-      const BALANCE_REFRESH_MS = 5000;
       function startBalanceAutoRefresh(){
-        if (balanceIntervalId) clearInterval(balanceIntervalId);
         updateBalance().catch(()=>{});
-        balanceIntervalId = setInterval(() => updateBalance().catch(()=>{}), BALANCE_REFRESH_MS);
       }
       function stopBalanceAutoRefresh(){
-        if (balanceIntervalId) clearInterval(balanceIntervalId);
-        balanceIntervalId = null;
+        // رفرش خودکار غیرفعال شد، فقط دستی با کلیک روی آیکون انجام می‌شود
       }
+
       async function updateBalance() {
         const token = getToken();
         if (!token || isJwtExpired(token)) {
