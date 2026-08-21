@@ -336,13 +336,13 @@
         clearInterval(diceAnimationInterval);
         diceAnimationInterval = null;
       }
+
+      // این تابع فقط انیمیشن را متوقف می‌کند.
+      // عدد تاس فقط در updateUI از وضعیت واقعی سرور نمایش داده می‌شود.
       dice1El.classList.remove("rolling");
       dice2El.classList.remove("rolling");
-      const d1 = Number(gameState?.dice1 || 0);
-      const d2 = Number(gameState?.dice2 || 0);
-      dice1El.textContent = d1 >= 1 && d1 <= 6 ? String(d1) : "🎲";
-      dice2El.textContent = d2 >= 1 && d2 <= 6 ? String(d2) : "🎲";
     }
+
 
 
     // ====== توابع کمکی ======
@@ -548,71 +548,70 @@ const opacity = isMyTurnPiece
 }
 
     function drawPlayerNames() {
-  if (!gameState || !gameState.playerNames) return;
+      if (!gameState || !gameState.playerNames) return;
 
-  const yardTitles = {
-    red:    { x: 2 * CELL,  y: 0.58 * CELL },
-    blue:   { x: 11 * CELL, y: 0.58 * CELL },
-    green:  { x: 11 * CELL, y: 9.58 * CELL },
-    yellow: { x: 2 * CELL,  y: 9.58 * CELL },
-  };
+      const yardTitles = {
+        red:    { x: 2 * CELL,  y: 0.58 * CELL },
+        blue:   { x: 11 * CELL, y: 0.58 * CELL },
+        green:  { x: 11 * CELL, y: 9.58 * CELL },
+        yellow: { x: 2 * CELL,  y: 9.58 * CELL },
+      };
 
-  // نام فیلد سرور activeColor است، نه currentTurnColor
-  const turnColor =
-    gameState.activeColor ?? colorOrder[gameState.currentTurn];
+      const turnColor =
+        gameState.activeColor ?? colorOrder[gameState.currentTurn];
 
-  const blinkIsVisible = Math.floor(Date.now() / 900) % 2 === 0;
+      const blinkIsVisible = Math.floor(Date.now() / 900) % 2 === 0;
 
-  for (const color of colorOrder) {
-    const username = String(
-      gameState.playerNames?.[color] || ""
-    ).trim();
+      for (const color of colorOrder) {
+        const username = String(gameState.playerNames?.[color] || "").trim();
+        const titlePos = yardTitles[color];
 
-    const titlePos = yardTitles[color];
+        if (!username || !titlePos) continue;
 
-    if (!username || !titlePos) continue;
+        const isMyCurrentTurn =
+          Boolean(myColor) &&
+          color === myColor &&
+          myColor === turnColor;
 
-    const isMyCurrentTurn =
-      Boolean(myColor) &&
-      color === myColor &&
-      myColor === turnColor;
+        // فقط نام خود بازیکن در نوبت خودش چشمک می‌زند.
+        if (isMyCurrentTurn && !blinkIsVisible) continue;
 
-    // فقط نام بازیکن خودِ کاربر هنگام نوبتش چشمک بزند
-    if (isMyCurrentTurn && !blinkIsVisible) continue;
+        ctx.save();
 
-    ctx.save();
+        ctx.textBaseline = "middle";
+        ctx.textAlign = "center";
 
-    ctx.textBaseline = "middle";
-    ctx.textAlign = "center";
+        const fontSize = Math.max(12, Math.floor(CELL * 0.32));
+        const shownName =
+          username.length > 12
+            ? `${username.slice(0, 12)}…`
+            : username;
 
-    const fontSize = Math.max(12, Math.floor(CELL * 0.32));
-    const shownName =
-      username.length > 12
-        ? `${username.slice(0, 12)}…`
-        : username;
+        const label = `👤 ${shownName}`;
 
-    ctx.font = `bold ${fontSize}px sans-serif, "Segoe UI Emoji", "Apple Color Emoji", AndroidEmoji`;
-    ctx.fillStyle = isMyCurrentTurn
-      ? "#ffffff"
-      : "rgba(255,255,255,0.78)";
+        ctx.font = `bold ${fontSize}px sans-serif, "Segoe UI Emoji", "Apple Color Emoji", AndroidEmoji`;
+        ctx.fillStyle = isMyCurrentTurn
+          ? "#ffffff"
+          : "rgba(255,255,255,0.78)";
 
-    // ایموجی هویت همیشه کنار نام باقی می‌ماند
-    ctx.fillText(
-      `👤 ${shownName}`,
-      titlePos.x,
-      titlePos.y
-    );
+        // نام و ایموجی هویت
+        ctx.fillText(label, titlePos.x, titlePos.y);
 
-    // ایموجی انتخابی بازیکن همچنان جداگانه و با افکت محو نمایش داده می‌شود
-    drawPlayerEmoji(
-      color,
-      titlePos.x,
-      titlePos.y
-    );
+        /*
+          ایموجی واکنش با اندازهٔ واقعی نام محاسبه می‌شود؛
+          بنابراین دقیقاً کنار نام همان بازیکن می‌نشیند.
+        */
+        drawPlayerEmoji(
+          color,
+          titlePos.x,
+          titlePos.y,
+          label
+        );
 
-    ctx.restore();
-  }
-}
+        ctx.restore();
+      }
+    }
+
 
 
     function draw(){
@@ -973,25 +972,63 @@ window.location.replace("/lobby.html");
         if (payload?.matchId) currentMatchId = String(payload.matchId);
       });
       socket.on("game:state", state => {
-        stopDiceAnimation();
         gameState = state;
 
-        const payload = getTokenPayload(); const myUserId = getMyUserIdFromPayload(payload);
-        if (state?.playerColors && myUserId != null) {
-          myColor = colorOrder.find(color => String(state.playerColors[color]) === String(myUserId)) || null;
-        } else { myColor = null; }
-        if (state?.matchId) currentMatchId = String(state.matchId);
-        if (state?.turnId != null) currentTurnId = Number(state.turnId); else currentTurnId = null;
-        const pendingDice = Array.isArray(state?.pendingDice) ? state.pendingDice : [];
-        if (!state?.rolled || pendingDice.length === 0 || pickedDieIndex == null || pendingDice.length <= pickedDieIndex) {
-          pickedDieIndex = null; pickedDieValue = null; clearDiePickUI();
-        } else { pickedDieValue = pendingDice[pickedDieIndex]; }
-        stopLobbyCountdown(); joinStatusEl.textContent = "✅ وضعیت دریافت شد";
-serverMsgEl.textContent = "✅ state دریافت شد.";
-updateUI();
-startTurnTimer();
+        const payload = getTokenPayload();
+        const myUserId = getMyUserIdFromPayload(payload);
 
+        if (state?.playerColors && myUserId != null) {
+          myColor = colorOrder.find(
+            color => String(state.playerColors[color]) === String(myUserId)
+          ) || null;
+        } else {
+          myColor = null;
+        }
+
+        if (state?.matchId) {
+          currentMatchId = String(state.matchId);
+        }
+
+        if (state?.turnId != null) {
+          currentTurnId = Number(state.turnId);
+        } else {
+          currentTurnId = null;
+        }
+
+        const pendingDice = Array.isArray(state?.pendingDice)
+          ? state.pendingDice
+          : [];
+
+        if (
+          !state?.rolled ||
+          pendingDice.length === 0 ||
+          pickedDieIndex == null ||
+          pendingDice.length <= pickedDieIndex
+        ) {
+          pickedDieIndex = null;
+          pickedDieValue = null;
+          clearDiePickUI();
+        } else {
+          pickedDieValue = pendingDice[pickedDieIndex];
+        }
+
+        /*
+          فقط وقتی تاس واقعی از سرور آمده، انیمیشن را قطع کن.
+          state قدیمی با rolled=false دیگر انیمیشن تازهٔ تاس را قطع نمی‌کند.
+        */
+        if (state?.rolled === true || !diceAnimationInterval) {
+          stopDiceAnimation();
+        }
+
+        stopLobbyCountdown();
+        joinStatusEl.textContent = "✅ وضعیت دریافت شد";
+        serverMsgEl.textContent = "✅ state دریافت شد.";
+
+        updateUI();
+        startTurnTimer();
+        requestBoardDraw();
       });
+
       socket.io.on("reconnect_attempt", n => { socketStatusEl.textContent = `🔄 تلاش مجدد (${n})...`; });
       socket.io.on("reconnect", () => {
         stopDiceAnimation();
@@ -1030,13 +1067,26 @@ startTurnTimer();
         } updateUI();
       });
       socket.on("player:emoji_sent", ({ playerColor, emoji }) => {
-        if (playerColor && emoji) {
-          activeEmojis[playerColor] = {
-            emoji: String(emoji),
-            sentAt: Date.now()
-          };
-        }
+        if (!playerColor || !emoji) return;
+
+        const sentAt = Date.now();
+
+        activeEmojis[playerColor] = {
+          emoji: String(emoji),
+          sentAt
+        };
+
+        requestBoardDraw();
+
+        // بعد از ۵ ثانیه پاک می‌شود و Canvas یک بار دیگر رسم می‌شود.
+        setTimeout(() => {
+          if (activeEmojis[playerColor]?.sentAt === sentAt) {
+            delete activeEmojis[playerColor];
+            requestBoardDraw();
+          }
+        }, 5000);
       });
+
 
       socket.connect();
       return socket;
@@ -1046,26 +1096,42 @@ startTurnTimer();
 draw();
 updateUI();
 
-let lastRenderTime = 0;
-function gameLoop(timestamp) {
-  if (timestamp - lastRenderTime >= 33) {
-    lastRenderTime = timestamp;
-try {
-  draw();
-} catch (err) {
-  console.error("[Canvas draw error]", err);
-  if (!window.__lastCanvasDrawErrorAt || Date.now() - window.__lastCanvasDrawErrorAt > 3000) {
-    window.__lastCanvasDrawErrorAt = Date.now();
-    setMsg("خطای رسم بازی؛ کنسول را بررسی کن.");
-  }
+let boardDrawQueued = false;
+
+function requestBoardDraw() {
+  if (boardDrawQueued) return;
+
+  boardDrawQueued = true;
+
+  requestAnimationFrame(() => {
+    boardDrawQueued = false;
+
+    try {
+      draw();
+    } catch (err) {
+      console.error("[Canvas draw error]", err);
+
+      if (
+        !window.__lastCanvasDrawErrorAt ||
+        Date.now() - window.__lastCanvasDrawErrorAt > 3000
+      ) {
+        window.__lastCanvasDrawErrorAt = Date.now();
+        setMsg("خطای رسم بازی؛ کنسول را بررسی کن.");
+      }
+    }
+  });
 }
 
+/*
+  قبلاً Canvas حدود ۳۰ بار در ثانیه حتی در حالت بی‌کاری رسم می‌شد.
+  حالا فقط هر ۹۰۰ میلی‌ثانیه برای چشمک نام و محوشدن ایموجی رندر سبک داریم.
+  تغییرات واقعی بازی نیز فوراً با requestBoardDraw رندر می‌شوند.
+*/
+setInterval(() => {
+  if (gameState) {
+    requestBoardDraw();
   }
-  requestAnimationFrame(gameLoop);
-}
-requestAnimationFrame(gameLoop);
-
-
+}, 900);
 
 
     // اتصال خودکار Socket در صورت وجود توکن
@@ -1081,45 +1147,36 @@ const emojiItems = document.querySelectorAll('.emoji-item');
 
 
 // نمایش اموجی روی Canvas
-function drawPlayerEmoji(playerColor, nameX, nameY) {
-    const emojiData = activeEmojis[playerColor];
-    if (!emojiData) return;
+function drawPlayerEmoji(playerColor, nameX, nameY, playerLabel) {
+  const emojiData = activeEmojis[playerColor];
+  if (!emojiData) return;
 
-    const elapsed = Date.now() - emojiData.sentAt;
+  const elapsed = Date.now() - emojiData.sentAt;
 
-    if (elapsed > 5000) {
-        delete activeEmojis[playerColor];
-        return;
-    }
+  if (elapsed > 5000) {
+    delete activeEmojis[playerColor];
+    return;
+  }
 
-    const fadeDuration = 1000;
-    let alpha = 1;
+  ctx.save();
 
-    if (elapsed > (5000 - fadeDuration)) {
-        alpha = Math.max(
-            0,
-            1 - (elapsed - (5000 - fadeDuration)) / fadeDuration
-        );
-    }
+  /*
+    چون نام با textAlign=center رسم می‌شود، نیمهٔ عرض نام را می‌گیریم
+    و ایموجی واکنش را با فاصلهٔ امن کنار آن می‌گذاریم.
+  */
+  const labelWidth = ctx.measureText(playerLabel).width;
+  const emojiX = nameX + (labelWidth / 2) + 17;
 
-    // جایگاه‌های red و blue بالای صفحه هستند.
-    // برای آن‌ها ایموجی پایین نام قرار می‌گیرد.
-    const isTopPlayer =
-        playerColor === "red" ||
-        playerColor === "blue";
+  ctx.globalAlpha = 1;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "22px serif";
 
-    const emojiY = isTopPlayer
-        ? nameY + 42
-        : nameY - 42;
+  ctx.fillText(emojiData.emoji, emojiX, nameY);
 
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.font = "30px serif";
-    ctx.fillText(emojiData.emoji, nameX, emojiY);
-    ctx.restore();
+  ctx.restore();
 }
+
 
 
 
@@ -1138,13 +1195,46 @@ emojiBtn.addEventListener('click', (event) => {
 
 // انتخاب اموجی و ارسال به سرور
 emojiItems.forEach(item => {
-    item.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const emoji = item.getAttribute('data-emoji');
-        socket.emit('player:emoji_sent', { emoji: emoji });
-        emojiMenu.style.display = 'none';
-    });
+  item.addEventListener("click", event => {
+    event.stopPropagation();
+
+    const emoji = item.getAttribute("data-emoji");
+
+    if (!emoji) return;
+
+    if (!socket || !socket.connected) {
+      setMsg("اتصال به سرور برقرار نیست.");
+      emojiMenu.style.display = "none";
+      return;
+    }
+
+    /*
+      ایموجی خود کاربر همان لحظه روی Canvas می‌آید؛
+      منتظر رفت‌وبرگشت اینترنت و سرور نمی‌ماند.
+    */
+    if (myColor) {
+      const sentAt = Date.now();
+
+      activeEmojis[myColor] = {
+        emoji: String(emoji),
+        sentAt
+      };
+
+      requestBoardDraw();
+
+      setTimeout(() => {
+        if (activeEmojis[myColor]?.sentAt === sentAt) {
+          delete activeEmojis[myColor];
+          requestBoardDraw();
+        }
+      }, 5000);
+    }
+
+    socket.emit("player:emoji_sent", { emoji: String(emoji) });
+    emojiMenu.style.display = "none";
+  });
 });
+
 
 // بستن منو با کلیک بیرون
 document.addEventListener('click', (event) => {
