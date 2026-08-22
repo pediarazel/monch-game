@@ -2737,6 +2737,13 @@ startAfterMs: 30000,
         turnDeadlineAt: m.game.turnDeadlineAt,
       });
 
+      /*
+        بسیار مهم:
+        نتیجهٔ تاس و زمان تازهٔ حرکت باید برای همهٔ اعضای بازی ارسال شود،
+        نه فقط برای بازیکنی که دکمهٔ تاس را زده است.
+      */
+      broadcastState(m);
+
       return callback?.({
         success: true,
         dice1: d1,
@@ -2748,6 +2755,7 @@ startAfterMs: 30000,
         turnDeadlineAt: m.game.turnDeadlineAt,
         winnerColor: null,
       });
+
 
     } catch (e) {
       if (m?.game) {

@@ -874,7 +874,17 @@ const turnColor =
     });
     rollBtn.addEventListener("click", rollDice);
 
-    canvas.addEventListener("click", onBoardClick);
+    /*
+      در موبایل pointerup از click سریع‌تر است و تأخیر لمس کمتری دارد.
+      touchAction نیز تأخیر مربوط به دابل‌تپ مرورگر را کم می‌کند.
+    */
+    canvas.style.touchAction = "manipulation";
+
+    canvas.addEventListener("pointerup", event => {
+      event.preventDefault();
+      onBoardClick(event);
+    }, { passive: false });
+
 
     leaveGameBtn.addEventListener("click", () => {
       if (!currentMatchId) { setMsg("بازی فعالی نیستی."); return; }

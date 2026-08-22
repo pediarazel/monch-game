@@ -469,15 +469,49 @@ function isJwtExpired(token) {
           serverMsgEl.textContent = "در حال تلاش برای اتصال مجدد...";
         });
 
-        socket.on("game:started", payload => {
+        /*
+          جلوگیری از اجرای چندبارهٔ انتقال:
+          ممکن است game:state و game:started پشت‌سرهم برسند.
+        */
+        function goToStartedGame(matchId) {
+          if (!matchId || window.__redirectingToGame) return;
+
+          window.__redirectingToGame = true;
+          currentMatchId = String(matchId);
+
           stopLobbyCountdown();
+          joinInProgress = false;
+          joinBtn.disabled = true;
+
           joinStatusEl.textContent = "🎮 بازی شروع شد!";
           peopleNewsEl.textContent = "در حال انتقال به صفحه بازی...";
-          if (payload?.matchId) {
-            currentMatchId = String(payload.matchId);
-            setTimeout(() => window.location.href = `/game.html?matchId=${currentMatchId}`, 500);
+
+          setTimeout(() => {
+            window.location.href =
+              `/game.html?matchId=${encodeURIComponent(currentMatchId)}`;
+          }, 300);
+        }
+
+        /*
+          مسیر عادی انتقال:
+          سرور پس از شروع بازی game:started را به همه می‌فرستد.
+        */
+        socket.on("game:started", payload => {
+          goToStartedGame(payload?.matchId);
+        });
+
+        /*
+          مسیر پشتیبان:
+          سرور ابتدا game:state و سپس game:started می‌فرستد.
+          اگر در اینترنت ضعیف یا هنگام تغییر اتصال، game:started از دست برود،
+          رسیدن state فعال برای ورود به صفحهٔ بازی کافی خواهد بود.
+        */
+        socket.on("game:state", state => {
+          if (state?.matchId && state?.status === "playing") {
+            goToStartedGame(state.matchId);
           }
         });
+
 
         socket.on("lobby:status", data => {
           if (!data) return;
