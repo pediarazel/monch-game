@@ -1650,72 +1650,126 @@ function clearBotTimers(match) {
 function startTurnTimeout(match) {
   if (!match || !match.game || match.game.winner) return;
 
-  // فقط تایمرهای قبلی را پاک می‌کنیم.
-  // سپس برای نوبت فعلی تایمر جدید ساخته می‌شود.
+  // تایمرهای مربوط به نوبت قبلی کاملاً لغو می‌شوند.
   clearGameTimers(match);
 
-  const myTurnId = match.turnId;
+  // برای هر نوبت، یک شناسهٔ مستقل برای تایمر ساخته می‌شود.
+  match.turnTimerToken = Number(match.turnTimerToken || 0) + 1;
+
+  const expectedMatchId = String(match.matchId);
+  const expectedTurnId = Number(match.turnId);
+  const expectedTimerToken = match.turnTimerToken;
 
   match.game.turnDeadlineAt = Date.now() + TURN_MS;
   match.turnDeadlineAt = match.game.turnDeadlineAt;
+
+  console.log("[TURN_TIMER_STARTED]", {
+    matchId: expectedMatchId,
+    turnId: expectedTurnId,
+    timerToken: expectedTimerToken,
+    currentTurn: match.game.currentTurn,
+    currentColor: colorOrder[match.game.currentTurn],
+    deadlineAt: match.game.turnDeadlineAt,
+  });
 
   broadcastState(match);
 
   match.pendingTurnTimer = setTimeout(() => {
     match.pendingTurnTimer = null;
 
-    const m = matches.get(String(match.matchId));
+    const currentMatch = matches.get(expectedMatchId);
 
-    if (!m) return;
-    if (m.turnId !== myTurnId) return;
-    if (!m.game || m.game.winner) return;
+    if (!currentMatch) {
+      console.log("[TURN_TIMEOUT_IGNORED] match not found", {
+        matchId: expectedMatchId,
+        turnId: expectedTurnId,
+        timerToken: expectedTimerToken,
+      });
+      return;
+    }
+
+    if (!currentMatch.game || currentMatch.game.winner) {
+      console.log("[TURN_TIMEOUT_IGNORED] game ended", {
+        matchId: expectedMatchId,
+        turnId: expectedTurnId,
+        timerToken: expectedTimerToken,
+      });
+      return;
+    }
+
+    // جلوگیری از اجرای تایمر متعلق به نوبت قدیمی
+    if (Number(currentMatch.turnId) !== expectedTurnId) {
+      console.log("[TURN_TIMEOUT_IGNORED] old turnId", {
+        matchId: expectedMatchId,
+        expectedTurnId,
+        actualTurnId: currentMatch.turnId,
+        timerToken: expectedTimerToken,
+      });
+      return;
+    }
+
+    // جلوگیری از اجرای تایمر قدیمی پس از ساخته‌شدن تایمر جدید
+    if (currentMatch.turnTimerToken !== expectedTimerToken) {
+      console.log("[TURN_TIMEOUT_IGNORED] old timerToken", {
+        matchId: expectedMatchId,
+        turnId: expectedTurnId,
+        expectedTimerToken,
+        actualTimerToken: currentMatch.turnTimerToken,
+      });
+      return;
+    }
 
     console.log("[TURN_TIMEOUT_FIRE]", {
-      matchId: m.matchId,
-      turnId: m.turnId,
-      currentTurn: m.game.currentTurn,
-      currentColor: colorOrder[m.game.currentTurn],
-      transitioningBeforeReset: m.game.transitioning,
+      matchId: currentMatch.matchId,
+      turnId: currentMatch.turnId,
+      timerToken: currentMatch.turnTimerToken,
+      currentTurn: currentMatch.game.currentTurn,
+      currentColor: colorOrder[currentMatch.game.currentTurn],
+      transitioningBeforeReset: currentMatch.game.transitioning,
+      rolledBeforeReset: currentMatch.game.rolled,
+      pendingDiceBeforeReset: Array.isArray(currentMatch.game.pendingDice)
+        ? currentMatch.game.pendingDice.slice()
+        : [],
     });
 
-    m.game.transitioning = false;
+    currentMatch.game.transitioning = false;
+    currentMatch.game.rolled = false;
+    currentMatch.game.pendingDice = [];
+    currentMatch.game.dice1 = 0;
+    currentMatch.game.dice2 = 0;
+    currentMatch.game.dice = 0;
+    currentMatch.game.turnMoved = true;
+    currentMatch.game.turnDeadlineAt = null;
+    currentMatch.turnDeadlineAt = null;
 
-    m.game.rolled = false;
-    m.game.pendingDice = [];
-    m.game.dice1 = 0;
-    m.game.dice2 = 0;
-    m.game.dice = 0;
-    m.game.turnMoved = true;
-    m.game.turnDeadlineAt = null;
-    m.turnDeadlineAt = null;
-
-    nextTurn(m);
+    // فقط همین نوبت می‌تواند به نوبت بعدی منتقل شود.
+    nextTurn(currentMatch);
   }, TURN_MS);
 
   scheduleDisconnectedPlayerBot(match);
 }
 
-function nextTurn(match) {
-  console.log("[NEXT_TURN] start", {
-    matchId: match?.matchId,
-    turnId: match?.turnId,
-    currentTurnBefore: match?.game?.currentTurn,
-    currentTurnColorBefore: match?.game
-      ? colorOrder[match.game.currentTurn]
-      : null,
-  });
 
+function nextTurn(match) {
   if (!match || !match.game || match.game.winner) return;
 
-  // جلوگیری از اجرای تایمرهای مربوط به نوبت قبلی
+  console.log("[NEXT_TURN] start", {
+    matchId: match.matchId,
+    turnIdBefore: match.turnId,
+    currentTurnBefore: match.game.currentTurn,
+    currentTurnColorBefore: colorOrder[match.game.currentTurn],
+    transitioningBefore: match.game.transitioning,
+    rolledBefore: match.game.rolled,
+    pendingDiceBefore: Array.isArray(match.game.pendingDice)
+      ? match.game.pendingDice.slice()
+      : [],
+  });
+
+  // همهٔ تایمرهای نوبت قبلی لغو می‌شوند.
   clearGameTimers(match);
 
-  let attempts = 0;
-  do {
-    match.game.currentTurn = (match.game.currentTurn + 1) % colorOrder.length;
-    attempts++;
-  } while (attempts < colorOrder.length && match.playerColors[colorOrder[match.game.currentTurn]] == null);
-
+  // آزادسازی کامل وضعیت پردازشی نوبت قبلی
+  match.game.transitioning = false;
   match.game.dice = 0;
   match.game.dice1 = 0;
   match.game.dice2 = 0;
@@ -1723,17 +1777,56 @@ function nextTurn(match) {
   match.game.rolled = false;
   match.game.turnMoved = false;
   match.game.turnDeadlineAt = null;
+  match.turnDeadlineAt = null;
 
-  match.turnId = (match.turnId || 0) + 1;
-
-  console.log("[NEXT_TURN] after change", {
-    matchId: match?.matchId,
-    turnId: match?.turnId,
-    currentTurnAfter: match?.game?.currentTurn,
-    currentTurnColorAfter: match?.game ? colorOrder[match.game.currentTurn] : null,
+  const activeColors = colorOrder.filter((color) => {
+    return match.playerColors?.[color] != null;
   });
 
+  if (activeColors.length === 0) {
+    console.error("[NEXT_TURN_ABORTED] no active players", {
+      matchId: match.matchId,
+    });
+    return;
+  }
 
+  let attempts = 0;
+
+  do {
+    match.game.currentTurn =
+      (match.game.currentTurn + 1) % colorOrder.length;
+
+    attempts++;
+  } while (
+    attempts <= colorOrder.length &&
+    match.playerColors?.[colorOrder[match.game.currentTurn]] == null
+  );
+
+  // اگر به هر دلیل رنگ فعال پیدا نشد، نوبت را خراب نکن.
+  const selectedColor = colorOrder[match.game.currentTurn];
+
+  if (match.playerColors?.[selectedColor] == null) {
+    const fallbackColor = activeColors[0];
+    match.game.currentTurn = colorOrder.indexOf(fallbackColor);
+
+    console.warn("[NEXT_TURN_FALLBACK_COLOR]", {
+      matchId: match.matchId,
+      fallbackColor,
+    });
+  }
+
+  match.turnId = Number(match.turnId || 0) + 1;
+
+  console.log("[NEXT_TURN] after change", {
+    matchId: match.matchId,
+    turnIdAfter: match.turnId,
+    currentTurnAfter: match.game.currentTurn,
+    currentTurnColorAfter: colorOrder[match.game.currentTurn],
+    nextUserId:
+      match.playerColors?.[colorOrder[match.game.currentTurn]] ?? null,
+  });
+
+  // ساخت تایمر تازه برای نوبت جدید
   startTurnTimeout(match);
 }
 
@@ -2953,14 +3046,6 @@ const piece = m.game.pieces.find(
     });
 
 
-    console.log("[MOVE_AFTER_CONSUME]", {
-      matchId,
-      pendingDice: m.game.pendingDice,
-      dice1: m.game.dice1,
-      dice2: m.game.dice2,
-      diceSum: m.game.dice
-    });
-
     const hasWon = checkWinner(m.game, currentColor);
     if (hasWon) {
       m.game.winner = currentColor;
@@ -3089,7 +3174,6 @@ const piece = m.game.pieces.find(
         m.game.dice1 = 0;
         m.game.dice2 = 0;
         m.game.dice = 0;
-        m.game.transitioning = false;
         nextTurn(m);
         broadcastState(m);
 
@@ -3101,6 +3185,7 @@ const piece = m.game.pieces.find(
           winnerColor: null,
           noLegalMovesAfterConsume: true,
         });
+
       }
 
       broadcastState(m);
@@ -3115,9 +3200,9 @@ const piece = m.game.pieces.find(
 
     // 3. اگر جفت ۶ نبود و هیچ تاس دیگری باقی نمانده، نوبت بعدی
     m.game.turnMoved = true;
-    m.game.transitioning = false;
     nextTurn(m);
     broadcastState(m);
+
 
     return callback?.({
       success: true,

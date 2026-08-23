@@ -193,7 +193,9 @@ function isJwtExpired(token) {
           if (res.ok && data?.token) {
             localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
             setAuthResult("ورود موفقیت‌آمیز بود. در حال انتقال به لابی...", "success");
-            setTimeout(() => window.location.href = "/lobby.html", 1500);
+            window.location.href = "/lobby.html";
+
+
           } else {
             setAuthResult(data?.message || "خطا در ورود", "error");
           }
@@ -234,7 +236,10 @@ function isJwtExpired(token) {
           if (res.ok && data?.token) {
             localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
             setAuthResult("ثبت‌نام موفقیت‌آمیز بود. در حال انتقال به لابی...", "success");
-            setTimeout(() => window.location.href = "/lobby.html", 1500);
+            window.location.href = "/lobby.html";
+
+
+
           } else {
             setAuthResult(data?.message || "خطا در ثبت‌نام", "error");
           }
@@ -251,7 +256,8 @@ function isJwtExpired(token) {
       const token = getToken();
       if (token && !isJwtExpired(token)) {
         setAuthResult("توکن معتبر است. در حال انتقال به لابی...", "success");
-        setTimeout(() => window.location.href = "/lobby.html", 1500);
+window.location.href = "/lobby.html";
+
       } else {
         if (token) {
           console.log("Token is expired, clearing it.");

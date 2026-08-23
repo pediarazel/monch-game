@@ -307,51 +307,75 @@ function isJwtExpired(token) {
         // رفرش خودکار غیرفعال است.
       }
 
-      async function updateBalance() {
-        const token = getToken();
+async function updateBalance() {
+  const token = getToken();
 
-        if (!token || isJwtExpired(token)) {
-          balanceValueEl.textContent = "0 تومان";
-          stopBalanceAutoRefresh();
-          return;
-        }
+  if (!token || isJwtExpired(token)) {
+    balanceValueEl.textContent = "0 تومان";
+    if (usernameTextEl) usernameTextEl.textContent = "مهمان";
+    stopBalanceAutoRefresh();
+    return;
+  }
 
-        try {
-          const res = await fetch(api("/api/me/balance"), {
-            method: "GET",
-            headers: {
-              "Authorization": "Bearer " + token
-            },
-            cache: "no-store"
-          });
+  try {
+    const res = await fetch(api("/api/me/balance"), {
+      method: "GET",
+      headers: {
+        "Authorization": "Bearer " + token
+      },
+      cache: "no-store"
+    });
 
-          let data;
-          try {
-            data = await res.json();
-          } catch {
-            data = null;
-          }
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
 
-          if (res.ok && data && data.coins != null) {
-            const value = Number(data.coins || 0) * 1000;
-            balanceValueEl.textContent = `${value.toLocaleString("en-US")} تومان`;
-            return;
-          }
-
-          if (!res.ok && res.status === 401) {
-            console.log("Balance fetch failed: 401 Unauthorized. Clearing token.");
-            clearToken();
-            stopBalanceAutoRefresh();
-            balanceValueEl.textContent = "0 تومان";
-            window.location.href = "/index.html";
-            return;
-          }
-
-          console.error("Balance fetch failed:", res.status, data);
-        } catch (e) {
-          console.error("Balance update error:", e);
-        }
+    if (res.ok && data) {
+      if (data.coins != null) {
+        const value = Number(data.coins || 0) * 1000;
+        balanceValueEl.textContent =
+          `${value.toLocaleString("en-US")} تومان`;
       }
+
+      if (data.username && usernameTextEl) {
+        currentUsername = String(data.username);
+        usernameTextEl.textContent = currentUsername;
+
+        copyBtn.onclick = () => {
+          navigator.clipboard.writeText(currentUsername).then(() => {
+            const originalText = copyBtn.textContent;
+            copyBtn.textContent = "✅";
+
+            setTimeout(() => {
+              copyBtn.textContent = originalText;
+            }, 1500);
+          }).catch(err => {
+            console.error("خطا در کپی:", err);
+          });
+        };
+      }
+
+      return;
+    }
+
+    if (!res.ok && res.status === 401) {
+      console.log("Balance fetch failed: 401 Unauthorized. Clearing token.");
+      clearToken();
+      stopBalanceAutoRefresh();
+      balanceValueEl.textContent = "0 تومان";
+      window.location.href = "/index.html";
+      return;
+    }
+
+    console.error("Balance fetch failed:", res.status, data);
+  } catch (e) {
+    console.error("Balance update error:", e);
+  }
+}
+
 
       const refreshBalanceBtn = document.getElementById("refreshBalanceBtn");
 
@@ -377,39 +401,14 @@ function isJwtExpired(token) {
       const copyBtn = document.getElementById('copyBtn');
       let currentUsername = "";
 
-      async function updateUsernameDisplay() {
+      function updateUsernameDisplay() {
         if (!usernameTextEl) return;
-        const token = getToken();
-        if (!token || isJwtExpired(token)) {
-          usernameTextEl.textContent = "مهمان";
-          return;
-        }
-        try {
-          const res = await fetch(api("/api/me/balance"), {
-            method: "GET", headers: { "Authorization": "Bearer " + token }, cache: "no-store"
-          });
-          let data;
-          try { data = await res.json(); } catch { data = null; }
-          if (res.ok && data && data.username) {
-            currentUsername = String(data.username);
-            usernameTextEl.textContent = currentUsername;
-            copyBtn.onclick = () => {
-              navigator.clipboard.writeText(currentUsername).then(() => {
-                const originalText = copyBtn.textContent;
-                copyBtn.textContent = "✅";
-                setTimeout(() => copyBtn.textContent = originalText, 1500);
-              }).catch(err => {
-                console.error('خطا در کپی:', err);
-              });
-            };
-          } else {
-            usernameTextEl.textContent = "نام نامشخص";
-          }
-        } catch (e) {
-          console.error("Error loading username:", e);
-          usernameTextEl.textContent = "خطا در دریافت نام";
+
+        if (!currentUsername) {
+          usernameTextEl.textContent = "نام کاربری";
         }
       }
+
 
 
       // --- Lobby Logic ---
@@ -437,8 +436,7 @@ function isJwtExpired(token) {
 
         socket.on("connect", () => {
           socketStatusEl.textContent = `✅ متصل به سرور (${socket.id})`;
-          updateBalance();
-                    updateUsernameDisplay();
+
 
           socket.emit("game:restoreSession", {}, (resp) => {
              if (resp?.success && resp?.restored && resp?.matchId) {
@@ -790,7 +788,7 @@ tierInput.disabled = true;
       }
 
       // نمایش نام کاربری هنگام بارگذاری صفحه
-      updateUsernameDisplay();
+
       socket.on("lobby:stats", (data) => {
         if (!data) return;
         document.getElementById('statsOnlineCount').textContent = Number(data.online || 0).toLocaleString('en-US');
