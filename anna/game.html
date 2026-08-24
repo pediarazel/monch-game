@@ -87,7 +87,24 @@
     @keyframes blink{from{opacity:0.3;}to{opacity:1;}}
     .rolling{animation:shake 0.1s infinite;}
     @keyframes shake{0%{transform:rotate(0deg);}25%{transform:rotate(10deg);}75%{transform:rotate(-10deg);}100%{transform:rotate(0deg);}}
+    #netAlertBanner {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 9999;
+      background: #dc2626;
+      color: #fff;
+      text-align: center;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-weight: 700;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      animation: blink 0.7s ease-in-out infinite alternate;
+    }
     #msg{color:#f1c40f;font-size:14px;text-align:center;min-height:20px;}
+
     #turnInfo{font-size:14px;text-align:center;min-height:20px;color:#ccc;}
     #socketStatus{font-size:12px;text-align:center;color:#888;min-height:16px;}
     #joinStatus{font-size:12px;text-align:center;color:#888;min-height:16px;}
@@ -110,7 +127,9 @@
 </head>
 
 <body>
+  <div id="netAlertBanner">⚠️ اتصال شما به اینترنت یا سرور قطع شد. در حال تلاش برای اتصال مجدد...</div>
   <div id="app">
+
     <canvas id="board" width="600" height="600"></canvas>
 
     <div class="panel">
@@ -1133,7 +1152,32 @@ window.location.replace("/lobby.html");
         reconnection: true, reconnectionAttempts: Infinity, reconnectionDelay: 1000, reconnectionDelayMax: 5000
       });
 
+      const netAlertBannerEl = document.getElementById("netAlertBanner");
+      function showNetAlert(text, isWarning) {
+        if (!netAlertBannerEl) return;
+        netAlertBannerEl.textContent = text;
+        netAlertBannerEl.style.background = isWarning ? "#d97706" : "#dc2626";
+        netAlertBannerEl.style.display = "block";
+      }
+      function hideNetAlert() {
+        if (!netAlertBannerEl) return;
+        netAlertBannerEl.style.display = "none";
+      }
+
+      window.addEventListener("offline", () => {
+        showNetAlert("⚠️ اینترنت شما قطع شد! لطفاً اتصال شبکه را بررسی کنید.", false);
+      });
+      window.addEventListener("online", () => {
+        if (socket && socket.connected) {
+          hideNetAlert();
+        } else {
+          showNetAlert("🔄 اینترنت وصل شد. در حال اتصال به بازی...", true);
+        }
+      });
+
       socket.on("connect", async () => {
+        hideNetAlert();
+        moveInFlight = false;
         socketStatusEl.textContent = "✅ سوکت متصل شد (" + socket.id + ")";
         serverMsgEl.textContent = "✅ اتصال آنلاین برقرار شد.";
         await updateBalance().catch(()=>{});
@@ -1146,12 +1190,17 @@ window.location.replace("/lobby.html");
         });
       });
       socket.on("connect_error", error => {
+        moveInFlight = false;
+        showNetAlert("⚠️ قطع ارتباط با سرور. در حال اتصال مجدد...", false);
         socketStatusEl.textContent = "❌ خطا: " + (error?.message || String(error));
         setDebug({ socketConnectError: { message: error?.message || String(error) } });
       });
       socket.on("disconnect", reason => {
+        moveInFlight = false;
         stopDiceAnimation();
-        stopLobbyCountdown(); socketStatusEl.textContent = "⚠️ قطع شد: " + (reason || "نامشخص");
+        stopLobbyCountdown();
+        showNetAlert("⚠️ اتصال به سرور قطع شد (" + (reason || "نامشخص") + "). در حال اتصال مجدد...", false);
+        socketStatusEl.textContent = "⚠️ قطع شد: " + (reason || "نامشخص");
       });
 
       socket.on("lobby:status", data => {
@@ -1161,11 +1210,13 @@ window.location.replace("/lobby.html");
         else if (data?.searchingFor) peopleNewsEl.textContent = `⏳ جستجوی نفر ${data.searchingFor}...`;
       });
       socket.on("match:error", payload => {
+        moveInFlight = false;
         stopLobbyCountdown(); const message = payload?.message || "خطا";
         joinStatusEl.textContent = "❌ match:error"; serverMsgEl.textContent = "❌ " + message;
         setMsg(message); joinInProgress = false;
       });
       socket.on("game:started", payload => {
+        moveInFlight = false;
         stopLobbyCountdown(); joinStatusEl.textContent = "🎮 بازی شروع شد";
         serverMsgEl.textContent = "🎮 بازی شروع شد."; setMsg("بازی شروع شد.");
         peopleNewsEl.textContent = "";
@@ -1173,6 +1224,8 @@ window.location.replace("/lobby.html");
       });
       socket.on("game:state", state => {
         gameState = state;
+        moveInFlight = false;
+
 
         const payload = getTokenPayload();
         const myUserId = getMyUserIdFromPayload(payload);
