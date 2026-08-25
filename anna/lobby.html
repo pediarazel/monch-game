@@ -170,11 +170,12 @@ input, select{
         <div style="max-width:260px; width:100%;">
           <label class="muted" for="tierInput" style="display:block; margin-bottom:6px; text-align:center;">قیمت اتاق</label>
           <select id="tierInput">
-            <option value="20">20,000 تومان</option>
-            <option value="50" selected>50,000 تومان</option>
-            <option value="100">100,000 تومان</option>
-            <option value="200">200,000 تومان</option>
+            <option value="20" id="optTier20">20,000 تومان (👥 0/4)</option>
+            <option value="50" id="optTier50" selected>50,000 تومان (👥 0/4)</option>
+            <option value="100" id="optTier100">100,000 تومان (👥 0/4)</option>
+            <option value="200" id="optTier200">200,000 تومان (👥 0/4)</option>
           </select>
+
         </div>
 
         <button id="joinBtn" style="background:#3b82f6;color:#fff; font-weight:700;">
@@ -804,12 +805,21 @@ tierInput.disabled = true;
 
       socket.on("lobby:stats", (data) => {
         if (!data) return;
-        document.getElementById('statsOnlineCount').textContent = Number(data.online || 0).toLocaleString('en-US');
+        const onlineEl = document.getElementById("statsOnlineCount");
+        if (onlineEl) onlineEl.textContent = Number(data.online || 0).toLocaleString("en-US");
+
+        const tierNames = { 20: "20,000", 50: "50,000", 100: "100,000", 200: "200,000" };
         [20, 50, 100, 200].forEach(tier => {
-          const el = document.getElementById(`statsTier${tier}`);
-          if (el) el.textContent = `👥 ${Number(data.tiers?.[tier]?.inGame || 0).toLocaleString('en-US')} نفر`;
+          const waitingCount = Number(data.tiers?.[tier]?.waiting || data.tiers?.[tier]?.inQueue || 0);
+          const optEl = document.getElementById("optTier" + tier);
+          if (optEl) {
+            optEl.textContent = `${tierNames[tier]} تومان (👥 ${waitingCount}/4)`;
+          }
+          const el = document.getElementById("statsTier" + tier);
+          if (el) el.textContent = `👥 ${Number(data.tiers?.[tier]?.inGame || 0).toLocaleString("en-US")} نفر`;
         });
       });
+
 
     })(); // End of IIFE
 
