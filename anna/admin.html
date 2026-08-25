@@ -71,8 +71,14 @@
     <input id="username" type="text" placeholder="مثلا ali" />
 
 <label for="amount">مبلغ (تومان)</label>
-<input id="amount" type="number" inputmode="numeric" step="1000" min="1000" placeholder="مثلاً 100000" />
-<div class="small-note">فقط مضرب ۱٬۰۰۰ وارد کن؛ مثال: 100000 یعنی صد هزار تومان.</div>
+<input
+  id="amount"
+  type="text"
+  inputmode="numeric"
+  placeholder="مثلاً 100,000"
+/>
+
+
 
 
     <label for="action">عملیات</label>
@@ -150,17 +156,19 @@
       return;
     }
 
-    const amountToman = Number(amountRaw);
+const amountToman = Number(amountRaw.replace(/,/g, ""));
+
 
     if (!Number.isInteger(amountToman) || amountToman <= 0) {
       showResult("مبلغ باید یک عدد صحیح و بزرگ‌تر از صفر باشد.");
       return;
     }
 
-    if (amountToman % 1000 !== 0) {
-      showResult("مبلغ باید مضرب ۱٬۰۰۰ تومان باشد؛ مثال: 50000 یا 100000.");
-      return;
-    }
+if (amountToman % 1000 !== 0) {
+  showResult("مبلغ را به هزار تومان وارد کن.");
+  return;
+}
+
 
     try {
       const res = await fetch("/admin/update-balance-by-username", {
@@ -271,6 +279,14 @@
     } catch (e) {
       showTreasuryResult("خطا در ارتباط با سرور");
     }
+  });
+</script>
+<script>
+  document.querySelectorAll('input[id*="amount" i], input[id*="Amount" i]').forEach((input) => {
+    input.addEventListener('input', () => {
+      const onlyNumbers = input.value.replace(/[^\d]/g, '');
+      input.value = onlyNumbers.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    });
   });
 </script>
 
