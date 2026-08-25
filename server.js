@@ -2371,8 +2371,11 @@ if (
           lobby.playerNamesByUserId = {};
         }
 
-        lobby.playerNamesByUserId[String(uid)] = lobbyUser.username;
-        lobby.playerUidsInOrder.push(uid);
+lobby.playerNamesByUserId[String(uid)] = lobbyUser.username;
+lobby.playerUidsInOrder.push(uid);
+
+// ارسال فوری تعداد جدید بازیکنان به همه کاربران لابی
+emitLobbyStats();
 
       }
 
@@ -2469,7 +2472,9 @@ startAfterMs: 30000,
           }
 
           lobby.playerUidsInOrder.splice(index, 1);
+          emitLobbyStats();
           stopLobbyTimer(lobby);
+
 
           const remainingCount = lobby.playerUidsInOrder.length;
           lobby.lobbyPhase = getLobbyPhaseFromCount(remainingCount);
@@ -2621,10 +2626,10 @@ startAfterMs: 30000,
         // کاربر باید پیش از بررسی مسابقه آفلاین علامت‌گذاری شود تا
         // زمان‌بندی ربات بتواند نبودن او در connectedUsers را تشخیص دهد.
         connectedUsers.delete(String(uid));
-        emitLobbyStats();
 
 
         // ۱. بررسی لابی‌ها
+
         for (const [tier, lobby] of tierLobbies.entries()) {
           if (!lobby) continue;
 
@@ -2653,8 +2658,12 @@ startAfterMs: 30000,
           }
         }
 
+        // ارسال آمار پس از حذف بازیکن از لابی
+        emitLobbyStats();
+
 
         // ۲. مدیریت قطع اتصال در حین مسابقه
+
         // بازیکن بازنده نمی‌شود؛ تا زمان بازگشت، کنترل نوبت‌هایش با منطق خودکار ادامه پیدا می‌کند.
 
         for (const match of matches.values()) {
