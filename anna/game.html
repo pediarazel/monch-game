@@ -109,21 +109,17 @@
     .ping-badge {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      background: rgba(255, 255, 255, 0.05);
+      gap: 5px;
+      background: rgba(0, 0, 0, 0.3);
       border: 1px solid rgba(212, 175, 55, 0.3);
-      padding: 1px 6px;
-      border-radius: 10px;
+      padding: 2px 8px;
+      border-radius: 12px;
       font-size: 11px;
       font-family: monospace, sans-serif;
-      color: #aaa;
+      color: #22c55e;
+      cursor: default;
     }
-    .ping-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: #22c55e;
-    }
+
 
     #socketStatus{font-size:12px;text-align:center;color:#888;min-height:16px;}
     #joinStatus{font-size:12px;text-align:center;color:#888;min-height:16px;}
@@ -186,9 +182,9 @@
         <div id="turnInfo">
           <span id="turnInfoText"></span>
           <span id="pingBadge" class="ping-badge">
-            <span id="pingDot" class="ping-dot"></span>
-            <span id="pingText">-- ms</span>
+            📶 <span id="pingText">-- ms</span>
           </span>
+
         </div>
         <div id="msg"></div>
       </div>
@@ -695,7 +691,8 @@ const opacity = isMyTurnPiece
     function updateUI() {
       if (!gameState) {
         rollBtn.disabled = true;
-        turnInfo.textContent = "";
+document.getElementById("turnInfoText").textContent = "";
+
         setMsg("بازی هنوز شروع نشده است.");
         dice1El.textContent = "🎲"; dice2El.textContent = "🎲";
         pickedDieValue = null; clearDiePickUI();
@@ -1097,7 +1094,8 @@ const turnColor =
       joinStatusEl.textContent = ""; peopleNewsEl.textContent = "";
       serverMsgEl.textContent = "Tier را انتخاب کن و دوباره وارد صف شو.";
       socketStatusEl.textContent = "از بازی/صف خارج شدی.";
-      turnInfo.textContent = ""; setMsg(message || "از بازی خارج شدی.");
+document.getElementById("turnInfoText").textContent = ""; setMsg(message || "از بازی خارج شدی.");
+
       draw(); updateUI();
     }
 
@@ -1211,26 +1209,27 @@ window.location.replace("/lobby.html");
       let pingInterval = null;
 
       function updatePingUI(ms) {
-        const pingDot = document.getElementById("pingDot");
+        const pingBadge = document.getElementById("pingBadge");
         const pingText = document.getElementById("pingText");
-        if (!pingDot || !pingText) return;
+        if (!pingBadge || !pingText) return;
 
         pingText.textContent = `${ms}ms`;
 
         if (ms < 150) {
-          pingDot.style.background = "#22c55e";
-          pingText.style.color = "#22c55e";
+          pingBadge.style.color = "#22c55e"; // سبز (عالی)
+          pingBadge.style.borderColor = "rgba(34, 197, 94, 0.4)";
         } else if (ms < 300) {
-          pingDot.style.background = "#eab308";
-          pingText.style.color = "#eab308";
+          pingBadge.style.color = "#eab308"; // زرد (متوسط)
+          pingBadge.style.borderColor = "rgba(234, 179, 8, 0.4)";
         } else if (ms < 500) {
-          pingDot.style.background = "#f97316";
-          pingText.style.color = "#f97316";
+          pingBadge.style.color = "#f97316"; // نارنجی (ضعیف)
+          pingBadge.style.borderColor = "rgba(249, 115, 22, 0.4)";
         } else {
-          pingDot.style.background = "#ef4444";
-          pingText.style.color = "#ef4444";
+          pingBadge.style.color = "#ef4444"; // قرمز (بسیار ضعیف / قطع)
+          pingBadge.style.borderColor = "rgba(239, 68, 68, 0.4)";
         }
       }
+
 
       function startPingMeasurement() {
         if (pingInterval) clearInterval(pingInterval);
