@@ -105,7 +105,26 @@
     }
     #msg{color:#f1c40f;font-size:14px;text-align:center;min-height:20px;}
 
-    #turnInfo{font-size:14px;text-align:center;min-height:20px;color:#ccc;}
+    #turnInfo{font-size:14px;text-align:center;min-height:20px;color:#ccc;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;}
+    .ping-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(212, 175, 55, 0.3);
+      padding: 1px 6px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-family: monospace, sans-serif;
+      color: #aaa;
+    }
+    .ping-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #22c55e;
+    }
+
     #socketStatus{font-size:12px;text-align:center;color:#888;min-height:16px;}
     #joinStatus{font-size:12px;text-align:center;color:#888;min-height:16px;}
     #peopleNews{font-size:12px;text-align:center;color:#888;min-height:16px;}
@@ -164,9 +183,16 @@
       </div>
 
       <div class="info">
-        <div id="turnInfo"></div>
+        <div id="turnInfo">
+          <span id="turnInfoText"></span>
+          <span id="pingBadge" class="ping-badge">
+            <span id="pingDot" class="ping-dot"></span>
+            <span id="pingText">-- ms</span>
+          </span>
+        </div>
         <div id="msg"></div>
       </div>
+
     </div>
 
     <div class="panel">
@@ -760,7 +786,14 @@ const turnColor =
 
         const myColorText = myColor ? colorLabel[myColor] : "تماشاچی";
         const turnColorText = turnColor ? colorLabel[turnColor] : "نامشخص";
-        turnInfo.innerHTML = `نوبت: <span class="tag ${turnColor}">${turnColorText}</span> | ${myColorText} | زمان: <b style="color:#ef4444;font-size:16px;">${secs !== null ? secs : "-"}</b> ثانیه`;
+        const turnTextEl = document.getElementById("turnInfoText");
+        const htmlContent = `نوبت: <span class="tag ${turnColor}">${turnColorText}</span> | ${myColorText} | زمان: <b style="color:#ef4444;font-size:16px;">${secs !== null ? secs : "-"}</b> ثانیه`;
+        if (turnTextEl) {
+          turnTextEl.innerHTML = htmlContent;
+        } else {
+          turnInfo.innerHTML = htmlContent;
+        }
+
       };
       renderCountdown(); turnTimerInterval = setInterval(renderCountdown, 500);
     }
@@ -1175,12 +1208,52 @@ window.location.replace("/lobby.html");
         }
       });
 
+      let pingInterval = null;
+
+      function updatePingUI(ms) {
+        const pingDot = document.getElementById("pingDot");
+        const pingText = document.getElementById("pingText");
+        if (!pingDot || !pingText) return;
+
+        pingText.textContent = `${ms}ms`;
+
+        if (ms < 150) {
+          pingDot.style.background = "#22c55e";
+          pingText.style.color = "#22c55e";
+        } else if (ms < 300) {
+          pingDot.style.background = "#eab308";
+          pingText.style.color = "#eab308";
+        } else if (ms < 500) {
+          pingDot.style.background = "#f97316";
+          pingText.style.color = "#f97316";
+        } else {
+          pingDot.style.background = "#ef4444";
+          pingText.style.color = "#ef4444";
+        }
+      }
+
+      function startPingMeasurement() {
+        if (pingInterval) clearInterval(pingInterval);
+        const measure = () => {
+          if (!socket || !socket.connected) return;
+          const start = Date.now();
+          socket.emit("app:ping", start, (clientTime) => {
+            const rtt = Date.now() - Number(clientTime || start);
+            updatePingUI(rtt);
+          });
+        };
+        measure();
+        pingInterval = setInterval(measure, 3000);
+      }
+
       socket.on("connect", async () => {
         hideNetAlert();
         moveInFlight = false;
+        startPingMeasurement();
         socketStatusEl.textContent = "✅ سوکت متصل شد (" + socket.id + ")";
         serverMsgEl.textContent = "✅ اتصال آنلاین برقرار شد.";
         await updateBalance().catch(()=>{});
+
         socket.emit("game:restoreSession", {}, (resp) => {
           if (resp?.success && resp?.restored && resp?.matchId) {
             currentMatchId = String(resp.matchId);
@@ -1196,6 +1269,13 @@ window.location.replace("/lobby.html");
         setDebug({ socketConnectError: { message: error?.message || String(error) } });
       });
       socket.on("disconnect", reason => {
+        if (pingInterval) {
+          clearInterval(pingInterval);
+          pingInterval = null;
+        }
+        updatePingUI(999);
+
+
         moveInFlight = false;
         stopDiceAnimation();
         stopLobbyCountdown();

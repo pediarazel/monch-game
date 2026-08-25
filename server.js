@@ -2702,7 +2702,13 @@ startAfterMs: 30000,
     }
   });
 
+  // اندازه‌گیری پینگ رفت‌وبرگشت کلاینت
+  socket.on("app:ping", (clientTime, callback) => {
+    if (typeof callback === "function") callback(clientTime);
+  });
+
   socket.on("game:roll", (payload, callback) => {
+
     let m;
     try {
       const matchId = String(payload?.matchId ?? "");
