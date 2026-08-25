@@ -1109,7 +1109,7 @@ function resetMatchGame(match) {
 
 function broadcastState(match) {
   if (!match.game) return;
-
+/*
   console.log("[BROADCAST_STATE]", {
     matchId: match.matchId,
     currentTurn: match.game.currentTurn,
@@ -1120,7 +1120,7 @@ function broadcastState(match) {
     pendingDice: match.game.pendingDice,
     rolled: match.game.rolled,
   });
-
+*/
   const activeColor = colorOrder[match.game.currentTurn];
 
   io.to(`match:${match.matchId}`).emit("game:state", {
@@ -1985,17 +1985,23 @@ async function startMatchFromLobby(lobby, filledColors) {
   if (lobby.lobbyTimer) clearTimeout(lobby.lobbyTimer);
   lobby.lobbyTimer = null;
 
-  for (const uid of lobby.playerUidsInOrder) {
+await Promise.all(
+  lobby.playerUidsInOrder.map(async (uid) => {
     const sid = connectedUsers.get(String(uid));
-    if (sid) {
-      const targetSocket = io.sockets.sockets.get(sid);
-      if (targetSocket) {
-        await targetSocket.join(`match:${match.matchId}`);
-        await targetSocket.leave('lobby');
-      }
-      match.players.set(uid, sid);
+
+    if (!sid) return;
+
+    const targetSocket = io.sockets.sockets.get(sid);
+
+    if (targetSocket) {
+      await targetSocket.join(`match:${match.matchId}`);
+      await targetSocket.leave("lobby");
     }
-  }
+
+    match.players.set(uid, sid);
+  })
+);
+
 
   // بعد از join room ها
   const ok = await startMatch(match);
@@ -2749,7 +2755,7 @@ startAfterMs: 30000,
         // بنابراین بعد از حرکت اول هم می‌دانیم تاس اولیه جفت ۶ بوده است.
         m.game.isDoubleSixRoll = d1 === 6 && d2 === 6;
 
-
+/*
         console.log("[ROLL_RESULT]", {
           matchId: m.matchId,
           currentTurn: m.game.currentTurn,
@@ -2758,7 +2764,7 @@ startAfterMs: 30000,
           dice2: d2,
           diceSum: d1 + d2,
         });
-
+*/
         // هر دو تاس، از جمله جفت ۶، برای انتخاب و حرکت نگه داشته می‌شوند.
         m.game.pendingDice = [d1, d2];
         m.game.rolled = true;
@@ -2830,12 +2836,6 @@ startAfterMs: 30000,
         turnDeadlineAt: m.game.turnDeadlineAt,
       });
 
-      /*
-        بسیار مهم:
-        نتیجهٔ تاس و زمان تازهٔ حرکت باید برای همهٔ اعضای بازی ارسال شود،
-        نه فقط برای بازیکنی که دکمهٔ تاس را زده است.
-      */
-      broadcastState(m);
 
       return callback?.({
         success: true,
@@ -2871,7 +2871,7 @@ socket.on("game:move", async (payload, callback) => {
     const pieceId = String(payload?.pieceId ?? "");
     const dieValue = Number(payload?.dieValue);
     const dieIndex = Number(payload?.dieIndex);
-
+/*
     console.log("[MOVE_REQ]", {
       matchId,
       pieceId,
@@ -2881,7 +2881,7 @@ socket.on("game:move", async (payload, callback) => {
       serverTurnId: matches.get(matchId)?.turnId,
       pendingDice: matches.get(matchId)?.game?.pendingDice
     });
-
+*/
     m = matches.get(matchId);
     if (!m || !m.game) {
       // اگر مسابقه پیدا نشد، قفلی فعال نبوده که بخواهیم ریست کنیم.
@@ -3036,7 +3036,7 @@ const piece = m.game.pieces.find(
     m.game.dice1 = m.game.pendingDice[0] ? Number(m.game.pendingDice[0]) : 0;
     m.game.dice2 = m.game.pendingDice[1] ? Number(m.game.pendingDice[1]) : 0;
     m.game.dice = m.game.dice1 + m.game.dice2;
-
+/*
     console.log("[MOVE_AFTER_CONSUME]", {
       matchId,
       pendingDice: m.game.pendingDice,
@@ -3044,7 +3044,7 @@ const piece = m.game.pieces.find(
       dice2: m.game.dice2,
       diceSum: m.game.dice
     });
-
+*/
 
     const hasWon = checkWinner(m.game, currentColor);
     if (hasWon) {
@@ -3175,7 +3175,6 @@ const piece = m.game.pieces.find(
         m.game.dice2 = 0;
         m.game.dice = 0;
         nextTurn(m);
-        broadcastState(m);
 
         return callback?.({
           success: true,
@@ -3201,7 +3200,6 @@ const piece = m.game.pieces.find(
     // 3. اگر جفت ۶ نبود و هیچ تاس دیگری باقی نمانده، نوبت بعدی
     m.game.turnMoved = true;
     nextTurn(m);
-    broadcastState(m);
 
 
     return callback?.({

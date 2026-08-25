@@ -454,7 +454,8 @@ async function updateBalance() {
              if (resp?.success && resp?.restored && resp?.matchId) {
                 currentMatchId = String(resp.matchId);
                 serverMsgEl.textContent = "بازی شما بازیابی شد. در حال انتقال...";
-                setTimeout(() => window.location.href = `/game.html?matchId=${currentMatchId}`, 1000);
+goToStartedGame(currentMatchId);
+
               }
           });
         });
@@ -496,10 +497,10 @@ async function updateBalance() {
           joinStatusEl.textContent = "🎮 بازی شروع شد!";
           peopleNewsEl.textContent = "در حال انتقال به صفحه بازی...";
 
-          setTimeout(() => {
-            window.location.href =
-              `/game.html?matchId=${encodeURIComponent(currentMatchId)}`;
-          }, 300);
+window.location.replace(
+  `/game.html?matchId=${encodeURIComponent(currentMatchId)}`
+);
+
         }
 
         /*
