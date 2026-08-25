@@ -743,19 +743,56 @@ function createLobby(tier) {
 }
 const LOBBY_TIERS = [20, 50, 100, 200];
 function computeLobbyStats() {
-  const stats = { online: connectedUsers ? connectedUsers.size : 0, tiers: {} };
-  for (const tier of LOBBY_TIERS) stats.tiers[tier] = { inGame: 0, waiting: 0 };
+  const stats = {
+    online: connectedUsers ? connectedUsers.size : 0,
+    tiers: {}
+  };
+
+  for (const tier of LOBBY_TIERS) {
+    stats.tiers[tier] = {
+      inGame: 0,
+      waiting: 0
+    };
+  }
+
+  // شمارش بازیکنان منتظر در لابی قبل از ساخته‌شدن match
+  for (const lobby of tierLobbies.values()) {
+    if (!lobby || lobby.status !== "lobby" || !lobby.tier) continue;
+
+    const tierStats = stats.tiers[lobby.tier];
+    if (!tierStats) continue;
+
+    const waitingCount = Array.isArray(lobby.playerUidsInOrder)
+      ? lobby.playerUidsInOrder.length
+      : 0;
+
+    tierStats.waiting += waitingCount;
+  }
+
+  // شمارش matchهایی که ساخته شده‌اند
   for (const match of matches.values()) {
     if (!match || !match.tier) continue;
+
     const tierStats = stats.tiers[match.tier];
     if (!tierStats) continue;
-    const isActiveGame = match.status === "playing" && match.game && !match.game.winner;
+
+    const isActiveGame =
+      match.status === "playing" &&
+      match.game &&
+      !match.game.winner;
+
     const count = getActivePlayersCount(match);
-    if (isActiveGame) tierStats.inGame += count;
-    else if (match.status === "waiting") tierStats.waiting += count;
+
+    if (isActiveGame) {
+      tierStats.inGame += count;
+    } else if (match.status === "waiting") {
+      tierStats.waiting += count;
+    }
   }
+
   return stats;
 }
+
 function emitLobbyStats() {
   if (!io) return;
   io.to('lobby').emit("lobby:stats", computeLobbyStats()); // فقط برای کسانی که در اتاق 'lobby' هستند
@@ -1977,11 +2014,13 @@ async function startMatchFromLobby(lobby, filledColors) {
 
   assignColorsToLobbyPlayers(lobby);
 
-  const match = createMatchFromLobby(lobby);
-  matches.set(match.matchId, match);
-  emitLobbyStats();
+const match = createMatchFromLobby(lobby);
+matches.set(match.matchId, match);
 
-  lobby.status = "matching";
+lobby.status = "matching";
+
+emitLobbyStats();
+
   if (lobby.lobbyTimer) clearTimeout(lobby.lobbyTimer);
   lobby.lobbyTimer = null;
 
