@@ -1096,7 +1096,9 @@ const turnColor =
       socketStatusEl.textContent = "از بازی/صف خارج شدی.";
 document.getElementById("turnInfoText").textContent = ""; setMsg(message || "از بازی خارج شدی.");
 
-      draw(); updateUI();
+updateUI();
+requestBoardDraw();
+
     }
 
     // ====== Event Listeners ======
