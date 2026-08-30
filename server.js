@@ -427,39 +427,82 @@ app.get("/admin/user-balance/:username", authenticateAdminSecret, async (req, re
 
 app.get("/admin/treasury-report", authenticateAdminSecret, async (req, res) => {
   try {
-    const range = String(req.query?.range || "day");
-    const bounds = getRangeBounds(range);
-    if (!bounds) return safeJsonError(res, 400, "range فقط day/week/month باشد.");
-
     const treasuryUser = await ensureTreasuryUser();
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-    const items = await prisma.transaction.findMany({
+    const todayItems = await prisma.transaction.findMany({
       where: {
         userId: treasuryUser.id,
         type: "TREASURY_CUT",
-        createdAt: { gte: bounds.from, lte: bounds.to },
+        createdAt: { gte: todayStart, lte: todayEnd },
       },
-      select: { amount: true, createdAt: true, type: true, note: true },
-      orderBy: { createdAt: "desc" },
+      select: { amount: true },
     });
 
-    const total = items.reduce((acc, x) => acc + Number(x.amount), 0);
+    const todayCoins = todayItems.reduce((acc, x) => acc + Number(x.amount), 0);
 
     return res.status(200).json({
       success: true,
-      range,
-      from: bounds.from,
-      to: bounds.to,
-      total,
-      totalToman: total * 1000,
-      count: items.length,
-
-      items: items.slice(0, 200),
+      todayCoins,
+      todayCutToman: todayCoins * 1000,
+      todayCount: todayItems.length,
+      totalCoins: treasuryUser.coins,
+      totalBalanceToman: treasuryUser.coins * 1000,
     });
   } catch (e) {
     return safeJsonError(res, 500, e.message || "خطای داخلی");
   }
 });
+
+app.post("/admin/treasury-deduct", authenticateAdminSecret, async (req, res) => {
+  try {
+    const rawAmount = Number(req.body?.amount);
+    if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
+      return safeJsonError(res, 400, "مبلغ نامعتبر است.");
+    }
+
+    if (rawAmount % 1000 !== 0) {
+      return safeJsonError(res, 400, "مبلغ باید مضربی از ۱۰۰۰ تومان باشد.");
+    }
+
+    const coinDeduct = Math.floor(rawAmount / 1000);
+    const treasuryUser = await ensureTreasuryUser();
+
+    if (treasuryUser.coins < coinDeduct) {
+      return safeJsonError(res, 400, "موجودی خزانه کافی نیست.");
+    }
+
+    const updatedTreasury = await prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: treasuryUser.id },
+        data: { coins: { decrement: coinDeduct } },
+      });
+
+      await tx.transaction.create({
+        data: {
+          userId: treasuryUser.id,
+          amount: -coinDeduct,
+          type: "WITHDRAW",
+          note: "Treasury withdrawal by admin",
+        },
+      });
+
+      return updated;
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "مبلغ با موفقیت از خزانه کسر شد.",
+      deductedToman: rawAmount,
+      newTotalBalanceToman: updatedTreasury.coins * 1000,
+    });
+  } catch (e) {
+    return safeJsonError(res, 500, e.message || "خطای داخلی سرور");
+  }
+});
+
 app.get("/health", async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
