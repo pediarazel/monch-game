@@ -252,9 +252,11 @@
       treasuryResultBox.textContent = [
         `📊 درآمد امروز: ${formatToman(data.todayCutToman)}`,
         `تعداد دست بازی امروز: ${data.todayCount}`,
-        `💰 موجودی کل فعلی خزانه: ${formatToman(data.totalBalanceToman)}forEach((input) => {
-    input.addEventListener('input', () => {
-      const onlyNumbers = input.value.replace(/[^\d]/
+        `💰 موجودی کل فعلی خزانه: ${formatToman(data.totalBalanceToman)}`,
+      ].join("\n");
+    } catch (err) {
+      showTreasuryResult("خطا در ارتباط با سرور");
+    }
   });
 
   deductBtn.addEventListener("click", async () => {
@@ -319,5 +321,6 @@
     });
   });
 </script>
+
 </body>
 </html>
