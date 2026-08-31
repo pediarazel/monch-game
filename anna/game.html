@@ -1137,23 +1137,36 @@ requestBoardDraw();
       );
       if (!confirmed) return;
       const leavingMatchId = currentMatchId;
-      leaveGameBtn.disabled = true; leaveGameBtn.textContent = "در حال خروج...";
+      leaveGameBtn.disabled = true; 
+      leaveGameBtn.textContent = "در حال خروج...";
+      
       socket.emit("game:leave", { matchId: leavingMatchId }, (response) => {
-        leaveGameBtn.disabled = false; leaveGameBtn.textContent = "خروج از بازی/صف";
-        if (!response?.success) { setMsg(response?.message || "خروج انجام نشد."); return; }
-        const message = response.type === "game_forfeit" ? "انصراف ثبت شد." : (response.message || "از صف خارج شدی.");
-if (socket) {
-  try {
-    socket.removeAllListeners();
-    socket.disconnect();
-  } catch {}
+        // ۱. اگر خروج با خطا مواجه شد، دکمه را فعال کن تا کاربر دوباره تلاش کند
+        if (!response?.success) {
+          leaveGameBtn.disabled = false;
+          leaveGameBtn.textContent = "خروج از بازی/صف";
+          setMsg(response?.message || "خروج انجام نشد.");
+          return;
+        }
 
-  socket = null;
-}
+        // ۲. اول عملیات قطع سوکت را انجام می‌دهیم (بدون استفاده از try/catch سنگین)
+        if (socket) {
+          try {
+            socket.disconnect();
+            socket.removeAllListeners();
+            socket = null;
+          } catch (e) {
+            console.error("Error during socket disconnect:", e);
+          }
+        }
 
-window.location.replace("/lobby.html");
-
+        // ۳. حالا با اطمینان کامل، کاربر را به لابی می‌فرستیم
+        // استفاده از setTimeout بسیار کوچک (۵۰ میلی‌ثانیه) باعث می‌شود مرورگر فرصت رندر کردن خروج را داشته باشد
+        setTimeout(() => {
+          window.location.replace("lobby.html");
+        }, 50);
       });
+
     });
 
     // ====== اتصال Socket.IO ======
