@@ -2146,8 +2146,9 @@ io = new Server(httpServer, {
   },
   transports: ["polling", "websocket"],
   allowEIO3: false,
-  pingTimeout: 30000, // اجازه بده پینگ ۳۰ ثانیه معطل بمونه
-  pingInterval: 10000, // هر ۱۰ ثانیه چک کن که اتصال زنده‌ست
+  pingTimeout: 5000, // حداکثر ۵ ثانیه صبر برای پاسخ پینگ
+  pingInterval: 3000, // هر ۳ ثانیه بررسی اتصال برای واکنش سریع در موبایل
+
 
 });
 

@@ -1186,27 +1186,70 @@ window.location.replace("/lobby.html");
       });
 
       const netAlertBannerEl = document.getElementById("netAlertBanner");
-      function showNetAlert(text, isWarning) {
-        if (!netAlertBannerEl) return;
-        netAlertBannerEl.textContent = text;
-        netAlertBannerEl.style.background = isWarning ? "#d97706" : "#dc2626";
-        netAlertBannerEl.style.display = "block";
+      
+      // ساخت خودکار اورلی تمام صفحه
+      let netOverlayEl = document.getElementById("netOverlay");
+      if (!netOverlayEl) {
+        netOverlayEl = document.createElement("div");
+        netOverlayEl.id = "netOverlay";
+        netOverlayEl.style.cssText = `
+          display: none;
+          position: fixed;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(15, 23, 42, 0.85);
+          backdrop-filter: blur(4px);
+          z-index: 99999;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          color: #fff;
+          font-family: inherit;
+          text-align: center;
+          padding: 20px;
+          direction: rtl;
+        `;
+        netOverlayEl.innerHTML = `
+          <div style="background:#1e293b; border:1px solid #334155; border-radius:16px; padding:24px 28px; max-width:340px; box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+            <div id="netOverlaySpinner" style="font-size:32px; margin-bottom:12px; animation: spin 1.5s linear infinite;">🔄</div>
+            <div id="netOverlayTitle" style="font-weight:bold; font-size:16px; margin-bottom:8px; color:#f8fafc;">ارتباط با سرور قطع شد</div>
+            <div id="netOverlayText" style="font-size:13px; color:#94a3b8; line-height:1.5;">در حال اتصال خودکار مجدد... لطفاً چند لحظه صبر کنید.</div>
+          </div>
+        `;
+        document.body.appendChild(netOverlayEl);
       }
+
+      function showNetAlert(text, isWarning) {
+        if (netAlertBannerEl) {
+          netAlertBannerEl.textContent = text;
+          netAlertBannerEl.style.background = isWarning ? "#d97706" : "#dc2626";
+          netAlertBannerEl.style.display = "block";
+        }
+        if (netOverlayEl) {
+          const titleEl = document.getElementById("netOverlayTitle");
+          const textEl = document.getElementById("netOverlayText");
+          if (titleEl) titleEl.textContent = isWarning ? "در حال اتصال..." : "⚠️ قطع ارتباط با سرور";
+          if (textEl) textEl.textContent = text;
+          netOverlayEl.style.display = "flex";
+        }
+      }
+
       function hideNetAlert() {
-        if (!netAlertBannerEl) return;
-        netAlertBannerEl.style.display = "none";
+        if (netAlertBannerEl) netAlertBannerEl.style.display = "none";
+        if (netOverlayEl) netOverlayEl.style.display = "none";
       }
 
       window.addEventListener("offline", () => {
-        showNetAlert("⚠️ اینترنت شما قطع شد! لطفاً اتصال شبکه را بررسی کنید.", false);
+        showNetAlert("اینترنت گوشی یا شبکه قطع شده است! لطفاً اتصال را بررسی کنید.", false);
       });
       window.addEventListener("online", () => {
         if (socket && socket.connected) {
           hideNetAlert();
         } else {
-          showNetAlert("🔄 اینترنت وصل شد. در حال اتصال به بازی...", true);
+          showNetAlert("اینترنت وصل شد. در حال برقراری مجدد ارتباط با بازی...", true);
+          if (socket) socket.connect();
         }
       });
+
 
       let pingInterval = null;
 
