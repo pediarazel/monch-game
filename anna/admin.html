@@ -236,27 +236,34 @@
       return;
     }
 
-    showTreasuryResult("در حال دریافت اطلاعات خزانه...");
+    treasuryResultBox.innerHTML = "در حال دریافت اطلاعات خزانه...";
     try {
       const res = await fetch(
-        `/admin/treasury-report?adminSecret=${encodeURIComponent(adminSecret)}&t=${Date.now()}`
+        `/admin/bot-stats?adminSecret=${encodeURIComponent(adminSecret)}&t=${Date.now()}`
       );
 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok || !data.success) {
-        showTreasuryResult(data.message || "خطا در دریافت گزارش خزانه");
+        treasuryResultBox.textContent = data.error || data.message || "خطا در دریافت گزارش خزانه";
         return;
       }
 
-      treasuryResultBox.textContent = [
-        `📊 درآمد امروز: ${formatToman(data.todayCutToman)}`,
-        `تعداد دست بازی امروز: ${data.todayCount}`,
-        `💰 موجودی کل فعلی خزانه: ${formatToman(data.totalBalanceToman)}`,
-      ].join("\n");
+      treasuryResultBox.innerHTML = `
+        <div class="stats-card" style="text-align: right; line-height: 1.8;">
+          <p>💰 کارمزد کل: ${formatToman(data.totalCommission)}</p>
+          <p>📈 سود کل ربات: ${formatToman(data.totalBotProfit)}</p>
+          <p>📉 ضرر کل ربات: ${formatToman(data.totalBotLoss)}</p>
+          <hr style="border: 0.5px solid #555; margin: 10px 0;">
+          <p style="font-weight: bold; font-size: 1.1em; color: #4ade80;">
+            موجودی کل خزانه: ${formatToman(data.totalTreasury)}
+          </p>
+        </div>
+      `;
     } catch (err) {
-      showTreasuryResult("خطا در ارتباط با سرور");
+      treasuryResultBox.textContent = "خطا در ارتباط با سرور";
     }
+
   });
 
   deductBtn.addEventListener("click", async () => {
