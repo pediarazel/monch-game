@@ -39,8 +39,6 @@
     button:hover { background: #16a34a; }
     .secondary { background: #3b82f6; margin-top: 10px; }
     .secondary:hover { background: #2563eb; }
-    .danger { background: #ef4444; margin-top: 10px; }
-    .danger:hover { background: #dc2626; }
     .result {
       margin-top: 18px;
       background: #0b1220;
@@ -53,25 +51,26 @@
       color: #e2e8f0;
     }
     .section-title{
-      margin-top: 24px;
+      margin-top: 18px;
       font-size: 16px;
       font-weight: 800;
       text-align: center;
       color: #e5e7eb;
     }
-    .divider{ height: 1px; background: #22314f; margin: 18px 0; border-radius: 999px; }
+    .divider{ height: 1px; background: #22314f; margin: 14px 0; border-radius: 999px; }
+    .small-note{ color:#cbd5e1; font-size:12px; text-align:center; margin-top:-6px; margin-bottom:10px; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>پنل مدیریت موجودی (تومان)</h1>
-    <p>افزایش، کاهش و مشاهدهٔ موجودی کاربر با تومان واقعی</p>
+    <h1>پنل مدیریت موجودی</h1>
+    <p>افزایش/کاهش و مشاهده موجودی کاربر (با username)</p>
 
     <label for="username">نام کاربری</label>
     <input id="username" type="text" placeholder="مثلا ali" />
 
-    <label for="amount">مبلغ (تومان)</label>
-    <input id="amount" type="text" inputmode="numeric" placeholder="مثلاً 100,000" />
+    <label for="amount">مقدار</label>
+    <input id="amount" type="number" placeholder="مثلا 1000" />
 
     <label for="action">عملیات</label>
     <select id="action">
@@ -91,243 +90,148 @@
     <div class="result" id="result">نتیجه اینجا نمایش داده می‌شود</div>
 
     <div class="divider"></div>
-    <div class="section-title">مدیریت درآمد و خزانه</div>
+    <div class="section-title">گزارش خزانه (Treasury Report)</div>
+    <div class="small-note">range را انتخاب کن و گزارش را بگیر.</div>
 
-    <button id="treasuryBtn" class="secondary" style="margin-top:14px;">مشاهده درآمد امروز و موجودی کل</button>
-    <div class="result" id="treasuryResult">اطلاعات خزانه اینجا نمایش داده می‌شود</div>
+    <label for="treasuryRange">بازه زمانی</label>
+    <select id="treasuryRange">
+      <option value="day">day</option>
+      <option value="week" selected>week</option>
+      <option value="month">month</option>
+    </select>
 
-    <label for="deductAmount">مبلغ کسر از موجودی کل خزانه (تومان)</label>
-    <input id="deductAmount" type="text" inputmode="numeric" placeholder="مثلاً 50,000" />
-    <button id="deductBtn" class="danger">کسر از موجودی کل</button>
+    <button id="treasuryBtn" class="secondary" style="margin-top:10px;">گرفتن گزارش خزانه</button>
+    <div class="result" id="treasuryResult">گزارش اینجا نمایش داده می‌شود</div>
   </div>
 
-<script>
-  const usernameInput = document.getElementById("username");
-  const amountInput = document.getElementById("amount");
-  const actionInput = document.getElementById("action");
-  const noteInput = document.getElementById("note");
-  const adminSecretInput = document.getElementById("adminSecret");
+  <script>
+    const usernameInput = document.getElementById("username");
+    const amountInput = document.getElementById("amount");
+    const actionInput = document.getElementById("action");
+    const noteInput = document.getElementById("note");
+    const adminSecretInput = document.getElementById("adminSecret");
 
-  const resultBox = document.getElementById("result");
-  const updateBtn = document.getElementById("updateBtn");
-  const getBtn = document.getElementById("getBtn");
+    const resultBox = document.getElementById("result");
+    const updateBtn = document.getElementById("updateBtn");
+    const getBtn = document.getElementById("getBtn");
 
-  const treasuryBtn = document.getElementById("treasuryBtn");
-  const treasuryResultBox = document.getElementById("treasuryResult");
-  const deductAmountInput = document.getElementById("deductAmount");
-  const deductBtn = document.getElementById("deductBtn");
-
-  function formatToman(value) {
-    return `${Number(value || 0).toLocaleString("en-US")} تومان`;
-  }
-
-  function showResult(data) {
-    resultBox.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
-  }
-
-  function showTreasuryResult(data) {
-    treasuryResultBox.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
-  }
-
-  function showUserBalance(data) {
-    resultBox.textContent = [
-      `نام کاربری: ${data.username}`,
-      `شناسه کاربر: ${data.userId}`,
-      `نقش: ${data.role}`,
-      `موجودی: ${formatToman(data.coinsToman ?? Number(data.coins || 0) * 1000)}`,
-    ].join("\n");
-  }
-
-  updateBtn.addEventListener("click", async () => {
-    const username = usernameInput.value.trim();
-    const amountRaw = amountInput.value.trim();
-    const action = actionInput.value;
-    const note = (noteInput.value || "").trim();
-    const adminSecret = adminSecretInput.value.trim();
-
-    if (!username || !amountRaw || !adminSecret) {
-      showResult("نام کاربری، مبلغ و رمز ادمین را کامل کن.");
-      return;
+    function showResult(data) {
+      resultBox.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
     }
 
-    const amountToman = Number(amountRaw.replace(/,/g, ""));
-    if (!Number.isInteger(amountToman) || amountToman <= 0) {
-      showResult("مبلغ باید یک عدد صحیح و بزرگ‌تر از صفر باشد.");
-      return;
-    }
+    updateBtn.addEventListener("click", async () => {
+      const username = usernameInput.value.trim();
+      const amountRaw = amountInput.value.trim();
+      const action = actionInput.value; // add | subtract
+      const note = (noteInput.value || "").trim();
+      const adminSecret = adminSecretInput.value.trim();
 
-    if (amountToman % 1000 !== 0) {
-      showResult("مبلغ را به هزار تومان وارد کن.");
-      return;
-    }
-
-    try {
-      const res = await fetch("/admin/update-balance-by-username", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username,
-          amount: amountToman,
-          action,
-          note,
-          adminSecret
-        })
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data.success) {
-        showResult(data.message || "خطا در تغییر موجودی");
+      if (!username || !amountRaw || !adminSecret) {
+        showResult("لطفا username، amount و رمز ادمین را کامل کن");
         return;
       }
 
-      const actionLabel = action === "add" ? "افزایش" : "کاهش";
-
-      resultBox.textContent = [
-        `عملیات با موفقیت انجام شد.`,
-        `کاربر: ${username}`,
-        `نوع عملیات: ${actionLabel}`,
-        `مبلغ عملیات: ${formatToman(amountToman)}`,
-        `موجودی جدید: ${formatToman(data.newCoinsToman ?? Number(data.newCoins || 0) * 1000)}`,
-      ].join("\n");
-
-      amountInput.value = "";
-    } catch (err) {
-      showResult("خطا در ارتباط با سرور");
-    }
-  });
-
-  getBtn.addEventListener("click", async () => {
-    const username = usernameInput.value.trim();
-    const adminSecret = adminSecretInput.value.trim();
-
-    if (!username || !adminSecret) {
-      showResult("نام کاربری و رمز ادمین را وارد کن.");
-      return;
-    }
-
-    const url = `/admin/user-balance/${encodeURIComponent(username)}?adminSecret=${encodeURIComponent(adminSecret)}&t=${Date.now()}`;
-
-    try {
-      const res = await fetch(url, {
-        method: "GET",
-        cache: "no-store",
-        headers: { "Cache-Control": "no-cache" }
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data.success) {
-        showResult(data.message || "خطا در دریافت موجودی");
+      let amountValue = Number(amountRaw);
+      if (!Number.isFinite(amountValue) || amountValue <= 0) {
+        showResult("amount باید یک عدد معتبر و بزرگ‌تر از صفر باشد.");
         return;
       }
 
-      showUserBalance(data);
-    } catch (err) {
-      showResult("خطا در ارتباط با سرور");
-    }
-  });
-
-  treasuryBtn.addEventListener("click", async () => {
-    const adminSecret = adminSecretInput.value.trim();
-
-    if (!adminSecret) {
-      showTreasuryResult("رمز ادمین را وارد کن.");
-      return;
-    }
-
-    treasuryResultBox.innerHTML = "در حال دریافت اطلاعات خزانه...";
-    try {
-      const res = await fetch(
-        `/admin/bot-stats?adminSecret=${encodeURIComponent(adminSecret)}&t=${Date.now()}`
-      );
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data.success) {
-        treasuryResultBox.textContent = data.error || data.message || "خطا در دریافت گزارش خزانه";
-        return;
+      // ✅ کلید اصلی:
+      // بعضی سرورها برای subtract انتظار دارند amount منفی باشد.
+      // بنابراین add = مثبت، subtract = منفی
+      if (action === "subtract") {
+        amountValue = -amountValue;
       }
 
-      treasuryResultBox.innerHTML = `
-        <div class="stats-card" style="text-align: right; line-height: 1.8;">
-          <p>💰 کارمزد کل: ${formatToman(data.totalCommission)}</p>
-          <p>📈 سود کل ربات: ${formatToman(data.totalBotProfit)}</p>
-          <p>📉 ضرر کل ربات: ${formatToman(data.totalBotLoss)}</p>
-          <hr style="border: 0.5px solid #555; margin: 10px 0;">
-          <p style="font-weight: bold; font-size: 1.1em; color: #4ade80;">
-            موجودی کل خزانه: ${formatToman(data.totalTreasury)}
-          </p>
-        </div>
-      `;
-    } catch (err) {
-      treasuryResultBox.textContent = "خطا در ارتباط با سرور";
-    }
+      try {
+        const res = await fetch("/admin/update-balance-by-username", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username,
+            amount: amountValue, // add مثبت / subtract منفی
+            action,              // هم action را هم می‌فرستیم
+            note,
+            adminSecret
+          })
+        });
 
-  });
-
-  deductBtn.addEventListener("click", async () => {
-    const rawAmount = deductAmountInput.value.trim();
-    const adminSecret = adminSecretInput.value.trim();
-
-    if (!rawAmount || !adminSecret) {
-      showTreasuryResult("مبلغ کسر و رمز ادمین را وارد کن.");
-      return;
-    }
-
-    const amountToman = Number(rawAmount.replace(/,/g, ""));
-    if (!Number.isInteger(amountToman) || amountToman <= 0) {
-      showTreasuryResult("مبلغ باید یک عدد صحیح و بزرگ‌تر از صفر باشد.");
-      return;
-    }
-
-    if (amountToman % 1000 !== 0) {
-      showTreasuryResult("مبلغ را به هزار تومان وارد کن.");
-      return;
-    }
-
-    if (!confirm(`آیا از کسر مبلغ ${formatToman(amountToman)} از موجودی کل خزانه مطمئن هستید؟`)) {
-      return;
-    }
-
-    showTreasuryResult("در حال کسر موجودی...");
-    try {
-      const res = await fetch("/admin/treasury-deduct", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount: amountToman,
-          adminSecret
-        })
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data.success) {
-        showTreasuryResult(data.message || "خطا در کسر موجودی خزانه");
-        return;
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showResult(data.message || "خطا در تغییر موجودی");
+          return;
+        }
+        showResult(data);
+      } catch (err) {
+        showResult("خطا در ارتباط با سرور");
       }
-
-      treasuryResultBox.textContent = [
-        `✅ ${data.message}`,
-        `مبلغ کسر شده: ${formatToman(data.deductedToman)}`,
-        `💰 موجودی جدید کل خزانه: ${formatToman(data.newTotalBalanceToman)}`,
-      ].join("\n");
-
-      deductAmountInput.value = "";
-    } catch (err) {
-      showTreasuryResult("خطا در ارتباط با سرور");
-    }
-  });
-
-  // فرمت سه رقم کاما خودکار برای تمام فیلدهای مبلغ
-  document.querySelectorAll('input[id*="amount" i], input[id*="Amount" i]').forEach((input) => {
-    input.addEventListener('input', () => {
-      const onlyNumbers = input.value.replace(/[^\d]/g, '');
-      input.value = onlyNumbers.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     });
-  });
-</script>
 
+    getBtn.addEventListener("click", async () => {
+      const username = usernameInput.value.trim();
+      const adminSecret = adminSecretInput.value.trim();
+
+      if (!username || !adminSecret) {
+        showResult("username و رمز ادمین را وارد کن");
+        return;
+      }
+
+      const url =
+        `/admin/user-balance/${encodeURIComponent(username)}?adminSecret=${encodeURIComponent(adminSecret)}&t=${Date.now()}`;
+
+      try {
+        const res = await fetch(url, {
+          method: "GET",
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" }
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showResult(data.message || "خطا در دریافت موجودی");
+          return;
+        }
+        showResult(data);
+      } catch (err) {
+        showResult("خطا در ارتباط با سرور");
+      }
+    });
+
+    // Treasury report
+    const treasuryRangeEl = document.getElementById("treasuryRange");
+    const treasuryBtn = document.getElementById("treasuryBtn");
+    const treasuryResultBox = document.getElementById("treasuryResult");
+
+    function showTreasuryResult(data){
+      treasuryResultBox.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+    }
+
+    treasuryBtn.addEventListener("click", async () => {
+      const adminSecret = adminSecretInput.value.trim();
+      const range = treasuryRangeEl.value;
+
+      if (!adminSecret) {
+        showTreasuryResult("adminSecret را وارد کن.");
+        return;
+      }
+
+      showTreasuryResult("در حال دریافت گزارش...");
+      try {
+        const res = await fetch(
+          `/admin/treasury-report?range=${encodeURIComponent(range)}&adminSecret=${encodeURIComponent(adminSecret)}`
+        );
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showTreasuryResult(data.message || "خطا در دریافت گزارش خزانه");
+          return;
+        }
+        showTreasuryResult(data);
+      } catch (e) {
+        showTreasuryResult("خطا در ارتباط با سرور");
+      }
+    });
+  </script>
 </body>
 </html>

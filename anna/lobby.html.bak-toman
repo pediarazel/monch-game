@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Monopoly Online - لابی</title>
+    <style>
+      body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #0a0a0a;
+        color: #e2e8f0;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        text-align: center;
+        font-size: 16px;
+        touch-action:manipulation;
+      }
+
+.panel{
+  width:min(92vw,430px);
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  justify-content:center;
+  align-items:center;
+  background:#101010;
+  border:1px solid #252525;
+  border-radius:14px;
+  padding:10px;
+}
+
+
+
+      .row{ width:100%; max-width:700px; display:flex; flex-wrap:wrap; gap:10px; justify-content:center; align-items:center; }
+
+button{
+  border:none;
+  background:#fff;
+  color:#000;
+  border-radius:10px;
+  padding:10px 14px;
+  font-size:14px;
+  font-weight:bold;
+  cursor:pointer;
+  transition:background 0.2s;
+}
+
+      button:active{ background:#ccc; }
+      button:disabled{ opacity:0.4; cursor:not-allowed; }
+
+      .info{ width:100%; text-align:center; font-size:14px; line-height:1.8; margin-top:5px; }
+      .muted{ color:#cbd5e1; font-size:13px; }
+input, select{
+  width:100%;
+  border:none;
+  border-radius:10px;
+  padding:10px;
+  font-size:14px;
+  background:#1f2937;
+  color:#fff;
+  outline:none;
+}
+
+.card{
+  width:min(92vw,430px);
+  background:#111827;
+  border-radius:14px;
+  padding:12px;
+  box-shadow:0 10px 30px rgba(0,0,0,0.35);
+  margin-bottom:12px;
+}
+
+
+#lobbyCountdownBox{
+  width:min(92vw,430px);
+  margin-top:12px;
+  padding:14px 12px;
+  border:1px solid #f59e0b;
+  border-radius:14px;
+  background:linear-gradient(135deg,#201708,#111827);
+  color:#fbbf24;
+  text-align:center;
+  font-size:30px;
+  font-weight:900;
+  line-height:1.2;
+  box-shadow:0 8px 24px rgba(245,158,11,0.16);
+}
+
+
+
+#lobbyCountdownBox small{
+  display:block;
+  margin-top:6px;
+  color:#d1d5db;
+  font-size:13px;
+  font-weight:normal;
+}
+
+    </style>
+</head>
+<body>
+  <!-- هدر مینیمال و یکپارچه تاج تاس -->
+<div style="display: flex; align-items: center; justify-content: center; background: #0a0a0a; padding: 15px; position: sticky; top: 0; z-index: 1000;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+        <!-- آیکون‌های تاج و تاس -->
+        <span style="font-size: 20px; filter: drop-shadow(0 0 5px rgba(212,175,55,0.4));">👑🎲</span>
+        
+        <!-- نام برند -->
+        <span style="color: #d4af37; font-size: 19px; font-weight: bold; font-family: Tahoma, sans-serif; letter-spacing: 1px; text-shadow: 0 0 5px rgba(212,175,55,0.5);">تاج تاس</span>
+        
+        <span style="font-size: 20px; filter: drop-shadow(0 0 5px rgba(212,175,55,0.4));">🎲👑</span>
+    </div>
+</div>
+  <!-- باکس نمایش آیدی و دکمه کپی -->
+<div id="userInfoBar" style="display:flex; justify-content:space-between; align-items:center; background:#0a0a0a; border:1px solid #252525; padding:8px 12px; border-radius:8px; margin:0 auto 12px auto; max-width:430px;">
+
+    <span style="font-size:13px; color:#94a3b8;">آیدی: <span id="usernameText" style="color:#fff; font-weight:700;">در حال اتصال...</span></span>
+<button id="copyBtn" type="button" style="background:transparent; border:1px solid #475569; padding:3px 7px; border-radius:6px; color:#fff; font-size:12px; cursor:pointer; line-height:1;">⧉</button>
+
+  </div>
+  <div class="card" id="lobbyStatsCard" style="background:#0f172a; border:1px solid #1e293b; padding:10px 14px; margin-bottom:12px;">
+    <div style="font-size:14px; font-weight:700; margin-bottom:8px; color:#22c55e; display:flex; align-items:center; gap:6px;">
+      🟢 <span id="statsOnlineCount">0</span> بازیکن آنلاین
+    </div>
+    <div style="display:flex; flex-direction:column; gap:6px; font-size:13px; color:#cbd5e1;">
+      <div style="display:flex; justify-content:space-between; align-items:center;"><span>💰 20,000تومنی</span><span style="font-weight:600;" id="statsTier20">👥 0 نفر</span></div>
+      <div style="display:flex; justify-content:space-between; align-items:center;"><span>💰 50,000تومنی</span><span style="font-weight:600;" id="statsTier50">👥 0 نفر</span></div>
+      <div style="display:flex; justify-content:space-between; align-items:center;"><span>💰 100,000تومنی</span><span style="font-weight:600;" id="statsTier100">👥 0 نفر</span></div>
+      <div style="display:flex; justify-content:space-between; align-items:center;"><span>💰 200,000تومنی</span><span style="font-weight:600;" id="statsTier200">👥 0 نفر</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+      <div>
+        <div style="font-size:18px; font-weight:700;">موجودی شما</div>
+      </div>
+      <button id="logoutBtn" style="background:#ef4444;color:#fff;">خروج</button>
+    </div>
+    <div style="height:10px;"></div>
+    <div class="muted" style="text-align:center; width:100%; display:flex; align-items:center; justify-content:center; gap:8px;">
+      <span>موجودی: <b id="balanceValue">0 تومان</b></span>
+
+      <button
+        id="refreshBalanceBtn"
+        type="button"
+        title="به‌روزرسانی موجودی"
+        aria-label="به‌روزرسانی موجودی"
+        style="display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; padding:0; border:0; background:transparent; color:#ffd700; cursor:pointer;"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.73-5.73"></path>
+        </svg>
+      </button>
+    </div>
+
+
+  </div>
+
+  <div class="panel">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px; width:100%;">
+      <div class="muted">ورود به صف بازی (بر اساس Tier)</div>
+
+      <div style="display:flex; gap:10px; width:100%; justify-content:center; flex-wrap:wrap; margin-top:6px;">
+        <div style="max-width:260px; width:100%;">
+          <label class="muted" for="tierInput" style="display:block; margin-bottom:6px; text-align:center;">قیمت اتاق</label>
+          <select id="tierInput">
+            <option value="20">20,000 تومان</option>
+            <option value="50" selected>50,000 تومان</option>
+            <option value="100">100,000 تومان</option>
+            <option value="200">200,000 تومان</option>
+          </select>
+        </div>
+
+        <button id="joinBtn" style="background:#3b82f6;color:#fff; font-weight:700;">
+          ورود به بازی
+        </button>
+        <button
+  id="leaveQueueBtn"
+  type="button"
+  hidden
+  style="background:#ef4444;color:#fff; font-weight:700;"
+>
+  خروج از صف
+</button>
+
+      </div>
+
+<div class="muted" style="margin-top:2px;" id="joinMeta">
+
+        قیمت ورودی از موجودی شما کم می‌شود. جایزهٔ برنده ۹۰٪ مبلغ کل است.
+      </div>
+
+      <div class="muted" id="socketStatus" style="min-height:18px;"></div>
+      <div class="muted" id="joinStatus" style="min-height:18px;"></div>
+      <div class="muted" id="peopleNews" style="min-height:18px;"></div>
+      <div class="muted" id="serverMsg" style="min-height:18px;"></div>
+    </div>
+  </div>
+  <div id="lobbyCountdownBox" hidden aria-live="polite">
+    ⏳ ۶۰ ثانیه
+    <small>زمان باقی‌مانده برای تکمیل بازیکنان</small>
+  </div>
+
+  <pre id="debug" aria-label="debug" style="display:none;"></pre>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script>
+    (function(){
+      // --- Global Refs ---
+      const debugEl = document.getElementById('debug');
+      const socketStatusEl = document.getElementById('socketStatus');
+      const joinStatusEl = document.getElementById('joinStatus');
+      const peopleNewsEl = document.getElementById('peopleNews');
+      const serverMsgEl = document.getElementById('serverMsg');
+      const lobbyCountdownBoxEl = document.getElementById('lobbyCountdownBox');
+
+      const balanceValueEl = document.getElementById('balanceValue');
+const logoutBtn = document.getElementById('logoutBtn');
+const joinBtn = document.getElementById('joinBtn');
+const leaveQueueBtn = document.getElementById('leaveQueueBtn');
+const tierInput = document.getElementById('tierInput');
+
+      const joinMeta = document.getElementById('joinMeta');
+
+      // --- Basic Setup ---
+      let lastDebugData = {};
+      function setDebug(value) {
+        try {
+          let nextValue = value;
+          if (typeof value === "function") nextValue = value(lastDebugData);
+          if (nextValue && typeof nextValue === "object" && !Array.isArray(nextValue)) {
+            lastDebugData = nextValue;
+          } else {
+            lastDebugData = nextValue;
+          }
+          debugEl.textContent = typeof nextValue === "string" ? nextValue : JSON.stringify(nextValue, null, 2);
+        } catch (error) {
+          debugEl.textContent = String(error?.message || value || "Debug error");
+        }
+      }
+      window.addEventListener('error', (e)=> console.error('Page Error:', e.message || e.error || e));
+      window.addEventListener('unhandledrejection', (e)=> console.error('Promise Error:', e.reason && e.reason.message ? e.reason.message : e));
+
+      const SOCKET_URL = "https://monch-game.onrender.com";
+      const API_BASE = "https://monch-game.onrender.com";
+      function api(path){ return API_BASE.replace(/\/$/,'') + path; }
+
+      // --- Token helpers ---
+      const TOKEN_STORAGE_KEY = "token";
+      function normalizeToken(value) {
+        if (value == null) return "";
+        let token = String(value).trim();
+        if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+          try { token = JSON.parse(token); } catch { token = token.slice(1, -1); }
+        }
+        token = String(token || "").trim();
+        token = token.replace(/^Bearer\s+/i, "").trim();
+        return token;
+      }
+      function getToken() {
+        const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+        const token = normalizeToken(storedToken);
+        if (token && token !== storedToken) localStorage.setItem(TOKEN_STORAGE_KEY, token);
+        return token;
+      }
+      function setToken(value) {
+        const token = normalizeToken(value);
+        if (!token) { localStorage.removeItem(TOKEN_STORAGE_KEY); return ""; }
+        localStorage.setItem(TOKEN_STORAGE_KEY, token);
+        return token;
+      }
+      function clearToken() { localStorage.removeItem(TOKEN_STORAGE_KEY); }
+
+function isJwtExpired(token) {
+  if (!token) return true;
+
+  try {
+    const parts = token.split(".");
+
+    if (parts.length !== 3) {
+      return true;
+    }
+
+    const base64 = parts[1]
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
+
+    const paddedBase64 = base64.padEnd(
+      base64.length + ((4 - (base64.length % 4)) % 4),
+      "="
+    );
+
+    const payload = JSON.parse(atob(paddedBase64));
+    const currentTime = Math.floor(Date.now() / 1000);
+
+    return !payload.exp || payload.exp <= currentTime;
+  } catch (e) {
+    console.error("JWT expiration check failed:", e);
+    return true;
+  }
+}
+
+
+      // --- Balance (Manual Refresh) ---
+      balanceValueEl.textContent = "0 تومان";
+
+      function startBalanceAutoRefresh() {
+        // دیگر setInterval نداریم؛ فقط یک بار در ورود به لابی موجودی خوانده می‌شود.
+        updateBalance().catch(() => {});
+      }
+
+      function stopBalanceAutoRefresh() {
+        // رفرش خودکار غیرفعال است.
+      }
+
+async function updateBalance() {
+  const token = getToken();
+
+  if (!token || isJwtExpired(token)) {
+    balanceValueEl.textContent = "0 تومان";
+    if (usernameTextEl) usernameTextEl.textContent = "مهمان";
+    stopBalanceAutoRefresh();
+    return;
+  }
+
+  try {
+    const res = await fetch(api("/api/me/balance"), {
+      method: "GET",
+      headers: {
+        "Authorization": "Bearer " + token
+      },
+      cache: "no-store"
+    });
+
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+
+    if (res.ok && data) {
+      if (data.coins != null) {
+        const value = Number(data.coins || 0) * 1000;
+        balanceValueEl.textContent =
+          `${value.toLocaleString("en-US")} تومان`;
+      }
+
+      if (data.username && usernameTextEl) {
+        currentUsername = String(data.username);
+        usernameTextEl.textContent = currentUsername;
+
+        copyBtn.onclick = () => {
+          navigator.clipboard.writeText(currentUsername).then(() => {
+            const originalText = copyBtn.textContent;
+            copyBtn.textContent = "✅";
+
+            setTimeout(() => {
+              copyBtn.textContent = originalText;
+            }, 1500);
+          }).catch(err => {
+            console.error("خطا در کپی:", err);
+          });
+        };
+      }
+
+      return;
+    }
+
+    if (!res.ok && res.status === 401) {
+      console.log("Balance fetch failed: 401 Unauthorized. Clearing token.");
+      clearToken();
+      stopBalanceAutoRefresh();
+      balanceValueEl.textContent = "0 تومان";
+      window.location.href = "/index.html";
+      return;
+    }
+
+    console.error("Balance fetch failed:", res.status, data);
+  } catch (e) {
+    console.error("Balance update error:", e);
+  }
+}
+
+
+      const refreshBalanceBtn = document.getElementById("refreshBalanceBtn");
+
+      if (refreshBalanceBtn) {
+        refreshBalanceBtn.addEventListener("click", async () => {
+          refreshBalanceBtn.disabled = true;
+          refreshBalanceBtn.style.opacity = "0.55";
+
+          try {
+            await updateBalance();
+          } finally {
+            setTimeout(() => {
+              refreshBalanceBtn.disabled = false;
+              refreshBalanceBtn.style.opacity = "1";
+            }, 350);
+          }
+        });
+      }
+
+
+      // --- Username & Copy Logic ---
+      const usernameTextEl = document.getElementById('usernameText');
+      const copyBtn = document.getElementById('copyBtn');
+      let currentUsername = "";
+
+      function updateUsernameDisplay() {
+        if (!usernameTextEl) return;
+
+        if (!currentUsername) {
+          usernameTextEl.textContent = "نام کاربری";
+        }
+      }
+
+
+
+      // --- Lobby Logic ---
+      let currentMatchId = null;
+      let lobbyCountdownInterval = null;
+      let joinInProgress = false;
+      let socket = null;
+
+      function connectSocketForLobby() {
+        const token = getToken();
+        if (!token || isJwtExpired(token)) {
+          socketStatusEl.textContent = "❌ توکن نامعتبر یا منقضی شده.";
+          serverMsgEl.textContent = "لطفاً دوباره وارد شوید.";
+          setTimeout(() => window.location.href = "/index.html", 2000);
+          return null;
+        }
+
+        if (socket && socket.connected) return socket;
+        if (socket) { try { socket.removeAllListeners(); socket.disconnect(); } catch {} socket = null; }
+
+        socket = io(SOCKET_URL, {
+          auth: { token }, autoConnect: false, transports: ["websocket", "polling"],
+          reconnection: true, reconnectionAttempts: 5, reconnectionDelay: 1000
+        });
+
+        socket.on("connect", () => {
+          socketStatusEl.textContent = `✅ متصل به سرور (${socket.id})`;
+
+
+          socket.emit("game:restoreSession", {}, (resp) => {
+             if (resp?.success && resp?.restored && resp?.matchId) {
+                currentMatchId = String(resp.matchId);
+                serverMsgEl.textContent = "بازی شما بازیابی شد. در حال انتقال...";
+goToStartedGame(currentMatchId);
+
+              }
+          });
+        });
+
+        socket.on("connect_error", error => {
+          const message = error?.message || String(error || "خطای نامشخص");
+          socketStatusEl.textContent = `❌ اتصال خطا: ${message}`;
+          setDebug({ socketConnectError: { message, name: error?.name || null } });
+          if (error.data?.code === 'invalid token' || message.includes('unauthorized')) {
+             console.log("Connection failed due to invalid token. Clearing token and redirecting.");
+             clearToken();
+             setTimeout(() => window.location.href = "/index.html", 2000);
+          }
+        });
+
+        socket.on("disconnect", reason => {
+          socketStatusEl.textContent = `⚠️ قطع شد: ${reason}`;
+          stopLobbyCountdown();
+          if (reason === "io server disconnect" || reason === "io client disconnect") {
+            return;
+          }
+          serverMsgEl.textContent = "در حال تلاش برای اتصال مجدد...";
+        });
+
+        /*
+          جلوگیری از اجرای چندبارهٔ انتقال:
+          ممکن است game:state و game:started پشت‌سرهم برسند.
+        */
+        function goToStartedGame(matchId) {
+          if (!matchId || window.__redirectingToGame) return;
+
+          window.__redirectingToGame = true;
+          currentMatchId = String(matchId);
+
+          stopLobbyCountdown();
+          joinInProgress = false;
+          joinBtn.disabled = true;
+
+          joinStatusEl.textContent = "🎮 بازی شروع شد!";
+          peopleNewsEl.textContent = "در حال انتقال به صفحه بازی...";
+
+window.location.replace(
+  `/game.html?matchId=${encodeURIComponent(currentMatchId)}`
+);
+
+        }
+
+        /*
+          مسیر عادی انتقال:
+          سرور پس از شروع بازی game:started را به همه می‌فرستد.
+        */
+        socket.on("game:started", payload => {
+          goToStartedGame(payload?.matchId);
+        });
+
+        /*
+          مسیر پشتیبان:
+          سرور ابتدا game:state و سپس game:started می‌فرستد.
+          اگر در اینترنت ضعیف یا هنگام تغییر اتصال، game:started از دست برود،
+          رسیدن state فعال برای ورود به صفحهٔ بازی کافی خواهد بود.
+        */
+        socket.on("game:state", state => {
+          if (state?.matchId && state?.status === "playing") {
+            goToStartedGame(state.matchId);
+          }
+        });
+
+
+        socket.on("lobby:status", data => {
+          if (!data) return;
+          renderLobbyByDeadline(data);
+          if (data?.phase === 4) {
+            peopleNewsEl.textContent = "🎮 بازی شروع می‌شود!";
+          } else if (data?.searchingFor) {
+            peopleNewsEl.textContent = `⏳ در حال جستجوی نفر ${data.searchingFor}...`;
+          } else {
+            peopleNewsEl.textContent = "";
+          }
+        });
+
+        socket.on("match:error", payload => {
+          const message = payload?.message || "خطا در بازی/صف";
+          serverMsgEl.textContent = `❌ ${message}`;
+          joinStatusEl.textContent = "❌ خطا";
+          setDebug({ matchError: payload });
+          joinInProgress = false;
+          joinBtn.disabled = false;
+        });
+
+        socket.on("reconnect_attempt", attemptNumber => {
+          socketStatusEl.textContent = `تلاش مجدد اتصال (${attemptNumber})...`;
+        });
+        socket.on("reconnect_failed", () => {
+          socketStatusEl.textContent = "❌ اتصال مجدد ناموفق.";
+        });
+
+        socket.connect();
+        return socket;
+      }
+
+function renderLobbyByDeadline(data) {
+  if (!data) return;
+
+  joinStatusEl.textContent = data.message || "";
+  serverMsgEl.textContent = "";
+
+  const phase = Number(data.phase || 0);
+  const searchingFor = Number(data.searchingFor || 0);
+
+  if (phase === 4) {
+    peopleNewsEl.textContent = "🎮 بازی شروع می‌شود...";
+  } else if (searchingFor > 0) {
+    peopleNewsEl.textContent = `⏳ در حال جستجوی نفر ${searchingFor}...`;
+  } else {
+    peopleNewsEl.textContent = "";
+  }
+
+  if (data.deadlineAt) {
+    startLobbyCountdown(
+      data.deadlineAt,
+      data.message || "در حال جستجوی بازیکن"
+    );
+  } else {
+    stopLobbyCountdown();
+  }
+}
+
+function startLobbyCountdown(deadlineAt, message) {
+  stopLobbyCountdown();
+
+  const deadlineMs = new Date(deadlineAt).getTime();
+
+  if (!Number.isFinite(deadlineMs)) {
+    return;
+  }
+
+  const updateCountdown = () => {
+    const remainingMs = deadlineMs - Date.now();
+    const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
+
+    joinStatusEl.textContent = message;
+
+    if (lobbyCountdownBoxEl) {
+      lobbyCountdownBoxEl.hidden = false;
+      lobbyCountdownBoxEl.innerHTML = `
+        ⏳ ${seconds.toLocaleString("fa-IR")} ثانیه
+        <small>زمان باقی‌مانده برای تکمیل بازیکنان</small>
+      `;
+    }
+
+    if (remainingMs <= 0) {
+      stopLobbyCountdown();
+      peopleNewsEl.textContent = "⏳ در انتظار شروع بازی...";
+    }
+  };
+
+  updateCountdown();
+
+  lobbyCountdownInterval = setInterval(updateCountdown, 500);
+}
+
+function stopLobbyCountdown() {
+  if (lobbyCountdownInterval) {
+    clearInterval(lobbyCountdownInterval);
+  }
+
+  lobbyCountdownInterval = null;
+
+  if (lobbyCountdownBoxEl) {
+    lobbyCountdownBoxEl.hidden = true;
+  }
+}
+
+
+
+
+      // --- Join Logic ---
+      joinBtn.addEventListener("click", async () => {
+        if (joinInProgress) return;
+        const token = getToken();
+        const tier = Number(tierInput.value);
+
+        if (!token || isJwtExpired(token)) {
+           serverMsgEl.textContent = "توکن شما نامعتبر است. لطفاً دوباره وارد شوید.";
+           setTimeout(() => window.location.href = "/index.html", 2000);
+           return;
+        }
+        if (!Number.isFinite(tier) || ![20, 50, 100, 200].includes(tier)) {
+          serverMsgEl.textContent = "قیمت اتاق نامعتبر است."; return;
+        }
+
+        // --- بررسی موجودی قبل از ورود ---
+        try {
+          const balRes = await fetch(api("/api/me/balance"), {
+            method: "GET", headers: { "Authorization": "Bearer " + token }, cache: "no-store"
+          });
+          let balData;
+          try { balData = await balRes.json(); } catch { balData = null; }
+          const coins = balRes.ok && balData && balData.coins != null ? Number(balData.coins) : 0;
+          if (coins < tier) {
+            serverMsgEl.textContent = "❌ موجودی شما برای ورود به این اتاق کافی نیست.";
+            return;
+          }
+        } catch (e) {
+          serverMsgEl.textContent = "❌ خطا در بررسی موجودی. لطفاً دوباره تلاش کنید.";
+          return;
+        }
+        // --- پایان بررسی موجودی ---
+
+        joinInProgress = true;
+
+        joinInProgress = true;
+        joinBtn.disabled = true;
+        serverMsgEl.textContent = ""; joinStatusEl.textContent = ""; peopleNewsEl.textContent = "";
+
+        if (!socket || !socket.connected) {
+          const newSocket = connectSocketForLobby();
+          if (!newSocket) {
+            joinInProgress = false; joinBtn.disabled = false; return;
+          }
+try {
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("مهلت اتصال تمام شد"));
+    }, 10000);
+
+    if (newSocket.connected) {
+      clearTimeout(timeout);
+      resolve();
+      return;
+    }
+
+    newSocket.once("connect", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+
+    newSocket.once("connect_error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
+} catch (err) {
+  serverMsgEl.textContent = `❌ خطا در اتصال: ${err.message || err}`;
+  joinInProgress = false;
+  joinBtn.disabled = false;
+  return;
+}
+
+        }
+
+        joinStatusEl.textContent = "✅ متصل شد. ارسال درخواست ورود...";
+        socket.emit("room:join", { tier }, (resp) => {
+          setDebug({ roomJoinResponse: resp });
+          if (resp?.success) {
+            currentMatchId = resp.matchId ? String(resp.matchId) : null;
+            leaveQueueBtn.hidden = !currentMatchId;
+leaveQueueBtn.disabled = !currentMatchId;
+tierInput.disabled = true;
+
+            if (resp.waiting || resp.status === "waiting") {
+              joinStatusEl.textContent = "⏳ منتظر نفرات بیشتر...";
+              serverMsgEl.textContent = "در صف انتظار...";
+            } else {
+              joinStatusEl.textContent = "✅ ورود موفق!";
+              serverMsgEl.textContent = "بازی در حال شروع است...";
+            }
+          } else {
+            const message = resp?.message || "خطا در ورود به صف";
+            serverMsgEl.textContent = `❌ ${message}`;
+            joinStatusEl.textContent = "❌ ورود ناموفق";
+            joinInProgress = false;
+            joinBtn.disabled = false;
+          }
+        });
+      });
+
+      // --- Leave Queue ---
+      leaveQueueBtn.addEventListener("click", () => {
+        if (!currentMatchId) {
+          serverMsgEl.textContent = "شما در صف فعالی نیستید.";
+          leaveQueueBtn.hidden = true;
+          leaveQueueBtn.disabled = true;
+          tierInput.disabled = false;
+          joinBtn.disabled = false;
+          return;
+        }
+
+        if (!socket || !socket.connected) {
+          serverMsgEl.textContent = "❌ اتصال به سرور برقرار نیست.";
+          return;
+        }
+
+        leaveQueueBtn.disabled = true;
+        serverMsgEl.textContent = "در حال خروج از صف...";
+
+        socket.emit("game:leave", { matchId: currentMatchId }, (resp) => {
+          if (!resp?.success) {
+            serverMsgEl.textContent =
+              `❌ ${resp?.message || "خروج از صف ناموفق بود."}`;
+
+            leaveQueueBtn.disabled = false;
+            return;
+          }
+
+          stopLobbyCountdown();
+
+          currentMatchId = null;
+          joinInProgress = false;
+
+          leaveQueueBtn.hidden = true;
+          leaveQueueBtn.disabled = true;
+
+          joinBtn.disabled = false;
+          tierInput.disabled = false;
+
+          joinStatusEl.textContent = "";
+          peopleNewsEl.textContent = "";
+          serverMsgEl.textContent = "✅ از صف بازی خارج شدی.";
+
+          updateBalance().catch(() => {});
+        });
+      });
+
+      // --- Logout ---
+      logoutBtn.addEventListener("click", ()=>{
+
+        stopBalanceAutoRefresh();
+        stopLobbyCountdown();
+        clearToken();
+        if (socket) { try { socket.removeAllListeners(); socket.disconnect(); } catch {} socket = null; }
+        window.location.href = "/index.html";
+      });
+
+      // --- Initial Load ---
+      const token = getToken();
+      if (!token || isJwtExpired(token)) {
+        console.log("No valid token found. Redirecting to login.");
+        setTimeout(() => window.location.href = "/index.html", 100);
+      } else {
+        startBalanceAutoRefresh();
+        connectSocketForLobby();
+      }
+
+      // نمایش نام کاربری هنگام بارگذاری صفحه
+
+      socket.on("lobby:stats", (data) => {
+        if (!data) return;
+        document.getElementById('statsOnlineCount').textContent = Number(data.online || 0).toLocaleString('en-US');
+        [20, 50, 100, 200].forEach(tier => {
+          const el = document.getElementById(`statsTier${tier}`);
+          if (el) el.textContent = `👥 ${Number(data.tiers?.[tier]?.inGame || 0).toLocaleString('en-US')} نفر`;
+        });
+      });
+
+    })(); // End of IIFE
+
+  </script>
+</body>
+</html>
