@@ -43,29 +43,28 @@
     .secondary { background: #3b82f6; margin-top: 10px; }
     .secondary:hover { background: #2563eb; }
     .result {
-      margin-top: 18px;
+      margin-top: 14px;
       background: #0b1220;
-      padding: 14px;
+      padding: 12px 14px;
       border-radius: 10px;
-      min-height: 52px;
-      white-space: pre-wrap;
-      word-break: break-word;
+      min-height: 48px;
       font-size: 14px;
       color: #e2e8f0;
-      line-height: 1.8;
+      line-height: 1.4;
       border: 1px solid #1e293b;
+      box-sizing: border-box;
     }
-    .section-title{
+    .section-title {
       margin-top: 18px;
       font-size: 16px;
       font-weight: 800;
       text-align: center;
       color: #e5e7eb;
     }
-    .divider{ height: 1px; background: #22314f; margin: 18px 0; border-radius: 999px; }
-    .res-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-    .res-label { color: #94a3b8; }
-    .res-val { font-weight: bold; }
+    .divider { height: 1px; background: #22314f; margin: 18px 0; border-radius: 999px; }
+    .res-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; }
+    .res-label { color: #94a3b8; font-size: 13.5px; }
+    .res-val { font-weight: bold; font-size: 14px; }
   </style>
 </head>
 <body>
@@ -108,7 +107,6 @@
     <input id="deductAmount" type="text" inputmode="numeric" placeholder="مثلا 50,000" />
     <button id="deductBtn" style="background: #ef4444; margin-top: 10px;">ثبت برداشت از خزانه</button>
     <div class="result" id="deductResult">نتیجه برداشت اینجا نمایش داده می‌شود</div>
-
   </div>
 
   <script>
@@ -129,39 +127,53 @@
     const treasuryBtn = document.getElementById("treasuryBtn");
     const treasuryResultBox = document.getElementById("treasuryResult");
 
-    // تابع ویرگول‌گذاری خودکار حین تایپ
-    function attachLiveComma(inputEl) {
-      inputEl.addEventListener("input", function() {
-        // تبدیل اعداد فارسی به انگلیسی
-        let raw = this.value.replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
-        // حذف هر کاراکتری غیر از ارقام
-        raw = raw.replace(/\D/g, "");
-        if (!raw) {
-          this.value = "";
-          return;
-        }
-        // جدا کردن خودکار ۳ رقم ۳ رقم
-        this.value = raw.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-      });
+    // فرمت‌دهی ۳ رقم ۳ رقم با ویرگول
+    function toComma(val) {
+      if (val === null || val === undefined || val === "") return "0";
+      let str = String(val).replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+      str = str.replace(/[^\d.-]/g, "");
+      if (!str) return "0";
+      let parts = str.split(".");
+      parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      return parts.join(".");
     }
 
-    // فعال کردن ویرگول خودکار روی هر دو کادر مبلغ
+    // اتصال ویرگول‌گذاری زنده با پشتیبانی کامل از موبایل
+    function attachLiveComma(inputEl) {
+      if (!inputEl) return;
+      const applyFormat = () => {
+        let val = inputEl.value;
+        if (!val) return;
+        let raw = val.replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+        raw = raw.replace(/\D/g, "");
+        if (!raw) {
+          inputEl.value = "";
+          return;
+        }
+        inputEl.value = raw.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      };
+
+      inputEl.addEventListener("input", applyFormat);
+      inputEl.addEventListener("keyup", applyFormat);
+      inputEl.addEventListener("change", applyFormat);
+      inputEl.addEventListener("blur", applyFormat);
+    }
+
     attachLiveComma(amountInput);
     attachLiveComma(deductAmountInput);
 
-    function formatNumber(num) {
-      return Number(num || 0).toLocaleString("fa-IR");
-    }
-
-    function formatToman(num) {
-      return Number(num || 0).toLocaleString("fa-IR") + " تومان";
+    function resolveTomanBalance(data) {
+      if (data.tomanBalance !== undefined) return Number(data.tomanBalance);
+      if (data.coinsToman !== undefined) return Number(data.coinsToman);
+      if (data.balanceToman !== undefined) return Number(data.balanceToman);
+      let raw = data.coins ?? data.balance ?? (data.user && (data.user.coins ?? data.user.balance)) ?? 0;
+      return Number(raw);
     }
 
     updateBtn.addEventListener("click", async () => {
       const username = usernameInput.value.trim();
-      // حذف ویرگول‌ها برای ارسال عدد خالص به سرور
       const amountRaw = amountInput.value.replace(/,/g, "").trim();
-      const action = actionInput.value; // add | subtract
+      const action = actionInput.value;
       const note = (noteInput.value || "").trim();
       const adminSecret = adminSecretInput.value.trim();
 
@@ -198,20 +210,33 @@
         }
 
         const isAdd = action === "add";
-        const newCoins = data.newCoins ?? data.newBalance ?? data.coins ?? 0;
-        const prevCoins = data.previousCoins ?? data.previousBalance ?? (isAdd ? newCoins - amountValue : newCoins + amountValue);
+        
+        let newCoins = 0;
+        if (data.newCoins !== undefined) newCoins = Number(data.newCoins);
+        else if (data.newBalance !== undefined) newCoins = Number(data.newBalance);
+        else if (data.coins !== undefined) newCoins = Number(data.coins);
+        else if (data.user && data.user.coins !== undefined) newCoins = Number(data.user.coins);
+
+        let prevCoins = 0;
+        if (data.previousCoins !== undefined) prevCoins = Number(data.previousCoins);
+        else if (data.prevCoins !== undefined) prevCoins = Number(data.prevCoins);
+        else if (data.oldCoins !== undefined) prevCoins = Number(data.oldCoins);
+        else if (data.previousBalance !== undefined) prevCoins = Number(data.previousBalance);
+        else {
+          prevCoins = isAdd ? (newCoins - amountValue) : (newCoins + amountValue);
+        }
 
         resultBox.innerHTML = `
           <div class="res-row"><span class="res-label">👤 نام کاربری:</span> <span class="res-val">${data.username || username}</span></div>
-          <div class="res-row"><span class="res-label">موجودی قبلی:</span> <span class="res-val">${formatNumber(prevCoins)} تومان</span></div>
+          <div class="res-row"><span class="res-label">موجودی قبلی:</span> <span class="res-val">${toComma(prevCoins)} تومان</span></div>
           <div class="res-row">
             <span class="res-label">${isAdd ? 'اضافه کردن موجودی:' : 'کم کردن موجودی:'}</span>
-            <span class="res-val" style="color: ${isAdd ? '#22c55e' : '#ef4444'}; font-size: 15px;">
-              ${isAdd ? '+' : '-'}${formatNumber(amountValue)} تومان
+            <span class="res-val" style="color: ${isAdd ? '#22c55e' : '#ef4444'}; font-size: 14.5px;">
+              ${isAdd ? '+' : '-'}${toComma(amountValue)} تومان
             </span>
           </div>
-          <hr style="margin: 6px 0; border: none; border-top: 1px dashed #334155;">
-          <div class="res-row"><span class="res-label">موجودی جدید:</span> <span class="res-val" style="color: #38bdf8;">${formatNumber(newCoins)} تومان</span></div>
+          <div style="margin: 4px 0; border-top: 1px dashed #334155;"></div>
+          <div class="res-row"><span class="res-label">موجودی جدید:</span> <span class="res-val" style="color: #38bdf8;">${toComma(newCoins)} تومان</span></div>
         `;
       } catch (err) {
         resultBox.innerHTML = '<span style="color:#ef4444;">خطا در ارتباط با سرور</span>';
@@ -228,8 +253,7 @@
       }
 
       resultBox.innerHTML = "در حال دریافت موجودی...";
-      const url =
-        `/admin/user-balance/${encodeURIComponent(username)}?adminSecret=${encodeURIComponent(adminSecret)}&t=${Date.now()}`;
+      const url = `/admin/user-balance/${encodeURIComponent(username)}?adminSecret=${encodeURIComponent(adminSecret)}&t=${Date.now()}`;
 
       try {
         const res = await fetch(url, {
@@ -244,18 +268,17 @@
           return;
         }
 
-        const bal = data.coins ?? data.balance ?? 0;
+        const bal = resolveTomanBalance(data);
         resultBox.innerHTML = `
           <div class="res-row"><span class="res-label">👤 نام کاربری:</span> <span class="res-val">${data.username || username}</span></div>
-          <div class="res-row"><span class="res-label">موجودی:</span> <span class="res-val" style="color: #22c55e; font-size: 15px;">${formatNumber(bal)} تومان</span></div>
+          <div class="res-row"><span class="res-label">موجودی:</span> <span class="res-val" style="color: #22c55e; font-size: 14.5px;">${toComma(bal)} تومان</span></div>
         `;
       } catch (err) {
         resultBox.innerHTML = '<span style="color:#ef4444;">خطا در ارتباط با سرور</span>';
       }
     });
 
-    // Treasury report
-    function showTreasuryResult(data){
+    function showTreasuryResult(data) {
       if (typeof data === "string") {
         treasuryResultBox.innerHTML = data;
         return;
@@ -266,11 +289,11 @@
       }
 
       treasuryResultBox.innerHTML = `
-        <div style="line-height: 2; font-size: 15px; direction: rtl; text-align: right;">
-          <div>💰 <b>درآمد امروز (۲۴ ساعته):</b> <span style="color: #22c55e; font-weight: bold;">${formatToman(data.todayCutToman)}</span> (${(data.todayCoins || 0).toLocaleString("fa-IR")} سکه)</div>
-          <div>🎮 <b>تعداد دست‌های امروز:</b> ${(data.todayCount || 0).toLocaleString("fa-IR")} بازی</div>
-          <hr style="margin: 8px 0; border: none; border-top: 1px dashed #444;">
-          <div>🏦 <b>موجودی کل خزانه (قابل برداشت):</b> <span style="color: #38bdf8; font-weight: bold;">${formatToman(data.totalBalanceToman)}</span> (${(data.totalCoins || 0).toLocaleString("fa-IR")} سکه)</div>
+        <div style="line-height: 1.8; font-size: 14.5px; direction: rtl; text-align: right;">
+          <div>💰 <b>درآمد امروز (۲۴ ساعته):</b> <span style="color: #22c55e; font-weight: bold;">${toComma(data.todayCutToman)} تومان</span></div>
+          <div>🎮 <b>تعداد دست‌های امروز:</b> ${toComma(data.todayCount || 0)} بازی</div>
+          <div style="margin: 6px 0; border-top: 1px dashed #334155;"></div>
+          <div>🏦 <b>موجودی کل خزانه:</b> <span style="color: #38bdf8; font-weight: bold;">${toComma(data.totalBalanceToman)} تومان</span></div>
         </div>
       `;
     }
@@ -301,7 +324,6 @@
     });
 
     deductBtn.addEventListener("click", async () => {
-      // حذف ویرگول‌ها برای ارسال عدد خالص به سرور
       const amount = Number(deductAmountInput.value.replace(/,/g, "").trim());
       const adminSecret = adminSecretInput.value.trim();
 
