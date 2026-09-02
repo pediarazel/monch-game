@@ -69,8 +69,8 @@
     <label for="username">نام کاربری</label>
     <input id="username" type="text" placeholder="مثلا ali" />
 
-    <label for="amount">مقدار</label>
-    <input id="amount" type="number" placeholder="مثلا 1000" />
+    <label for="amount">مقدار (تومان)</label>
+    <input id="amount" type="text" inputmode="numeric" placeholder="مثلا 100,000" />
 
     <label for="action">عملیات</label>
     <select id="action">
@@ -102,10 +102,11 @@
 
     <button id="treasuryBtn" class="secondary" style="margin-top:10px;">گرفتن گزارش خزانه</button>
     <div class="result" id="treasuryResult">گزارش اینجا نمایش داده می‌شود</div>
-        <div class="divider"></div>
+
+    <div class="divider"></div>
     <div class="section-title">برداشت از خزانه</div>
     <label for="deductAmount">مبلغ برداشت (تومان)</label>
-    <input id="deductAmount" type="number" placeholder="مثلا 50000" />
+    <input id="deductAmount" type="text" inputmode="numeric" placeholder="مثلا 50,000" />
     <button id="deductBtn" style="background: #ef4444; margin-top: 10px;">ثبت برداشت از خزانه</button>
     <div class="result" id="deductResult">نتیجه برداشت اینجا نمایش داده می‌شود</div>
 
@@ -122,13 +123,38 @@
     const updateBtn = document.getElementById("updateBtn");
     const getBtn = document.getElementById("getBtn");
 
+    const deductAmountInput = document.getElementById("deductAmount");
+    const deductBtn = document.getElementById("deductBtn");
+    const deductResultBox = document.getElementById("deductResult");
+
+    // تابع جادویی برای ویرگول‌گذاری خودکار حین تایپ
+    function attachLiveComma(inputEl) {
+      inputEl.addEventListener("input", function() {
+        // تبدیل اعداد فارسی به انگلیسی
+        let raw = this.value.replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+        // حذف هر کاراکتری غیر از ارقام
+        raw = raw.replace(/\D/g, "");
+        if (!raw) {
+          this.value = "";
+          return;
+        }
+        // جدا کردن خودکار ۳ رقم ۳ رقم
+        this.value = raw.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      });
+    }
+
+    // فعال کردن ویرگول خودکار روی هر دو کادر مبلغ
+    attachLiveComma(amountInput);
+    attachLiveComma(deductAmountInput);
+
     function showResult(data) {
       resultBox.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
     }
 
     updateBtn.addEventListener("click", async () => {
       const username = usernameInput.value.trim();
-      const amountRaw = amountInput.value.trim();
+      // حذف ویرگول‌ها برای ارسال عدد خالص به سرور
+      const amountRaw = amountInput.value.replace(/,/g, "").trim();
       const action = actionInput.value; // add | subtract
       const note = (noteInput.value || "").trim();
       const adminSecret = adminSecretInput.value.trim();
@@ -144,15 +170,14 @@
         return;
       }
 
-
       try {
         const res = await fetch("/admin/update-balance-by-username", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             username,
-            amount: amountValue, // add مثبت / subtract منفی
-            action,              // هم action را هم می‌فرستیم
+            amount: amountValue,
+            action,
             note,
             adminSecret
           })
@@ -228,7 +253,6 @@
       `;
     }
 
-
     treasuryBtn.addEventListener("click", async () => {
       const adminSecret = adminSecretInput.value.trim();
       const range = treasuryRangeEl.value;
@@ -254,12 +278,10 @@
         showTreasuryResult("خطا در ارتباط با سرور");
       }
     });
-        const deductAmountInput = document.getElementById("deductAmount");
-    const deductBtn = document.getElementById("deductBtn");
-    const deductResultBox = document.getElementById("deductResult");
 
     deductBtn.addEventListener("click", async () => {
-      const amount = Number(deductAmountInput.value);
+      // حذف ویرگول‌ها برای ارسال عدد خالص به سرور
+      const amount = Number(deductAmountInput.value.replace(/,/g, "").trim());
       const adminSecret = adminSecretInput.value.trim();
 
       if (!amount || amount <= 0 || !adminSecret) {
@@ -285,7 +307,6 @@
         deductResultBox.textContent = "خطا در ارتباط با سرور";
       }
     });
-
   </script>
 </body>
 </html>
