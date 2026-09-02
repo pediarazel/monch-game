@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fa">
+<html lang="fa" dir="rtl">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -48,23 +48,24 @@
       padding: 14px;
       border-radius: 10px;
       min-height: 52px;
+      white-space: pre-wrap;
+      word-break: break-word;
       font-size: 14px;
       color: #e2e8f0;
       line-height: 1.8;
       border: 1px solid #1e293b;
     }
-    .section-title {
+    .section-title{
       margin-top: 18px;
       font-size: 16px;
       font-weight: 800;
       text-align: center;
       color: #e5e7eb;
     }
-    .divider { height: 1px; background: #22314f; margin: 18px 0; border-radius: 999px; }
-    .small-note { color:#cbd5e1; font-size:12px; text-align:center; margin-top:-6px; margin-bottom:10px; }
-    .res-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .divider{ height: 1px; background: #22314f; margin: 18px 0; border-radius: 999px; }
+    .res-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
     .res-label { color: #94a3b8; }
-    .res-value { font-weight: bold; }
+    .res-val { font-weight: bold; }
   </style>
 </head>
 <body>
@@ -97,16 +98,8 @@
 
     <div class="divider"></div>
     <div class="section-title">گزارش خزانه (Treasury Report)</div>
-    <div class="small-note">range را انتخاب کن و گزارش را بگیر.</div>
 
-    <label for="treasuryRange">بازه زمانی</label>
-    <select id="treasuryRange">
-      <option value="day">day</option>
-      <option value="week" selected>week</option>
-      <option value="month">month</option>
-    </select>
-
-    <button id="treasuryBtn" class="secondary" style="margin-top:10px;">گرفتن گزارش خزانه</button>
+    <button id="treasuryBtn" class="secondary" style="margin-top:14px;">گرفتن گزارش خزانه</button>
     <div class="result" id="treasuryResult">گزارش اینجا نمایش داده می‌شود</div>
 
     <div class="divider"></div>
@@ -133,19 +126,26 @@
     const deductBtn = document.getElementById("deductBtn");
     const deductResultBox = document.getElementById("deductResult");
 
-    // تابع ویرگول‌گذاری زنده موقع تایپ
+    const treasuryBtn = document.getElementById("treasuryBtn");
+    const treasuryResultBox = document.getElementById("treasuryResult");
+
+    // تابع ویرگول‌گذاری خودکار حین تایپ
     function attachLiveComma(inputEl) {
       inputEl.addEventListener("input", function() {
+        // تبدیل اعداد فارسی به انگلیسی
         let raw = this.value.replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+        // حذف هر کاراکتری غیر از ارقام
         raw = raw.replace(/\D/g, "");
         if (!raw) {
           this.value = "";
           return;
         }
+        // جدا کردن خودکار ۳ رقم ۳ رقم
         this.value = raw.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
       });
     }
 
+    // فعال کردن ویرگول خودکار روی هر دو کادر مبلغ
     attachLiveComma(amountInput);
     attachLiveComma(deductAmountInput);
 
@@ -153,63 +153,31 @@
       return Number(num || 0).toLocaleString("fa-IR");
     }
 
-    function showResult(data) {
-      if (typeof data === "string") {
-        resultBox.innerHTML = `<span style="color:#ef4444;">${data}</span>`;
-        return;
-      }
-
-      // اگر نتیجه مربوط به تغییر موجودی باشد
-      if (data.previousCoins !== undefined || data.newCoins !== undefined || data.previousBalance !== undefined) {
-        const prev = data.previousCoins ?? data.previousBalance ?? 0;
-        const current = data.newCoins ?? data.newBalance ?? (prev + (data.deltaCoins || data.delta || 0));
-        const delta = Math.abs(data.deltaCoins ?? data.delta ?? (current - prev));
-        const isAdd = (data.deltaCoins ?? data.delta ?? 0) >= 0;
-
-        resultBox.innerHTML = `
-          <div style="color: #22c55e; font-weight: bold; text-align: center; margin-bottom: 8px;">✅ تراکنش با موفقیت انجام شد</div>
-          <div class="res-row"><span class="res-label">نام کاربری:</span> <span class="res-value">${data.username || usernameInput.value}</span></div>
-          <div class="res-row"><span class="res-label">موجودی قبلی:</span> <span class="res-value">${formatNumber(prev)} تومان</span></div>
-          <div class="res-row"><span class="res-label">${isAdd ? '➕ مبلغ اضافه شده:' : '➖ مبلغ کسر شده:'}</span> <span class="res-value" style="color: ${isAdd ? '#22c55e' : '#ef4444'};">${formatNumber(delta)} تومان</span></div>
-          <hr style="margin: 6px 0; border: none; border-top: 1px dashed #334155;">
-          <div class="res-row"><span class="res-label">💰 موجودی جدید (جمع کل):</span> <span class="res-value" style="color: #38bdf8; font-size: 15px;">${formatNumber(current)} تومان</span></div>
-        `;
-        return;
-      }
-
-      // اگر نتیجه مربوط به دریافت موجودی (استعلام) باشد
-      if (data.coins !== undefined || data.balance !== undefined) {
-        const bal = data.coins ?? data.balance ?? 0;
-        resultBox.innerHTML = `
-          <div style="color: #38bdf8; font-weight: bold; text-align: center; margin-bottom: 8px;">ℹ️ اطلاعات کاربر</div>
-          <div class="res-row"><span class="res-label">نام کاربری:</span> <span class="res-value">${data.username || usernameInput.value}</span></div>
-          <div class="res-row"><span class="res-label">موجودی فعلی:</span> <span class="res-value" style="color: #22c55e; font-size: 15px;">${formatNumber(bal)} تومان</span></div>
-        `;
-        return;
-      }
-
-      resultBox.textContent = JSON.stringify(data, null, 2);
+    function formatToman(num) {
+      return Number(num || 0).toLocaleString("fa-IR") + " تومان";
     }
 
     updateBtn.addEventListener("click", async () => {
       const username = usernameInput.value.trim();
+      // حذف ویرگول‌ها برای ارسال عدد خالص به سرور
       const amountRaw = amountInput.value.replace(/,/g, "").trim();
-      const action = actionInput.value;
+      const action = actionInput.value; // add | subtract
       const note = (noteInput.value || "").trim();
       const adminSecret = adminSecretInput.value.trim();
 
       if (!username || !amountRaw || !adminSecret) {
-        showResult("لطفاً نام کاربری، مبلغ و رمز ادمین را وارد کنید.");
+        resultBox.innerHTML = '<span style="color:#ef4444;">لطفاً نام کاربری، مبلغ و رمز ادمین را کامل کنید.</span>';
         return;
       }
 
       let amountValue = Number(amountRaw);
       if (!Number.isFinite(amountValue) || amountValue <= 0) {
-        showResult("مبلغ باید یک عدد معتبر و بزرگ‌تر از صفر باشد.");
+        resultBox.innerHTML = '<span style="color:#ef4444;">مبلغ باید یک عدد معتبر و بزرگ‌تر از صفر باشد.</span>';
         return;
       }
 
-      resultBox.innerHTML = "در حال ثبت تغییرات...";
+      resultBox.innerHTML = "در حال پردازش...";
+
       try {
         const res = await fetch("/admin/update-balance-by-username", {
           method: "POST",
@@ -225,12 +193,28 @@
 
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          showResult(data.message || "خطا در تغییر موجودی");
+          resultBox.innerHTML = `<span style="color:#ef4444;">${data.message || "خطا در تغییر موجودی"}</span>`;
           return;
         }
-        showResult(data);
+
+        const isAdd = action === "add";
+        const newCoins = data.newCoins ?? data.newBalance ?? data.coins ?? 0;
+        const prevCoins = data.previousCoins ?? data.previousBalance ?? (isAdd ? newCoins - amountValue : newCoins + amountValue);
+
+        resultBox.innerHTML = `
+          <div class="res-row"><span class="res-label">👤 نام کاربری:</span> <span class="res-val">${data.username || username}</span></div>
+          <div class="res-row"><span class="res-label">موجودی قبلی:</span> <span class="res-val">${formatNumber(prevCoins)} تومان</span></div>
+          <div class="res-row">
+            <span class="res-label">${isAdd ? 'اضافه کردن موجودی:' : 'کم کردن موجودی:'}</span>
+            <span class="res-val" style="color: ${isAdd ? '#22c55e' : '#ef4444'}; font-size: 15px;">
+              ${isAdd ? '+' : '-'}${formatNumber(amountValue)} تومان
+            </span>
+          </div>
+          <hr style="margin: 6px 0; border: none; border-top: 1px dashed #334155;">
+          <div class="res-row"><span class="res-label">موجودی جدید:</span> <span class="res-val" style="color: #38bdf8;">${formatNumber(newCoins)} تومان</span></div>
+        `;
       } catch (err) {
-        showResult("خطا در ارتباط با سرور");
+        resultBox.innerHTML = '<span style="color:#ef4444;">خطا در ارتباط با سرور</span>';
       }
     });
 
@@ -239,11 +223,11 @@
       const adminSecret = adminSecretInput.value.trim();
 
       if (!username || !adminSecret) {
-        showResult("نام کاربری و رمز ادمین را وارد کنید.");
+        resultBox.innerHTML = '<span style="color:#ef4444;">نام کاربری و رمز ادمین را وارد کنید.</span>';
         return;
       }
 
-      resultBox.innerHTML = "در حال دریافت اطلاعات...";
+      resultBox.innerHTML = "در حال دریافت موجودی...";
       const url =
         `/admin/user-balance/${encodeURIComponent(username)}?adminSecret=${encodeURIComponent(adminSecret)}&t=${Date.now()}`;
 
@@ -256,27 +240,24 @@
 
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          showResult(data.message || "خطا در دریافت موجودی");
+          resultBox.innerHTML = `<span style="color:#ef4444;">${data.message || "خطا در دریافت موجودی"}</span>`;
           return;
         }
-        showResult(data);
+
+        const bal = data.coins ?? data.balance ?? 0;
+        resultBox.innerHTML = `
+          <div class="res-row"><span class="res-label">👤 نام کاربری:</span> <span class="res-val">${data.username || username}</span></div>
+          <div class="res-row"><span class="res-label">موجودی:</span> <span class="res-val" style="color: #22c55e; font-size: 15px;">${formatNumber(bal)} تومان</span></div>
+        `;
       } catch (err) {
-        showResult("خطا در ارتباط با سرور");
+        resultBox.innerHTML = '<span style="color:#ef4444;">خطا در ارتباط با سرور</span>';
       }
     });
 
     // Treasury report
-    const treasuryRangeEl = document.getElementById("treasuryRange");
-    const treasuryBtn = document.getElementById("treasuryBtn");
-    const treasuryResultBox = document.getElementById("treasuryResult");
-
-    function formatToman(num) {
-      return Number(num || 0).toLocaleString("fa-IR") + " تومان";
-    }
-
     function showTreasuryResult(data){
       if (typeof data === "string") {
-        treasuryResultBox.innerHTML = `<span style="color:#ef4444;">${data}</span>`;
+        treasuryResultBox.innerHTML = data;
         return;
       }
       if (!data.success) {
@@ -296,31 +277,31 @@
 
     treasuryBtn.addEventListener("click", async () => {
       const adminSecret = adminSecretInput.value.trim();
-      const range = treasuryRangeEl.value;
 
       if (!adminSecret) {
-        showTreasuryResult("adminSecret را وارد کن.");
+        showTreasuryResult('<span style="color:#ef4444;">رمز ادمین را وارد کنید.</span>');
         return;
       }
 
       showTreasuryResult("در حال دریافت گزارش...");
       try {
         const res = await fetch(
-          `/admin/treasury-report?range=${encodeURIComponent(range)}&adminSecret=${encodeURIComponent(adminSecret)}`
+          `/admin/treasury-report?range=day&adminSecret=${encodeURIComponent(adminSecret)}`
         );
 
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          showTreasuryResult(data.message || "خطا در دریافت گزارش خزانه");
+          showTreasuryResult(`<span style="color:#ef4444;">${data.message || "خطا در دریافت گزارش خزانه"}</span>`);
           return;
         }
         showTreasuryResult(data);
       } catch (e) {
-        showTreasuryResult("خطا در ارتباط با سرور");
+        showTreasuryResult('<span style="color:#ef4444;">خطا در ارتباط با سرور</span>');
       }
     });
 
     deductBtn.addEventListener("click", async () => {
+      // حذف ویرگول‌ها برای ارسال عدد خالص به سرور
       const amount = Number(deductAmountInput.value.replace(/,/g, "").trim());
       const adminSecret = adminSecretInput.value.trim();
 
