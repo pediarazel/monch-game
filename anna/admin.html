@@ -102,6 +102,13 @@
 
     <button id="treasuryBtn" class="secondary" style="margin-top:10px;">گرفتن گزارش خزانه</button>
     <div class="result" id="treasuryResult">گزارش اینجا نمایش داده می‌شود</div>
+        <div class="divider"></div>
+    <div class="section-title">برداشت از خزانه</div>
+    <label for="deductAmount">مبلغ برداشت (تومان)</label>
+    <input id="deductAmount" type="number" placeholder="مثلا 50000" />
+    <button id="deductBtn" style="background: #ef4444; margin-top: 10px;">ثبت برداشت از خزانه</button>
+    <div class="result" id="deductResult">نتیجه برداشت اینجا نمایش داده می‌شود</div>
+
   </div>
 
   <script>
@@ -137,12 +144,6 @@
         return;
       }
 
-      // ✅ کلید اصلی:
-      // بعضی سرورها برای subtract انتظار دارند amount منفی باشد.
-      // بنابراین add = مثبت، subtract = منفی
-      if (action === "subtract") {
-        amountValue = -amountValue;
-      }
 
       try {
         const res = await fetch("/admin/update-balance-by-username", {
@@ -203,9 +204,30 @@
     const treasuryBtn = document.getElementById("treasuryBtn");
     const treasuryResultBox = document.getElementById("treasuryResult");
 
-    function showTreasuryResult(data){
-      treasuryResultBox.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+    function formatToman(num) {
+      return Number(num || 0).toLocaleString("fa-IR") + " تومان";
     }
+
+    function showTreasuryResult(data){
+      if (typeof data === "string") {
+        treasuryResultBox.textContent = data;
+        return;
+      }
+      if (!data.success) {
+        treasuryResultBox.textContent = data.message || "خطا در دریافت اطلاعات";
+        return;
+      }
+
+      treasuryResultBox.innerHTML = `
+        <div style="line-height: 2; font-size: 15px; direction: rtl; text-align: right;">
+          <div>💰 <b>درآمد امروز (۲۴ ساعته):</b> <span style="color: #22c55e; font-weight: bold;">${formatToman(data.todayCutToman)}</span> (${(data.todayCoins || 0).toLocaleString("fa-IR")} سکه)</div>
+          <div>🎮 <b>تعداد دست‌های امروز:</b> ${(data.todayCount || 0).toLocaleString("fa-IR")} بازی</div>
+          <hr style="margin: 8px 0; border: none; border-top: 1px dashed #444;">
+          <div>🏦 <b>موجودی کل خزانه (قابل برداشت):</b> <span style="color: #38bdf8; font-weight: bold;">${formatToman(data.totalBalanceToman)}</span> (${(data.totalCoins || 0).toLocaleString("fa-IR")} سکه)</div>
+        </div>
+      `;
+    }
+
 
     treasuryBtn.addEventListener("click", async () => {
       const adminSecret = adminSecretInput.value.trim();
@@ -232,6 +254,38 @@
         showTreasuryResult("خطا در ارتباط با سرور");
       }
     });
+        const deductAmountInput = document.getElementById("deductAmount");
+    const deductBtn = document.getElementById("deductBtn");
+    const deductResultBox = document.getElementById("deductResult");
+
+    deductBtn.addEventListener("click", async () => {
+      const amount = Number(deductAmountInput.value);
+      const adminSecret = adminSecretInput.value.trim();
+
+      if (!amount || amount <= 0 || !adminSecret) {
+        deductResultBox.textContent = "لطفاً مبلغ و رمز ادمین را وارد کنید.";
+        return;
+      }
+
+      deductResultBox.textContent = "در حال ثبت درخواست...";
+      try {
+        const res = await fetch("/admin/treasury-deduct", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount, adminSecret })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          deductResultBox.textContent = data.message || "خطا در برداشت از خزانه";
+          return;
+        }
+        deductResultBox.textContent = "✅ برداشت با موفقیت ثبت شد.";
+        treasuryBtn.click();
+      } catch (err) {
+        deductResultBox.textContent = "خطا در ارتباط با سرور";
+      }
+    });
+
   </script>
 </body>
 </html>
