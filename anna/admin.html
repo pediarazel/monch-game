@@ -127,7 +127,7 @@
     const treasuryBtn = document.getElementById("treasuryBtn");
     const treasuryResultBox = document.getElementById("treasuryResult");
 
-    // فرمت‌دهی ۳ رقم ۳ رقم با ویرگول
+    // تابع ۳ رقم جدا کردن
     function toComma(val) {
       if (val === null || val === undefined || val === "") return "0";
       let str = String(val).replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
@@ -138,7 +138,7 @@
       return parts.join(".");
     }
 
-    // اتصال ویرگول‌گذاری زنده با پشتیبانی کامل از موبایل
+    // اتصال فرمت‌دهی خودکار هنگام تایپ در موبایل و دسکتاپ
     function attachLiveComma(inputEl) {
       if (!inputEl) return;
       const applyFormat = () => {
@@ -162,14 +162,7 @@
     attachLiveComma(amountInput);
     attachLiveComma(deductAmountInput);
 
-    function resolveTomanBalance(data) {
-      if (data.tomanBalance !== undefined) return Number(data.tomanBalance);
-      if (data.coinsToman !== undefined) return Number(data.coinsToman);
-      if (data.balanceToman !== undefined) return Number(data.balanceToman);
-      let raw = data.coins ?? data.balance ?? (data.user && (data.user.coins ?? data.user.balance)) ?? 0;
-      return Number(raw);
-    }
-
+    // ثبت افزایش/کاهش موجودی
     updateBtn.addEventListener("click", async () => {
       const username = usernameInput.value.trim();
       const amountRaw = amountInput.value.replace(/,/g, "").trim();
@@ -204,31 +197,27 @@
         });
 
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
+        if (!res.ok || data.success === false) {
           resultBox.innerHTML = `<span style="color:#ef4444;">${data.message || "خطا در تغییر موجودی"}</span>`;
           return;
         }
 
         const isAdd = action === "add";
         
-        let newCoins = 0;
-        if (data.newCoins !== undefined) newCoins = Number(data.newCoins);
-        else if (data.newBalance !== undefined) newCoins = Number(data.newBalance);
-        else if (data.coins !== undefined) newCoins = Number(data.coins);
-        else if (data.user && data.user.coins !== undefined) newCoins = Number(data.user.coins);
-
-        let prevCoins = 0;
-        if (data.previousCoins !== undefined) prevCoins = Number(data.previousCoins);
-        else if (data.prevCoins !== undefined) prevCoins = Number(data.prevCoins);
-        else if (data.oldCoins !== undefined) prevCoins = Number(data.oldCoins);
-        else if (data.previousBalance !== undefined) prevCoins = Number(data.previousBalance);
-        else {
-          prevCoins = isAdd ? (newCoins - amountValue) : (newCoins + amountValue);
+        // استخراج موجودی جدید بر حسب تومان
+        let newCoinsToman = 0;
+        if (data.newCoinsToman !== undefined) {
+          newCoinsToman = Number(data.newCoinsToman);
+        } else if (data.newCoins !== undefined) {
+          newCoinsToman = Number(data.newCoins) * 1000;
         }
 
+        // محاسبه دقیق موجودی قبلی بر حسب تومان
+        let prevCoinsToman = isAdd ? (newCoinsToman - amountValue) : (newCoinsToman + amountValue);
+
         resultBox.innerHTML = `
-          <div class="res-row"><span class="res-label">👤 نام کاربری:</span> <span class="res-val">${data.username || username}</span></div>
-          <div class="res-row"><span class="res-label">موجودی قبلی:</span> <span class="res-val">${toComma(prevCoins)} تومان</span></div>
+          <div class="res-row"><span class="res-label">👤 نام کاربری:</span> <span class="res-val">${username}</span></div>
+          <div class="res-row"><span class="res-label">موجودی قبلی:</span> <span class="res-val">${toComma(prevCoinsToman)} تومان</span></div>
           <div class="res-row">
             <span class="res-label">${isAdd ? 'اضافه کردن موجودی:' : 'کم کردن موجودی:'}</span>
             <span class="res-val" style="color: ${isAdd ? '#22c55e' : '#ef4444'}; font-size: 14.5px;">
@@ -236,13 +225,14 @@
             </span>
           </div>
           <div style="margin: 4px 0; border-top: 1px dashed #334155;"></div>
-          <div class="res-row"><span class="res-label">موجودی جدید:</span> <span class="res-val" style="color: #38bdf8;">${toComma(newCoins)} تومان</span></div>
+          <div class="res-row"><span class="res-label">موجودی جدید:</span> <span class="res-val" style="color: #38bdf8;">${toComma(newCoinsToman)} تومان</span></div>
         `;
       } catch (err) {
         resultBox.innerHTML = '<span style="color:#ef4444;">خطا در ارتباط با سرور</span>';
       }
     });
 
+    // دریافت موجودی کاربر
     getBtn.addEventListener("click", async () => {
       const username = usernameInput.value.trim();
       const adminSecret = adminSecretInput.value.trim();
@@ -263,21 +253,29 @@
         });
 
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
+        if (!res.ok || data.success === false) {
           resultBox.innerHTML = `<span style="color:#ef4444;">${data.message || "خطا در دریافت موجودی"}</span>`;
           return;
         }
 
-        const bal = resolveTomanBalance(data);
+        // استخراج موجودی به تومان
+        let balToman = 0;
+        if (data.coinsToman !== undefined) {
+          balToman = Number(data.coinsToman);
+        } else if (data.coins !== undefined) {
+          balToman = Number(data.coins) * 1000;
+        }
+
         resultBox.innerHTML = `
           <div class="res-row"><span class="res-label">👤 نام کاربری:</span> <span class="res-val">${data.username || username}</span></div>
-          <div class="res-row"><span class="res-label">موجودی:</span> <span class="res-val" style="color: #22c55e; font-size: 14.5px;">${toComma(bal)} تومان</span></div>
+          <div class="res-row"><span class="res-label">موجودی:</span> <span class="res-val" style="color: #22c55e; font-size: 14.5px;">${toComma(balToman)} تومان</span></div>
         `;
       } catch (err) {
         resultBox.innerHTML = '<span style="color:#ef4444;">خطا در ارتباط با سرور</span>';
       }
     });
 
+    // نمایش گزارش خزانه
     function showTreasuryResult(data) {
       if (typeof data === "string") {
         treasuryResultBox.innerHTML = data;
