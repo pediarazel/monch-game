@@ -945,7 +945,8 @@ async function chargeTierFromPlayers(match) {
   if (!match.tier) throw new Error("tier نامعتبر است یا ست نشده است.");
   assertValidTier(match.tier);
 
-  const userIds = colorOrder.map((color) => match.playerColors[color]).filter((userId) => userId != null);
+  const userIds = colorOrder.map((color) => match.playerColors[color]).filter((userId) => userId != null).map((id) => Number(id));
+
 
   if (userIds.length < 2 || userIds.length > 4) {
     throw new Error("برای شروع بازی باید بین ۲ تا ۴ بازیکن حضور داشته باشند.");
@@ -2011,11 +2012,12 @@ async function handleLobbyTimeout(lobby) {
 
     try {
       const bot = await ensureBotUser();
-      const botUid = String(bot.id);
+      const botUid = Number(bot.id);
 
       if (!lobby.playerUidsInOrder.includes(botUid)) {
         lobby.playerUidsInOrder.push(botUid);
         lobby.playerNamesByUserId[botUid] = "حریف هوشمند 🤖";
+
         assignColorsToLobbyPlayers(lobby);
       }
 
