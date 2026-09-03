@@ -800,7 +800,8 @@ function createLobby(tier) {
 }
 const LOBBY_TIERS = [20, 50, 100, 200];
 const LOBBY_BOT_TIERS = new Set([20, 50]);
-const LOBBY_BOT_WAIT_SECONDS = 5;
+const LOBBY_BOT_WAIT_SECONDS = 30;
+
 
 function isBotTier(tier) {
   return LOBBY_BOT_TIERS.has(Number(tier));
@@ -1915,17 +1916,41 @@ async function nextTurn(match) {
   const isNextUserBot = !match.playerUidsInOrder.includes(nextUserId);
 
   if (isNextUserBot) {
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    const d1 = Math.floor(Math.random() * 6) + 1;
+    const d2 = Math.floor(Math.random() * 6) + 1;
+
+    match.game.dice1 = d1;
+    match.game.dice2 = d2;
+    match.game.pendingDice = [d1, d2];
+    match.game.rolled = true;
+    match.game.dice = d1 + d2;
+
+    await broadcastState(match);
+
     const smartMove = await getRobotSmartMove(match);
+
     if (smartMove) {
       await movePiece(match, smartMove.piece, smartMove.dieValue);
       await broadcastState(match);
-    } else {
-      startTurnTimeout(match);
+      return;
     }
-  } else {
-    startTurnTimeout(match);
+
+    match.game.pendingDice = [];
+    match.game.dice1 = 0;
+    match.game.dice2 = 0;
+    match.game.dice = 0;
+    match.game.rolled = false;
+    match.game.turnMoved = false;
+
+    await broadcastState(match);
+    await nextTurn(match);
+    return;
   }
+
+  startTurnTimeout(match);
+
 }
 
 /**
@@ -1942,7 +1967,15 @@ async function getRobotSmartMove(match) {
   // ۲. استخراج تمام حرکت‌های قانونی ممکن
   let legalMoves = [];
   for (const piece of robotPieces) {
-    const diceToTry = game.pendingDice.length > 0 ? game.pendingDice : [1, 2, 3, 4, 5, 6];
+const diceToTry = Array.isArray(game.pendingDice)
+  ? game.pendingDice.filter(
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 1 &&
+        value <= 6
+    )
+  : [];
+
     
     for (const die of diceToTry) {
       if (typeof canPieceMove === 'function' && canPieceMove(game, piece, die)) {
@@ -2049,7 +2082,9 @@ lobby.playerNamesByUserId[botUid] = robotNamesGenerator();
         assignColorsToLobbyPlayers(lobby);
       }
 
-      return startMatchFromLobby(lobby, 2);
+       await startMatchFromLobby(lobby, 2);
+       return;
+
     } catch (err) {
       console.error("[BOT] Failed to inject bot:", err);
       return;
@@ -2093,27 +2128,6 @@ async function onLobbyPlayerJoined(tier) {
 
   const count = lobby.playerUidsInOrder.length;
 
-  // ۱. مدیریت ورود ربات برای نفر اول
-  if (count === 1 && isBotTier(tier)) {
-    try {
-      const botUid = "17"; // طبق ساختار شما
-      if (!lobby.playerUidsInOrder.includes(botUid)) {
-        lobby.playerUidsInOrder.push(botUid);
-lobby.playerNamesByUserId[botUid] = robotNamesGenerator();
-
-        assignColorsToLobbyPlayers(lobby);
-      }
-      // بعد از ورود ربات، بلافاصله دستور جستجوی نفر سوم را اجرا کن
-      // اما چون تابع خودکار صدا زده می‌شود، اجازه بده جریان به پایین برود
-    } catch (err) {
-      console.error("[BOT] Failed to inject bot:", err);
-    }
-  }
-  const effectiveCount = lobby.playerUidsInOrder.length;
-if (effectiveCount === 2 && isBotTier(tier)) {
-  await startMatchFromLobby(lobby, 2);
-  return;
-}
 
   // ۲. مدیریت منطق لابی و پیام‌های اموجی (نفر ۱، ۲ و ۳)
   // این بخش بر اساس درخواست شما: نفر ۱ و ۲ -> جستجوی ۳ | نفر ۳ -> جستجوی ۴
@@ -3325,7 +3339,15 @@ async function getRobotSmartMove(match) {
   let legalMoves = [];
   for (const piece of robotPieces) {
     // ما از تاس‌های موجود در بازی استفاده می‌کنیم (بدون دستکاری)
-    const diceToTry = game.pendingDice.length > 0 ? game.pendingDice : [1, 2, 3, 4, 5, 6];
+const diceToTry = Array.isArray(game.pendingDice)
+  ? game.pendingDice.filter(
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 1 &&
+        value <= 6
+    )
+  : [];
+
     
     for (const die of diceToTry) {
       // بررسی قانونی بودن حرکت با استفاده از تابع موجود در کد شما
