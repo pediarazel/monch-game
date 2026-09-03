@@ -945,12 +945,16 @@ async function chargeTierFromPlayers(match) {
   if (!match.tier) throw new Error("tier نامعتبر است یا ست نشده است.");
   assertValidTier(match.tier);
 
-  const userIds = colorOrder.map((color) => match.playerColors[color]).filter((userId) => userId != null).map((id) => Number(id));
-
+  // اطمینان مضاعف از اینکه تمام آیدی‌ها حتماً به عدد تبدیل می‌شوند تا Prisma خطا ندهد
+  const userIds = colorOrder
+    .map((color) => match.playerColors[color])
+    .filter((userId) => userId != null)
+    .map((id) => Number(id));
 
   if (userIds.length < 2 || userIds.length > 4) {
     throw new Error("برای شروع بازی باید بین ۲ تا ۴ بازیکن حضور داشته باشند.");
   }
+
 
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
@@ -2012,11 +2016,13 @@ async function handleLobbyTimeout(lobby) {
 
     try {
       const bot = await ensureBotUser();
+      // اطمینان از اینکه آیدی حتماً عدد است تا با Prisma خطا ندهد
       const botUid = Number(bot.id);
 
       if (!lobby.playerUidsInOrder.includes(botUid)) {
         lobby.playerUidsInOrder.push(botUid);
-        lobby.playerNamesByUserId[botUid] = "حریف هوشمند 🤖";
+        // حذف ایموجی برای انسانی‌تر شدن نام ربات
+        lobby.playerNamesByUserId[botUid] = "حریف هوشمند";
 
         assignColorsToLobbyPlayers(lobby);
       }
@@ -2041,6 +2047,7 @@ function getLobbyPhaseFromCount(count) {
   return 4;
 }
 
+
 async function onLobbyPlayerJoined(tier) {
   const lobby = tierLobbies.get(tier);
   if (!lobby) return;
@@ -2048,75 +2055,32 @@ async function onLobbyPlayerJoined(tier) {
   const count = lobby.playerUidsInOrder.length;
   lobby.lobbyPhase = getLobbyPhaseFromCount(count);
 
+  // حالت اول: نفر اول وارد شده و اتاق از نوع ربات است (تایمر ۳۰ ثانیه شروع می‌شود)
   if (count === 1 && isBotTier(tier)) {
-    setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
+    setLobbyDeadline(lobby, 30); 
     emitLobbyStatus(lobby, {
       phase: 1,
       searchingFor: 2,
       deadlineAt: lobby.lobbyDeadlineAt,
-      deadlineMs: LOBBY_BOT_WAIT_SECONDS * 1000,
+      deadlineMs: 30 * 1000,
       message: "در حال جستجوی حریف...",
       status: "SEARCHING_BOT",
     });
     return;
   }
 
-  if (count === 2) {
-
+  // حالت دوم: نفر دوم یا بیشتر وارد شده‌اند (تایمر ربات باید متوقف شود)
+  if (count >= 2) {
     lobby.status = "lobby";
-    lobby.lobbyDeadlineAt = null;
-    lobby.lobbyPhase = 2;
-
+    lobby.lobbyDeadlineAt = null; // توقف تایمر جستجوی ربات
+    lobby.lobbyPhase = 2; 
+    
     emitLobbyStatus(lobby, {
       phase: 2,
-      searchingFor: 3,
-      deadlineAt: null,
-      message: "در حال جستجوی نفر سوم...",
-      status: "SEARCHING_3",
+      status: "WAITING_FOR_OTHERS",
+      message: "در حال آماده‌سازی بازی...",
     });
-
-setLobbyDeadline(lobby, 30);
-
-emitLobbyStatus(lobby, {
-  phase: 2,
-  searchingFor: 3,
-  deadlineAt: lobby.lobbyDeadlineAt,
-  deadlineMs: 30000,
-  message: "در حال جستجوی نفر سوم... (۳۰ ثانیه)",
-  status: "SEARCHING_3",
-});
-
     return;
-  }
-
-if (count === 3) {
-  lobby.lobbyPhase = 3;
-  setLobbyDeadline(lobby, 30);
-
-  emitLobbyStatus(lobby, {
-    phase: 3,
-    searchingFor: 4,
-    deadlineAt: lobby.lobbyDeadlineAt,
-    deadlineMs: 30000,
-    message: "در حال جستجوی نفر چهارم... (۳۰ ثانیه)",
-    status: "SEARCHING_4",
-  });
-  return;
-}
-
-
-  if (count >= 4) {
-    lobby.lobbyPhase = 4;
-
-    emitLobbyStatus(lobby, {
-      phase: 4,
-      searchingFor: null,
-      deadlineAt: lobby.lobbyDeadlineAt,
-      message: "نفر چهارم پیدا شد ✅",
-      status: "FULL",
-    });
-
-    await startMatchFromLobby(lobby, 4);
   }
 }
 
