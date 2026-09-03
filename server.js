@@ -785,6 +785,37 @@ function createLobby(tier) {
   };
 }
 const LOBBY_TIERS = [20, 50, 100, 200];
+const LOBBY_BOT_TIERS = new Set([20, 50]);
+const LOBBY_BOT_WAIT_SECONDS = 5;
+
+function isBotTier(tier) {
+  return LOBBY_BOT_TIERS.has(Number(tier));
+}
+
+async function ensureBotUser() {
+  const username = "system_bot";
+  const existing = await prisma.user.findUnique({ where: { username } });
+  if (existing) {
+    if (existing.coins < 1000) {
+      return prisma.user.update({
+        where: { id: existing.id },
+        data: { coins: 100000 },
+      });
+    }
+    return existing;
+  }
+
+  const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
+  return prisma.user.create({
+    data: {
+      username,
+      password: passwordHash,
+      coins: 100000,
+      role: "USER",
+    },
+  });
+}
+
 function computeLobbyStats() {
   const stats = {
     online: connectedUsers ? connectedUsers.size : 0,
@@ -1974,10 +2005,32 @@ function setLobbyDeadline(lobby, seconds) {
 
 async function handleLobbyTimeout(lobby) {
   const count = lobby.playerUidsInOrder.length;
+
+  if (count === 1) {
+    if (!isBotTier(lobby.tier)) return;
+
+    try {
+      const bot = await ensureBotUser();
+      const botUid = String(bot.id);
+
+      if (!lobby.playerUidsInOrder.includes(botUid)) {
+        lobby.playerUidsInOrder.push(botUid);
+        lobby.playerNamesByUserId[botUid] = "حریف هوشمند 🤖";
+        assignColorsToLobbyPlayers(lobby);
+      }
+
+      return startMatchFromLobby(lobby, 2);
+    } catch (err) {
+      console.error("[BOT] Failed to inject bot:", err);
+      return;
+    }
+  }
+
   if (count === 2) return startMatchFromLobby(lobby, 2);
   if (count === 3) return startMatchFromLobby(lobby, 3);
   if (count >= 4) return startMatchFromLobby(lobby, 4);
 }
+
 
 function getLobbyPhaseFromCount(count) {
   if (count <= 1) return 1;
@@ -1993,7 +2046,21 @@ async function onLobbyPlayerJoined(tier) {
   const count = lobby.playerUidsInOrder.length;
   lobby.lobbyPhase = getLobbyPhaseFromCount(count);
 
+  if (count === 1 && isBotTier(tier)) {
+    setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
+    emitLobbyStatus(lobby, {
+      phase: 1,
+      searchingFor: 2,
+      deadlineAt: lobby.lobbyDeadlineAt,
+      deadlineMs: LOBBY_BOT_WAIT_SECONDS * 1000,
+      message: "در حال جستجوی حریف...",
+      status: "SEARCHING_BOT",
+    });
+    return;
+  }
+
   if (count === 2) {
+
     lobby.status = "lobby";
     lobby.lobbyDeadlineAt = null;
     lobby.lobbyPhase = 2;
