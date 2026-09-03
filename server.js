@@ -2109,6 +2109,11 @@ lobby.playerNamesByUserId[botUid] = robotNamesGenerator();
       console.error("[BOT] Failed to inject bot:", err);
     }
   }
+  const effectiveCount = lobby.playerUidsInOrder.length;
+if (effectiveCount === 2 && isBotTier(tier)) {
+  await startMatchFromLobby(lobby, 2);
+  return;
+}
 
   // ۲. مدیریت منطق لابی و پیام‌های اموجی (نفر ۱، ۲ و ۳)
   // این بخش بر اساس درخواست شما: نفر ۱ و ۲ -> جستجوی ۳ | نفر ۳ -> جستجوی ۴
