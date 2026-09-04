@@ -443,7 +443,8 @@ async function updateBalance() {
         if (socket) { try { socket.removeAllListeners(); socket.disconnect(); } catch {} socket = null; }
 
         socket = io(SOCKET_URL, {
-          auth: { token }, autoConnect: false, transports: ["websocket", "polling"],
+          auth: { token }, autoConnect: false, transports: ["websocket"],
+
           reconnection: true, reconnectionAttempts: 5, reconnectionDelay: 1000
         });
 

@@ -2212,17 +2212,6 @@ function normalizeSocketToken(value) {
   return token;
 }
 
-// --- FIX: Robust Socket.io Initialization ---
-const io = new Server(httpServer, {
-  cors: {
-    origin: "*", 
-    methods: ["GET", "POST"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true
-  },
-  transports: ["polling", "websocket"],
-  allowEIO3: true 
-});
 
 // این خط بسیار مهم است: باعث می‌شود در کل فایل با هر اسمی (io یا socketServer) کار کند
 global.io = io;
