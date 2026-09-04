@@ -125,8 +125,23 @@ const clearBotTimers = (match) => {
 */
 const app = express();
 
-
 const httpServer = http.createServer(app);
+
+// --- FIX: MOVE SOCKET INITIALIZATION HERE ---
+const io = new Server(httpServer, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true
+  },
+  transports: ["polling", "websocket"],
+  allowEIO3: true
+});
+global.io = io;
+global.socketServer = io;
+// --------------------------------------------
+
 app.disable("x-powered-by");
 
 app.use(express.json({ limit: "2mb" }));
