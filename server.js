@@ -124,6 +124,8 @@ const clearBotTimers = (match) => {
 |--------------------------------------------------------------------------
 */
 const app = express();
+
+
 const httpServer = http.createServer(app);
 app.disable("x-powered-by");
 
@@ -826,7 +828,7 @@ function checkWinner(game) {
 |--------------------------------------------------------------------------
 */
 const matches = new Map(); // matchId -> match
-let io;
+
 
 const tierLobbies = new Map(); // tier -> lobby
 
@@ -2195,7 +2197,7 @@ function normalizeSocketToken(value) {
   return token;
 }
 
-io = new Server(httpServer, {
+global.io = new Server(httpServer, {
   cors: {
     origin: allowedOriginsForSocket,
     methods: ["GET", "POST"],
