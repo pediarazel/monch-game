@@ -2197,20 +2197,22 @@ function normalizeSocketToken(value) {
   return token;
 }
 
-global.io = new Server(httpServer, {
+const io = new Server(httpServer, {
   cors: {
-    origin: allowedOriginsForSocket,
+    origin: CLIENT_ORIGIN,
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: allowedOriginsForSocket !== "*",
+    credentials: true
   },
   transports: ["polling", "websocket"],
   allowEIO3: false,
-  pingTimeout: 5000, // حداکثر ۵ ثانیه صبر برای پاسخ پینگ
-  pingInterval: 3000, // هر ۳ ثانیه بررسی اتصال برای واکنش سریع در موبایل
-
-
+  pingTimeout: 5000,
+  pingInterval: 3000
 });
+global.io = io;
+
+// بعد از این کد، مستقیم برو سراغ io.use...
+
 
 io.use((socket, next) => {
   try {
