@@ -2035,13 +2035,6 @@ function setLobbyDeadline(lobby, seconds) {
   const token = lobby.timerToken;
   if (lobby.lobbyTimer) clearTimeout(lobby.lobbyTimer);
 
-  lobby.lobbyTimer = setTimeout(() => {
-    const current = tierLobbies.get(lobby.tier);
-    if (!current) return;
-    if (current.timerToken !== token) return;
-    handleLobbyTimeout(current).catch((e) => console.error("handleLobbyTimeout error:", e));
-  }, seconds * 1000);
-}
 
 
 function getLobbyPhaseFromCount(count) {
@@ -3391,24 +3384,28 @@ const piece = m.game.pieces.find(
 });
 
 });
-// تابع ربات (با نام کاملاً متفاوت تا تداخل نداشته باشد)
+
+}
 const injectBotNow = async (tier) => {
   const lobby = tierLobbies.get(tier);
   if (!lobby || !lobby.playerUidsInOrder || lobby.playerUidsInOrder.length >= 2) return;
 
-  console.log(`[ROBOT_SYSTEM] Lobby ${tier} timeout. Adding bot...`);
+  // جلوگیری از اجرای مجدد تایمر
+  if (lobby.lobbyTimer) clearTimeout(lobby.lobbyTimer);
+
+  console.log(`[ROBOT_SYSTEM] Lobby ${tier} timeout. Injecting bot...`);
   
   const botId = `bot_${Date.now()}`;
   lobby.playerNamesByUserId[botId] = generateRobotName(); 
   lobby.playerUidsInOrder.push(botId);
   
-  emitLobbyStats(); 
+  if (typeof emitLobbyStats === 'function') emitLobbyStats(); 
   
   if (lobby.playerUidsInOrder.length >= 2) {
+    console.log(`[ROBOT_SYSTEM] Match starting for tier ${tier}`);
     await startMatchFromLobby(lobby, 2); 
   }
 };
-
 
 
 // Start
