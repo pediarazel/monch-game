@@ -2197,21 +2197,23 @@ function normalizeSocketToken(value) {
   return token;
 }
 
-const io = new Server(httpServer, {
+// --- FIX: Robust Socket.io Initialization ---
+// اطمینان از اینکه از همان httpServer اصلی استفاده می‌کنیم
+const socketServer = new Server(httpServer, {
   cors: {
-    origin: CLIENT_ORIGIN,
+    origin: "*", // برای رفع سریع 404 در محیط Render، ابتدا اجازه دسترسی باز می‌دهیم
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true
   },
   transports: ["polling", "websocket"],
-  allowEIO3: false,
-  pingTimeout: 5000,
-  pingInterval: 3000
+  allowEIO3: true // فعال کردن برای سازگاری بیشتر با کلاینت‌های مختلف
 });
-global.io = io;
 
-// بعد از این کد، مستقیم برو سراغ io.use...
+global.io = socketServer;
+const io = socketServer; // برای اینکه بقیه کد که از 'io' استفاده می‌کنند خراب نشود
+// --- END FIX ---
+
 
 
 io.use((socket, next) => {
