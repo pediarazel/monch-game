@@ -2198,23 +2198,21 @@ function normalizeSocketToken(value) {
 }
 
 // --- FIX: Robust Socket.io Initialization ---
-// اطمینان از اینکه از همان httpServer اصلی استفاده می‌کنیم
-const socketServer = new Server(httpServer, {
+const io = new Server(httpServer, {
   cors: {
-    origin: "*", // برای رفع سریع 404 در محیط Render، ابتدا اجازه دسترسی باز می‌دهیم
+    origin: "*", 
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true
   },
   transports: ["polling", "websocket"],
-  allowEIO3: true // فعال کردن برای سازگاری بیشتر با کلاینت‌های مختلف
+  allowEIO3: true 
 });
 
-global.io = socketServer;
-const io = socketServer; // برای اینکه بقیه کد که از 'io' استفاده می‌کنند خراب نشود
+// این خط بسیار مهم است: باعث می‌شود در کل فایل با هر اسمی (io یا socketServer) کار کند
+global.io = io;
+global.socketServer = io; 
 // --- END FIX ---
-
-
 
 io.use((socket, next) => {
   try {
