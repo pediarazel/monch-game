@@ -1193,8 +1193,7 @@ requestBoardDraw();
       if (socket && socket.connected) return socket;
       if (socket) { try { socket.removeAllListeners(); socket.disconnect(); } catch {} socket = null; }
       socket = io(SOCKET_URL, {
-        autoConnect: false, transports: ["websocket"],
- timeout: 30000,
+        autoConnect: false, transports: ["websocket", "polling"], timeout: 30000,
         auth: (callback) => { callback({ token: getToken() }); },
         reconnection: true, reconnectionAttempts: Infinity, reconnectionDelay: 1000, reconnectionDelayMax: 5000
       });

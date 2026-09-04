@@ -46,77 +46,6 @@ const connectedUsers = new Map(); // userId -> socketId
 
 const disconnectionTimers = new Map();
 
-// --------- تنظیمات ربات (تاج تاس)
-const ROBOT_TIERS = [20000, 50000]; // فقط در این مبالغ ربات وارد می‌شود
-const LOBBY_WAIT_TIME = 30000;      // زمان انتظار برای ورود بازیکن دوم (۳۰ ثانیه)
-
-// سیستم نام‌گذاری هوشمند برای جلوگیری از تکراری بودن
-const ROBOT_BASE_NAMES = [
-  "Arash", "Behram", "Darius", "Amir", "Payman", "Reza", "Sohrab", "Farzad", "Kamran", "Kian",
-  "Mehdi", "Ali", "Hossein", "Mohammad", "Morteza", "Abbas", "Rezvan", "Saman", "Navid", "Omid",
-  "Jafar", "Saeed", "Ebrahim", "Kasra", "Hassan", "Arash_Persian", "Ali_King", "Reza_Pro"
-];
-const ROBOT_SUFFIXES = ["_King", "_Pro", "_Boss", "_Gamer", "_Master", "_Hero", "_Star", "_Ace", "_Win", "_Top"];
-
-// تابعی برای تولید نام تصادفی در هر بار ورود
-const generateRobotName = () => {
-  const name = ROBOT_BASE_NAMES[Math.floor(Math.random() * ROBOT_BASE_NAMES.length)];
-  // ۵۰٪ احتمال دارد که یک پسوند هم به نام اضافه شود تا نام‌ها متنوع‌تر شوند
-  if (Math.random() > 0.5) {
-    const suffix = ROBOT_SUFFIXES[Math.floor(Math.random() * ROBOT_SUFFIXES.length)];
-    return name + suffix;
-  }
-  return name;
-};
-
-/**
- * مدیریت تایمر لابی و ورود خودکار ربات
- * اگر پس از LOBBY_WAIT_TIME بازیکن دوم نیامد، ربات وارد می‌شود.
- */
-const handleLobbyTimeout = (matchId) => {
-  const match = matches.get(matchId);
-  if (!match || match.isBotStarted) return;
-
-  // اگر بازیکن دوم هنوز وارد نشده باشد
-  if (match.players.length < 2) {
-    console.log(`[ROBOT_SYSTEM] Lobby timeout for match ${matchId}. Injecting bot...`);
-    
-    // علامت‌گذاری برای اینکه بدانیم ربات وارد شده است (جلوگیری از تکرار)
-    match.isBotStarted = true;
-    
-    // ایجاد یک بازیکن مجازی (ربات)
-    const botId = `bot_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-    const botName = generateRobotName();
-
-    const botUser = {
-      id: botId,
-      name: botName,
-      isBot: true, // بسیار مهم برای تشخیص در مراحل بعدی
-      balance: 0,
-      color: null // در مرحله بعد رنگ را اختصاص می‌دهیم
-    };
-
-    // اضافه کردن ربات به لیست بازیکنان مسابقه
-    match.players.push(botUser);
-
-    // ارسال اطلاعات به‌روز شده به تمام بازیکنان موجود در این مسابقه
-    io.to(`match:${matchId}`).emit("matchUpdated", match);
-
-    console.log(`[ROBOT_SYSTEM] Bot ${botName} joined match ${matchId}`);
-    
-    // شروع خودکار بازی (چون حالا ۲ نفر هستند)
-    startMatch(match);
-  }
-};
-
-// تابع کمکی برای پاکسازی تایمرها (برای جلوگیری از نشت حافظه)
-const clearBotTimers = (match) => {
-  if (match.lobbyTimer) {
-    clearTimeout(match.lobbyTimer);
-    match.lobbyTimer = null;
-  }
-};
-
 
 /*
 |--------------------------------------------------------------------------
@@ -124,24 +53,7 @@ const clearBotTimers = (match) => {
 |--------------------------------------------------------------------------
 */
 const app = express();
-
 const httpServer = http.createServer(app);
-
-// --- FIX: MOVE SOCKET INITIALIZATION HERE ---
-const io = new Server(httpServer, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true
-  },
-  transports: ["polling", "websocket"],
-  allowEIO3: true
-});
-global.io = io;
-global.socketServer = io;
-// --------------------------------------------
-
 app.disable("x-powered-by");
 
 app.use(express.json({ limit: "2mb" }));
@@ -843,7 +755,7 @@ function checkWinner(game) {
 |--------------------------------------------------------------------------
 */
 const matches = new Map(); // matchId -> match
-
+let io;
 
 const tierLobbies = new Map(); // tier -> lobby
 
@@ -930,18 +842,9 @@ function emitLobbyStats() {
 }
 
 function getTierLobby(tier) {
-  if (!tierLobbies.has(tier)) {
-    const lobby = createLobby(tier);
-    tierLobbies.set(tier, lobby);
-
-    // شروع تایمر ۳۰ ثانیه‌ای برای ربات (فقط برای اتاق‌های ۲۰ و ۵۰)
-    if (tier === 20 || tier === 50) {
-lobby.lobbyTimer = setTimeout(() => injectBotNow(tier), 30000);
-    }
-  }
+  if (!tierLobbies.has(tier)) tierLobbies.set(tier, createLobby(tier));
   return tierLobbies.get(tier);
 }
-
 
 function activePlayersCountFromPlayerColors(playerColors) {
   return colorOrder.filter((c) => playerColors[c] != null).length;
@@ -1813,7 +1716,16 @@ function clearGameTimers(match) {
   match.pendingBotTurnId = null;
   match.pendingBotUserId = null;
 }
+function clearBotTimers(match) {
+  if (!match) return;
 
+  if (match.pendingBotTimer) {
+    clearTimeout(match.pendingBotTimer);
+    match.pendingBotTimer = null;
+  }
+  match.pendingBotTurnId = null;
+  match.pendingBotUserId = null;
+}
 
 function startTurnTimeout(match) {
   if (!match || !match.game || match.game.winner) return;
@@ -2052,7 +1964,20 @@ function setLobbyDeadline(lobby, seconds) {
   const token = lobby.timerToken;
   if (lobby.lobbyTimer) clearTimeout(lobby.lobbyTimer);
 
+  lobby.lobbyTimer = setTimeout(() => {
+    const current = tierLobbies.get(lobby.tier);
+    if (!current) return;
+    if (current.timerToken !== token) return;
+    handleLobbyTimeout(current).catch((e) => console.error("handleLobbyTimeout error:", e));
+  }, seconds * 1000);
+}
 
+async function handleLobbyTimeout(lobby) {
+  const count = lobby.playerUidsInOrder.length;
+  if (count === 2) return startMatchFromLobby(lobby, 2);
+  if (count === 3) return startMatchFromLobby(lobby, 3);
+  if (count >= 4) return startMatchFromLobby(lobby, 4);
+}
 
 function getLobbyPhaseFromCount(count) {
   if (count <= 1) return 1;
@@ -2212,11 +2137,20 @@ function normalizeSocketToken(value) {
   return token;
 }
 
+io = new Server(httpServer, {
+  cors: {
+    origin: allowedOriginsForSocket,
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: allowedOriginsForSocket !== "*",
+  },
+  transports: ["polling", "websocket"],
+  allowEIO3: false,
+  pingTimeout: 5000, // حداکثر ۵ ثانیه صبر برای پاسخ پینگ
+  pingInterval: 3000, // هر ۳ ثانیه بررسی اتصال برای واکنش سریع در موبایل
 
-// این خط بسیار مهم است: باعث می‌شود در کل فایل با هر اسمی (io یا socketServer) کار کند
-global.io = io;
-global.socketServer = io; 
-// --- END FIX ---
+
+});
 
 io.use((socket, next) => {
   try {
@@ -3392,29 +3326,6 @@ const piece = m.game.pieces.find(
 });
 
 });
-
-}
-const injectBotNow = async (tier) => {
-  const lobby = tierLobbies.get(tier);
-  if (!lobby || !lobby.playerUidsInOrder || lobby.playerUidsInOrder.length >= 2) return;
-
-  // جلوگیری از اجرای مجدد تایمر
-  if (lobby.lobbyTimer) clearTimeout(lobby.lobbyTimer);
-
-  console.log(`[ROBOT_SYSTEM] Lobby ${tier} timeout. Injecting bot...`);
-  
-  const botId = `bot_${Date.now()}`;
-  lobby.playerNamesByUserId[botId] = generateRobotName(); 
-  lobby.playerUidsInOrder.push(botId);
-  
-  if (typeof emitLobbyStats === 'function') emitLobbyStats(); 
-  
-  if (lobby.playerUidsInOrder.length >= 2) {
-    console.log(`[ROBOT_SYSTEM] Match starting for tier ${tier}`);
-    await startMatchFromLobby(lobby, 2); 
-  }
-};
-
 
 // Start
 httpServer.listen(PORT, () => {
