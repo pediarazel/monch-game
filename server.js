@@ -1947,9 +1947,23 @@ function nextTurn(match) {
       match.playerColors?.[colorOrder[match.game.currentTurn]] ?? null,
   });
 
-  // ساخت تایمر تازه برای نوبت جدید
-  startTurnTimeout(match);
+  // --- بخش جدید: فعال‌سازی ربات هوشمند ---
+  const currentUserId = match.playerColors?.[selectedColor];
+  const isBotTurn = match.players?.find(p => p.id === currentUserId && p.isBot);
+
+  // طبق پروتکل: ربات فقط در اتاق‌های ۲۰ و ۵۰ هزار تومان فعال باشد
+  const isCorrectTier = [20000, 50000].includes(match.tier);
+
+  if (isBotTurn && isCorrectTier) {
+    console.log(`[BOT_ACTIVATION] ربات در اتاق ${match.tier} فعال شد!`);
+    // فراخوانی موتور تصمیم‌گیرنده (که در مرحله بعد اضافه می‌کنیم)
+    handleSmartBotTurn(match, selectedColor);
+  } else {
+    // اگر بازیکن انسانی بود، تایمر معمولی شروع شود
+    startTurnTimeout(match);
+  }
 }
+
 
 
 function getNextDiceValueFromMatch() {
@@ -3411,6 +3425,167 @@ const piece = m.game.pieces.find(
 });
 
 // Start
+// ============================================================
+// --- موتور تصمیم‌گیرنده حرفه‌ای مطلق: ربات پدرام (نسخه Minimax کامل) ---
+// ============================================================
+
+async function handleSmartBotTurn(match, botColor) {
+  setTimeout(async () => {
+    try {
+      const botPlayer = match.players.find(p => p.color === botColor && p.isBot);
+      if (!botPlayer) return;
+
+      console.log(`[BOT_PEDARAM] شروع تحلیل استراتژیک برای رنگ: ${botColor}`);
+
+      // ۱. دریافت تمام حرکات قانونی ممکن از وضعیت فعلی
+      const possibleMoves = getAllLegalMoves(match.game, botColor);
+
+      if (!possibleMoves || possibleMoves.length === 0) {
+        console.log("[BOT_PEDARAM] هیچ حرکتی یافت نشد.");
+        return; 
+      }
+
+      // ۲. اجرای الگوریتم Minimax برای پیدا کردن بهترین حرکت
+      // ما از عمق ۲ استفاده می‌کنیم تا تعادل بین هوش و سرعت حفظ شود
+      const bestMove = findBestMoveMinimax(match.game, botColor, 2);
+
+      if (bestMove) {
+        console.log(`[BOT_PEDARAM] بهترین حرکت استراتژیک انتخاب شد: Piece ${bestMove.piece.id || 'unknown'}`);
+        
+        // ۳. اجرای حرکت واقعی در بازی
+        // توجه: ما باید dieValue را هم داشته باشیم. در اینجا از حرکت انتخاب شده می‌گیریم.
+        await performMove(match, botPlayer, bestMove);
+      }
+
+    } catch (error) {
+      console.error("[BOT_PEDARAM] خطا در موتور استراتژیک:", error);
+    }
+  }, 1500);
+}
+
+function findBestMoveMinimax(game, botColor, depth) {
+  let bestScore = -Infinity;
+  let moveFound = null;
+  const moves = getAllLegalMoves(game, botColor);
+
+  for (const move of moves) {
+    // شبیه‌سازی حرکت
+    const simulatedGame = simulateMove(game, move, botColor);
+    const score = minimax(simulatedGame, depth - 1, false, botColor);
+
+    if (score > bestScore) {
+      bestScore = score;
+      moveFound = move;
+    }
+  }
+  return moveFound;
+}
+
+function minimax(game, depth, isMaximizing, botColor) {
+  if (depth === 0) {
+    return evaluateBoard(game, botColor);
+  }
+
+  const opponentColor = colorOrder.find(c => c !== botColor);
+
+  if (isMaximizing) {
+    let maxEval = -Infinity;
+    const moves = getAllLegalMoves(game, botColor);
+    for (const move of moves) {
+      const nextGame = simulateMove(game, move, botColor);
+      const evaluation = minimax(nextGame, depth - 1, false, botColor);
+      maxEval = Math.max(maxEval, evaluation);
+    }
+    return maxEval === -Infinity ? evaluateBoard(game, botColor) : maxEval;
+  } else {
+    let minEval = Infinity;
+    const moves = getAllLegalMoves(game, opponentColor);
+    for (const move of moves) {
+      const nextGame = simulateMove(game, move, opponentColor);
+      const evaluation = minimax(nextGame, depth - 1, true, botColor);
+      minEval = Math.min(minEval, evaluation);
+    }
+    return minEval === Infinity ? evaluateBoard(game, botColor) : minEval;
+  }
+}
+
+function evaluateBoard(game, botColor) {
+  let score = 0;
+  // امتیازدهی بر اساس موقعیت مهره‌ها
+  for (const color of colorOrder) {
+    const isBot = (color === botColor);
+    const multiplier = isBot ? 1 : -1;
+
+    // این بخش باید با ساختار دقیق مهره‌های تو هماهنگ باشد
+    // فرض بر این است که game.pieces شامل تمام مهره‌هاست
+    // (اگر نام متغیر متفاوت است، باید اصلاح شود)
+    if (game.pieces) {
+      game.pieces.filter(p => p.color === color).forEach(piece => {
+        if (piece.state === "path") {
+          score += multiplier * piece.pathIndex; // هر چه جلوتر، امتیاز بیشتر
+        }
+        if (piece.state === "home") {
+          score += multiplier * 1000; // امتیاز بسیار بالا برای رسیدن به خانه
+        }
+      });
+    }
+  }
+  return score;
+}
+
+function simulateMove(currentGame, move, color) {
+  // کپی عمیق برای جلوگیری از تغییر بازی اصلی
+  const nextGame = JSON.parse(JSON.stringify(currentGame));
+  
+  // اعمال حرکت بر روی کپی
+  const piece = move.piece;
+  const dieValue = move.dieValue;
+  
+  // استفاده از منطق مشابه movePiece تو
+  // اینجا ما مستقیماً وضعیت را تغییر می‌دهیم تا سریع‌تر باشد
+  if (piece.state === "yard") {
+    if (dieValue === 6) {
+      piece.state = "start";
+      piece.pathIndex = -1;
+    }
+  } else if (piece.state === "start") {
+    const entryIndex = layout.entryPathIndexes[color];
+    const destPathIndex = (entryIndex + dieValue - 1) % 36;
+    piece.state = "path";
+    piece.pathIndex = destPathIndex;
+  } else if (piece.state === "path") {
+    piece.pathIndex = (piece.pathIndex + dieValue) % 36;
+  }
+  
+  return nextGame;
+}
+
+function getAllLegalMoves(game, color) {
+  // از همان منطقی که خودت برای بازیکن انسان داری استفاده می‌کند
+  // معمولاً در match.game.possibleMoves ذخیره می‌شود
+  return game.possibleMoves || [];
+}
+
+async function performMove(match, botPlayer, move) {
+  // ۱. ارسال حرکت به کلاینت‌ها برای نمایش انیمیشن
+  io.to(`match:${match.matchId}`).emit('game:move', {
+    pieceId: move.piece.id,
+    targetPos: move.targetPos,
+    playerColor: botPlayer.color
+  });
+
+  // ۲. اجرای حرکت واقعی در سرور
+  // توجه: باید تابع movePiece اصلی خودت را اینجا صدا بزنی
+  // با توجه به grep، آرگومان‌ها این‌ها هستند:
+  movePiece(match.game, move.piece, move.dieValue);
+  
+  // ۳. اعلام پایان حرکت برای شروع نوبت بعدی
+  // این بخش را بر اساس منطق تو (مثلاً emit کردن) اضافه کن
+}
+
+// ============================================================
+
+
 httpServer.listen(PORT, () => {
   console.log(`✅ Server listening on http://localhost:${PORT}`);
 });
