@@ -2254,10 +2254,9 @@ io = new Server(httpServer, {
     credentials: allowedOriginsForSocket !== "*",
   },
   transports: ["polling", "websocket"],
-  allowEIO3: false,
-  pingTimeout: 20000, // افزایش به ۲۰ ثانیه برای جلوگیری از قطع شدن حین پردازش
+  pingTimeout: 60000, // افزایش به ۶۰ ثانیه برای پایداری در هاست رایگان
+  pingInterval: 25000, // افزایش به ۲۵ ثانیه (کاهش بار پینگ اضافه)
 
-  pingInterval: 3000, // هر ۳ ثانیه بررسی اتصال برای واکنش سریع در موبایل
 
 
 });
@@ -3443,11 +3442,15 @@ async function handleSmartBotTurn(match, botColor) {
   match._botThinking = true;
 
   try {
+    // اضافه کردن تاخیر برای جلوگیری از فشار ناگهانی به CPU و پینگ
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
     console.log(`[BOT_TURN_START] Color: ${botColor}, Tier: ${match.tier}`);
     
     // شبیه‌سازی پرتاب دو تاس
     const d1 = Math.floor(Math.random() * 6) + 1;
     const d2 = Math.floor(Math.random() * 6) + 1;
+
     
     // تنظیم وضعیت تاس‌ها در بازی برای اینکه منطق movePiece کار کند
     match.game.pendingDice = [d1, d2];
@@ -3594,7 +3597,7 @@ function selectBestMove(match, legalMoves) {
     const opponentPieces = match.players[opponentIndex].pieces;
 
     let bestMove = null;
-    let maxScore = -999999; // مقدار اولیه بسیار پایین
+    let maxScore = -Infinity;
 
     for (const move of legalMoves) {
       let score = 0;
@@ -3603,49 +3606,59 @@ function selectBestMove(match, legalMoves) {
       const dice = move.diceValue;
       const targetPos = currentPos + dice;
 
-      // اولویت ۱: کاشتن مهره (فقط اگر ۶ آوردیم) - بالاترین اهمیت
+      // --- استراتژی ۱: کاشتن مهره (Spawn) ---
       if (currentPos === 0 && dice === 6) {
-        score += 10000; 
+        score += 15000; // اولویت بسیار بالا برای شروع بازی
       }
 
-      // اولویت ۲: زدن مهره حریف
+      // --- استراتژی ۲: کشتن (Kill) و تهاجم ---
       const isKill = opponentPieces.some(p => p.position === targetPos && p.position > 0 && p.position < 52);
       if (isKill) {
-        score += 8000;
+        score += 12000; // کشتن حریف اولویت مرگبار دارد
       }
 
-      // اولویت ۳: رسیدن به خانه نهایی (Goal)
+      // --- استراتژی ۳: رسیدن به خانه (Victory) ---
       if (targetPos >= 50) {
-        score += 6000;
+        score += 10000; // رسیدن به هدف نهایی
       }
 
-      // اولویت ۴: فرار از تیررس حریف (اگر پشت سر مهره حریف باشد)
-      const isThreatened = opponentPieces.some(p => p.position > 0 && p.position < currentPos && (currentPos - p.position) <= 6);
-      if (isThreatened && currentPos > 0) {
-        score += 4000;
+      // --- استراتژی ۴: امنیت و فرار (Safety) ---
+      // بررسی اینکه آیا بعد از این حرکت، مهره در معرض خطر قرار می‌گیرد؟
+      const isVulnerable = opponentPieces.some(p => {
+        const dist = Math.abs(targetPos - p.position);
+        return dist > 0 && dist <= 6 && targetPos !== 0; 
+      });
+      
+      if (isVulnerable && targetPos !== 0) {
+        score -= 5000; // جریمه سنگین برای حرکاتی که مهره را در معرض خطر می‌گذارد
       }
 
-      // اولویت ۵: جلو بردن مهره‌های داخل بازی
+      // --- استراتژی ۵: پیشروی هوشمند (Progress) ---
       if (currentPos > 0) {
-        score += 1000;
+        score += (targetPos * 10); // هرچه مهره جلوتر برود، امتیاز مثبت بیشتری می‌گیرد
       }
 
-      // حذف کامل Math.random برای اینکه ربات فقط بهترین تصمیم را بگیرد (کاملاً حرفه‌ای)
+      // --- استراتژی ۶: جلوگیری از ایستادگی (Anti-Stagnation) ---
+      // اگر مهره‌ای در خانه (0) باشد و تاس 6 نباشد، امتیاز کمتری می‌گیرد تا مهره‌های دیگر حرکت کنند
+      if (currentPos === 0 && dice !== 6) {
+        score -= 2000;
+      }
 
+      // محاسبه نهایی امتیاز
       if (score > maxScore) {
         maxScore = score;
         bestMove = move;
       }
     }
 
+    // اگر هیچ حرکت با امتیاز مثبت پیدا نشد، اولین حرکت قانونی را انجام بده
     return bestMove || legalMoves[0];
 
   } catch (err) {
-    console.error("Critical Bot Error:", err);
+    console.error("[BOT_LOGIC_ERROR]:", err);
     return legalMoves[0];
   }
 }
-
 
 
 httpServer.listen(PORT, () => {
