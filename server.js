@@ -3432,19 +3432,18 @@ const piece = m.game.pieces.find(
 });
 
 // Start
-// --- موتور تصمیم‌گیرنده حرفه‌ای مطلق: ربات پدرام (نسخه Minimax کامل) ---
-
 /**
- * مدیریت هوشمند نوبت ربات
+ * --- موتور تصمیم‌گیرنده اصلاح‌شده: ربات تاج تاس (نسخه تهاجمی) ---
  */
+
 async function handleSmartBotTurn(match, botColor) {
   if (match._botThinking) return;
   match._botThinking = true;
 
   try {
-    console.log(`[BOT_TURN_START] Color: ${botColor}, Tier: ${match.tier}`);
-    await new Promise(resolve => setTimeout(resolve, 5000));
-
+    console.log(`[BOT_TURN] Starting Turn for ${botColor}`);
+    
+    // شبیه‌سازی تاس
     const d1 = Math.floor(Math.random() * 6) + 1;
     const d2 = Math.floor(Math.random() * 6) + 1;
 
@@ -3453,18 +3452,23 @@ async function handleSmartBotTurn(match, botColor) {
     match.game.dice1 = d1;
     match.game.dice2 = d2;
     match.game.dice = d1 + d2;
-    match.game.isDoubleSixRoll = (d1 === 6 && d2 === 6);
 
     let legalMoves = getAllLegalMoves(match, botColor, [d1, d2]);
 
+    // حلقه حرکت ربات
     while (legalMoves.length > 0) {
+      // مکث ۵ ثانیه‌ای قبل از هر حرکت برای جلوگیری از فشار به سرور و قطع اتصال
       await new Promise(resolve => setTimeout(resolve, 5000));
+      
       const bestMove = selectBestMove(match, legalMoves);
       if (!bestMove) break;
 
       await executeBotMove(match, botColor, bestMove);
+      
+      // آپدیت وضعیت حرکات بعد از انجام حرکت قبلی
       legalMoves = getAllLegalMoves(match, botColor, match.game.pendingDice);
     }
+    
     match._botThinking = false;
   } catch (error) {
     console.error("[BOT_ERROR] handleSmartBotTurn:", error);
@@ -3472,77 +3476,77 @@ async function handleSmartBotTurn(match, botColor) {
   }
 }
 
-function getTargetPosition(match, piece, dieValue) {
-  if (piece.inBase) return dieValue === 6 ? 1 : null;
-  return (piece.position + dieValue) % 52;
-}
-
 function selectBestMove(match, legalMoves) {
-  try {
-    if (!legalMoves || legalMoves.length === 0) return null;
-    const player = match.players[match.currentPlayer];
-    const opponent = match.players[match.currentPlayer === 0 ? 1 : 0];
-    const opponentPieces = opponent.pieces;
-    const safeSquares = [1, 9, 14, 22, 27, 35, 40, 48];
+  if (!legalMoves || legalMoves.length === 0) return null;
+  
+  const player = match.players[match.currentPlayer];
+  const opponent = match.players[match.currentPlayer === 0 ? 1 : 0];
+  const safeSquares = [1, 9, 14, 22, 27, 35, 40, 48];
 
-    let bestMove = null;
-    let maxScore = -Infinity;
+  let bestMove = null;
+  let maxScore = -Infinity;
 
-    for (const move of legalMoves) {
-      let score = 0;
-      const targetPos = move.targetPosition;
-      
-      if (move.dieValue === 6) score += 20000;
-      const isKill = opponentPieces.some(p => p.position === targetPos && p.position > 0 && p.position < 52);
-      if (isKill) score += 50000;
-      if (targetPos >= 50) score += 40000;
-      if (safeSquares.includes(targetPos)) score += 10000;
-      const isVulnerable = opponentPieces.some(p => Math.abs(targetPos - p.position) <= 6);
-      if (isVulnerable && !safeSquares.includes(targetPos)) score -= 5000;
+  for (const move of legalMoves) {
+    let score = 0;
+    const targetPos = move.targetPosition;
+    const piece = player.pieces.find(p => p.id === move.pieceId);
 
-      if (score > maxScore) {
-        maxScore = score;
-        bestMove = move;
-      }
+    // اولویت ۱: خروج از خانه با تاس ۶ (حیاتی‌ترین)
+    if (piece.inBase && move.dieValue === 6) score += 100000;
+    
+    // اولویت ۲: کشتن حریف
+    const isKill = opponent.pieces.some(p => p.position === targetPos && p.position > 0 && p.position < 52);
+    if (isKill) score += 80000;
+
+    // اولویت ۳: رسیدن به خانه نهایی
+    if (targetPos >= 50) score += 60000;
+
+    // اولویت ۴: استفاده از تاس ۶ در مسیر
+    if (move.dieValue === 6) score += 20000;
+
+    // اولویت ۵: امنیت
+    if (safeSquares.includes(targetPos)) score += 10000;
+
+    // جریمه: نزدیک بودن به حریف (بدون خانه امن)
+    const isVulnerable = opponent.pieces.some(p => Math.abs(targetPos - p.position) <= 6);
+    if (isVulnerable && !safeSquares.includes(targetPos)) score -= 30000;
+
+    if (score > maxScore) {
+      maxScore = score;
+      bestMove = move;
     }
-    return bestMove;
-  } catch (e) {
-    console.error("[BOT_AI_ERROR] Error in selectBestMove:", e);
-    return legalMoves[0];
   }
+  return bestMove;
 }
 
 async function executeBotMove(match, botColor, move) {
-  try {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    const { pieceId } = move;
-    const player = match.players[match.currentPlayer];
-    const piece = player.pieces.find(p => p.id === pieceId);
-    if (!piece) return;
+  const player = match.players[match.currentPlayer];
+  const piece = player.pieces.find(p => p.id === move.pieceId);
+  if (!piece) return;
 
-    if (piece.inBase) {
-      piece.inBase = false;
-      piece.position = 1;
-    } else {
-      piece.position = move.targetPosition;
-    }
-
-    const opponent = match.players[match.currentPlayer === 0 ? 1 : 0];
-    const kill = opponent.pieces.find(p => p.position === piece.position && p.position > 0 && p.position < 52);
-    if (kill) {
-      kill.inBase = true;
-      kill.position = 0;
-    }
-    match.game.pendingDice = match.game.pendingDice.filter((_, index) => index !== move.diceIndex);
-    broadcastState(match);
-  } catch (e) {
-    console.error("[BOT_EXEC_ERROR]", e);
+  if (piece.inBase) {
+    piece.inBase = false;
+    piece.position = 1;
+  } else {
+    piece.position = move.targetPosition;
   }
+
+  // بررسی کشتن
+  const opponent = match.players[match.currentPlayer === 0 ? 1 : 0];
+  const kill = opponent.pieces.find(p => p.position === piece.position && p.position > 0 && p.position < 52);
+  if (kill) {
+    kill.inBase = true;
+    kill.position = 0;
+  }
+
+  match.game.pendingDice = match.game.pendingDice.filter((_, index) => index !== move.diceIndex);
+  broadcastState(match);
 }
 
 function getAllLegalMoves(match, color, diceValues) {
   const player = match.players[match.currentPlayer];
   const moves = [];
+  
   diceValues.forEach((die, index) => {
     player.pieces.forEach(piece => {
       if (canPieceMove(match.game, piece, die)) {
@@ -3550,13 +3554,14 @@ function getAllLegalMoves(match, color, diceValues) {
           pieceId: piece.id,
           dieValue: die,
           diceIndex: index,
-          targetPosition: getTargetPosition(match, piece, die)
+          targetPosition: piece.inBase ? 1 : (piece.position + die) % 52
         });
       }
     });
   });
   return moves;
 }
+
 
 httpServer.listen(PORT, () => {
   console.log(`✅ Server listening on http://localhost:${PORT}`);
