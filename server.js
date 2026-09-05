@@ -3584,55 +3584,50 @@ function getTargetPosition(match, piece, dieValue) {
  * انتخاب بهترین حرکت (Minimax ساده شده)
  */
 function selectBestMove(match, legalMoves) {
-  if (!legalMoves || legalMoves.length === 0) return null;
-
-  let bestMove = null;
-  let maxScore = -Infinity;
-
-  for (const move of legalMoves) {
-    let currentScore = 0;
-    const { pieceIndex, diceValue } = move;
-    const piece = match.players[match.currentPlayer].pieces[pieceIndex];
-    const opponentId = match.currentPlayer === 0 ? 1 : 0;
-    const opponent = match.players[opponentId];
-
-    // ۱. امتیاز برای زدن مهره حریف (بسیار بالا)
-    // فرض بر این است که تابع movePiece یا منطق بازی، موقعیت جدید را مشخص می‌کند
-    // در اینجا یک شبیه‌سازی ساده برای امتیازدهی انجام می‌دهیم
-    const targetPositionAfterMove = piece.position + diceValue; 
+  try {
+    if (!legalMoves || legalMoves.length === 0) return null;
     
-    const isKill = opponent.pieces.some(oppPiece => 
-      oppPiece.position === targetPositionAfterMove && targetPositionAfterMove !== 0
-    );
+    let bestMove = null;
+    let maxScore = -9999;
 
-    if (isKill) {
-      currentScore += 100; // امتیاز بسیار بالا برای کشتن حریف
+    const currentPlayerIndex = match.currentPlayer;
+    const opponentIndex = currentPlayerIndex === 0 ? 1 : 0;
+    const opponentPieces = match.players[opponentIndex].pieces;
+
+    for (const move of legalMoves) {
+      let score = 0;
+      const piece = match.players[currentPlayerIndex].pieces[move.pieceIndex];
+      const newPos = piece.position + move.diceValue;
+
+      // استراتژی ۱: اگر می‌تواند مهره حریف را بزند (اولویت بسیار بالا)
+      const canKill = opponentPieces.some(p => p.position === newPos && p.position > 0 && p.position < 52);
+      if (canKill) score += 1000;
+
+      // استراتژی ۲: اولویت برای مهره‌هایی که در مسیر خانه هستند
+      if (newPos >= 50) score += 500; 
+
+      // استراتژی ۳: جلوگیری از هدر دادن تاس ۶ (خروج از خانه)
+      if (piece.position === 0 && move.diceValue === 6) score += 200;
+
+      // استراتژی ۴: ترجیح به حرکت دادن مهره‌ای که در بازی است تا مهره‌ای که در خانه است
+      if (piece.position > 0) score += 50;
+
+      // اضافه کردن کمی تصادف برای هوشمندی و غیرقابل پیش‌بینی بودن
+      score += Math.floor(Math.random() * 20);
+
+      if (score > maxScore) {
+        maxScore = score;
+        bestMove = move;
+      }
     }
-
-    // ۲. امتیاز برای نزدیک شدن به خانه (Home)
-    // اگر حرکت باعث شود مهره به نزدیکی خانه برسد
-    if (targetPositionAfterMove >= 51) { // فرض بر این است که ۵۲ خانه است
-      currentScore += 50;
-    }
-
-    // ۳. امتیاز برای خروج از خانه (اگر مهره در خانه است و با تاس ۶ یا ۶ تاس خارج می‌شود)
-    if (piece.position === 0 && diceValue === 6) {
-      currentScore += 30;
-    }
-
-    // ۴. امتیاز برای جلوگیری از گیر کردن (بقا)
-    // اگر حرکت باعث شود مهره در موقعیت امن قرار بگیرد
-    // (این بخش می‌تواند با منطق دقیق‌تر جایگزین شود)
-    currentScore += Math.random() * 5; // کمی تصادف برای اینکه ربات قابل پیش‌بینی نباشد
-
-    if (currentScore > maxScore) {
-      maxScore = currentScore;
-      bestMove = move;
-    }
+    return bestMove || legalMoves[0];
+    
+  } catch (err) {
+    console.error("Bot Error (Safe Mode):", err);
+    return legalMoves[0]; // در صورت خطا، فقط حرکت اول را انجام بده تا کرش نکند
   }
-
-  return bestMove || legalMoves[0];
 }
+
 
 
 httpServer.listen(PORT, () => {
