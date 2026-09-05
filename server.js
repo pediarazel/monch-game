@@ -3586,47 +3586,67 @@ function getTargetPosition(match, piece, dieValue) {
 function selectBestMove(match, legalMoves) {
   try {
     if (!legalMoves || legalMoves.length === 0) return null;
-    
-    let bestMove = null;
-    let maxScore = -9999;
 
     const currentPlayerIndex = match.currentPlayer;
+    const player = match.players[currentPlayerIndex];
     const opponentIndex = currentPlayerIndex === 0 ? 1 : 0;
     const opponentPieces = match.players[opponentIndex].pieces;
 
+    let bestMove = null;
+    let maxScore = -99999;
+
     for (const move of legalMoves) {
       let score = 0;
-      const piece = match.players[currentPlayerIndex].pieces[move.pieceIndex];
-      const newPos = piece.position + move.diceValue;
+      const piece = player.pieces[move.pieceIndex];
+      const currentPos = piece.position;
+      const dice = move.diceValue;
+      const targetPos = currentPos + dice;
 
-      // استراتژی ۱: اگر می‌تواند مهره حریف را بزند (اولویت بسیار بالا)
-      const canKill = opponentPieces.some(p => p.position === newPos && p.position > 0 && p.position < 52);
-      if (canKill) score += 1000;
+      // ۱. اولویت حیاتی: اگر تاس ۶ داریم و مهره در خانه (position === 0) است، حتماً بکار!
+      if (currentPos === 0 && dice === 6) {
+        score += 5000; // امتیاز فوق‌العاده بالا برای کاشتن مهره
+      }
 
-      // استراتژی ۲: اولویت برای مهره‌هایی که در مسیر خانه هستند
-      if (newPos >= 50) score += 500; 
+      // ۲. اولویت بسیار بالا: زدن مهره حریف
+      const isKill = opponentPieces.some(p => p.position === targetPos && p.position > 0 && p.position < 52);
+      if (isKill) {
+        score += 3000;
+      }
 
-      // استراتژی ۳: جلوگیری از هدر دادن تاس ۶ (خروج از خانه)
-      if (piece.position === 0 && move.diceValue === 6) score += 200;
+      // ۳. اولویت برای رسیدن به خانه‌های پایانی و خانه (Home)
+      if (targetPos >= 50) {
+        score += 1500;
+      }
 
-      // استراتژی ۴: ترجیح به حرکت دادن مهره‌ای که در بازی است تا مهره‌ای که در خانه است
-      if (piece.position > 0) score += 50;
+      // ۴. ترجیح به حرکت مهره‌هایی که قبلاً وارد بازی شده‌اند (به جای اینکه همه را در خانه نگه دارد)
+      if (currentPos > 0) {
+        score += 200;
+      }
 
-      // اضافه کردن کمی تصادف برای هوشمندی و غیرقابل پیش‌بینی بودن
-      score += Math.floor(Math.random() * 20);
+      // ۵. ریسک‌ستیزی هوشمند: اگر مهره‌ای در خطر است، آن را جلو ببر (تلاش برای فرار)
+      // بررسی اینکه آیا حریف پشت سر این مهره قرار دارد یا خیر
+      const isThreatened = opponentPieces.some(p => p.position > 0 && p.position < currentPos && (currentPos - p.position) <= 6);
+      if (isThreatened && currentPos > 0) {
+        score += 800; // امتیاز بالا برای فرار از دست حریف
+      }
+
+      // کمی فاکتور تصادفی کنترل‌شده برای طبیعی شدن بازی (بدون ریسک افت پینگ)
+      score += Math.floor(Math.random() * 50);
 
       if (score > maxScore) {
         maxScore = score;
         bestMove = move;
       }
     }
+
     return bestMove || legalMoves[0];
-    
+
   } catch (err) {
-    console.error("Bot Error (Safe Mode):", err);
-    return legalMoves[0]; // در صورت خطا، فقط حرکت اول را انجام بده تا کرش نکند
+    console.error("Advanced Bot Tactical Error:", err);
+    return legalMoves[0];
   }
 }
+
 
 
 
