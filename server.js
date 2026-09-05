@@ -3546,6 +3546,118 @@ async function executeBotMove(match, botColor, move) {
   broadcastState(match);
 }
 
+/**
+ * موتور تصمیم‌گیرنده اصلاح‌شده: انتخاب سراسری بهترین حرکت (Global Optimizer)
+ */
+
+async function handleSmartBotTurn(match, botColor) {
+  if (match._botThinking) return;
+  match._botThinking = true;
+
+  try {
+    console.log(`[BOT_TURN] Starting Turn for ${botColor}`);
+    
+    // شبیه‌سازی تاس (تولید تاس)
+    const d1 = Math.floor(Math.random() * 6) + 1;
+    const d2 = Math.floor(Math.random() * 6) + 1;
+
+    match.game.pendingDice = [d1, d2];
+    match.game.rolled = true;
+    match.game.dice1 = d1;
+    match.game.dice2 = d2;
+    match.game.dice = d1 + d2;
+
+    // تا زمانی که حرکتی وجود دارد، بازی کن
+    while (match.game.pendingDice.length > 0) {
+      let legalMoves = getAllLegalMoves(match, botColor, match.game.pendingDice);
+      if (legalMoves.length === 0) break;
+
+      // انتخاب بهترین حرکت از کلِ لیست (هم تاس ۱ و هم تاس ۲ با هم)
+      const bestMove = selectBestMove(match, legalMoves);
+      
+      if (!bestMove) break;
+
+      // مکث اجباری ۵ ثانیه‌ای قبل از حرکت
+      console.log(`[BOT] Bot is thinking... waiting 5s before moving ${bestMove.pieceId} with ${bestMove.dieValue}`);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      await executeBotMove(match, botColor, bestMove);
+    }
+    
+    match._botThinking = false;
+  } catch (error) {
+    console.error("[BOT_ERROR] handleSmartBotTurn:", error);
+    match._botThinking = false;
+  }
+}
+
+function selectBestMove(match, legalMoves) {
+  if (!legalMoves || legalMoves.length === 0) return null;
+  
+  const player = match.players[match.currentPlayer];
+  const opponent = match.players[match.currentPlayer === 0 ? 1 : 0];
+  const safeSquares = [1, 9, 14, 22, 27, 35, 40, 48];
+
+  let bestMove = null;
+  let maxScore = -Infinity;
+
+  for (const move of legalMoves) {
+    let score = 0;
+    const targetPos = move.targetPosition;
+    const piece = player.pieces.find(p => p.id === move.pieceId);
+
+    // ۱. خروج از خانه با تاس ۶
+    if (piece.inBase && move.dieValue === 6) score += 500000;
+    
+    // ۲. کشتن حریف
+    const isKill = opponent.pieces.some(p => p.position === targetPos && p.position > 0 && p.position < 52);
+    if (isKill) score += 400000;
+
+    // ۳. رسیدن به خانه نهایی
+    if (targetPos >= 50) score += 300000;
+
+    // ۴. امنیت (خانه‌های امن)
+    if (safeSquares.includes(targetPos)) score += 50000;
+
+    // ۵. جریمه برای حرکت خطرناک
+    const isVulnerable = opponent.pieces.some(p => Math.abs(targetPos - p.position) <= 6);
+    if (isVulnerable && !safeSquares.includes(targetPos)) score -= 200000;
+
+    if (score > maxScore) {
+      maxScore = score;
+      bestMove = move;
+    }
+  }
+  return bestMove;
+}
+
+async function executeBotMove(match, botColor, move) {
+  const player = match.players[match.currentPlayer];
+  const piece = player.pieces.find(p => p.id === move.pieceId);
+  if (!piece) return;
+
+  if (piece.inBase) {
+    piece.inBase = false;
+    piece.position = 1;
+  } else {
+    piece.position = move.targetPosition;
+  }
+
+  const opponent = match.players[match.currentPlayer === 0 ? 1 : 0];
+  const kill = opponent.pieces.find(p => p.position === piece.position && p.position > 0 && p.position < 52);
+  if (kill) {
+    kill.inBase = true;
+    kill.position = 0;
+  }
+
+  const indexToRemove = match.game.pendingDice.indexOf(move.dieValue);
+  if (indexToRemove > -1) {
+    match.game.pendingDice.splice(indexToRemove, 1);
+  }
+  
+  broadcastState(match);
+}
+
 function getAllLegalMoves(match, color, diceValues) {
   const player = match.players[match.currentPlayer];
   const moves = [];
@@ -3553,12 +3665,11 @@ function getAllLegalMoves(match, color, diceValues) {
   diceValues.forEach((die) => {
     player.pieces.forEach(piece => {
       if (canPieceMove(match.game, piece, die)) {
-        moves.push({
-          pieceId: piecePieceMove(match.game, piece, die)) {
+        const targetPos = piece.inBase ? 1 : (piece.position + die) % 52;
         moves.push({
           pieceId: piece.id,
           dieValue: die,
-          targetPosition: piece.inBase ? 1 : (piece.position + die) % 52
+          targetPosition: targetPos
         });
       }
     });
