@@ -566,6 +566,7 @@ const layout = {
 
 const colorOrder = ["red", "green", "yellow", "blue"];
 
+
 function buildPieces() {
   const arr = [];
   for (const c of colorOrder) {
@@ -785,6 +786,10 @@ function createLobby(tier) {
   };
 }
 const LOBBY_TIERS = [20, 50, 100, 200];
+const LOBBY_BOT_TIERS = new Set([20, 50]);
+const LOBBY_BOT_WAIT_SECONDS = 30;
+const LOBBY_BOT_USERNAME = "tajdas_bot";
+const LOBBY_BOT_INITIAL_COINS = 100000000;
 function computeLobbyStats() {
   const stats = {
     online: connectedUsers ? connectedUsers.size : 0,
@@ -907,6 +912,42 @@ async function ensureTreasuryUser() {
   return prisma.user.create({
     data: { username, password: passwordHash, coins: 0, role: "TREASURY" },
   });
+}
+async function ensureLobbyBotUser() {
+  let botUser = await prisma.user.findUnique({
+    where: {
+      username: LOBBY_BOT_USERNAME
+    }
+  });
+
+  if (!botUser) {
+    botUser = await prisma.user.create({
+      data: {
+        username: LOBBY_BOT_USERNAME,
+        password: await bcrypt.hash(
+          crypto.randomBytes(32).toString("hex"),
+          12
+        ),
+        role: "BOT",
+        coins: LOBBY_BOT_INITIAL_COINS
+      }
+    });
+
+    console.log(`[LOBBY_BOT] Created bot user: ${LOBBY_BOT_USERNAME}`);
+  } else if (Number(botUser.coins || 0) < LOBBY_BOT_INITIAL_COINS) {
+    botUser = await prisma.user.update({
+      where: {
+        id: botUser.id
+      },
+      data: {
+        coins: LOBBY_BOT_INITIAL_COINS
+      }
+    });
+
+    console.log(`[LOBBY_BOT] Bot balance restored: ${LOBBY_BOT_USERNAME}`);
+  }
+
+  return botUser;
 }
 
 async function chargeTierFromPlayers(match) {
@@ -1973,11 +2014,56 @@ function setLobbyDeadline(lobby, seconds) {
 }
 
 async function handleLobbyTimeout(lobby) {
+  if (!lobby || lobby.status !== "lobby") {
+    return;
+  }
+
   const count = lobby.playerUidsInOrder.length;
-  if (count === 2) return startMatchFromLobby(lobby, 2);
-  if (count === 3) return startMatchFromLobby(lobby, 3);
-  if (count >= 4) return startMatchFromLobby(lobby, 4);
+
+  if (
+    count === 1 &&
+    LOBBY_BOT_TIERS.has(Number(lobby.tier))
+  ) {
+    try {
+      const botUser = await ensureLobbyBotUser();
+
+      if (!lobby.playerUidsInOrder.includes(botUser.id)) {
+        lobby.playerUidsInOrder.push(botUser.id);
+        lobby.botUserId = botUser.id;
+        lobby.botInjected = true;
+
+        console.log(
+          `[LOBBY_BOT] Injected bot into tier ${lobby.tier}`
+        );
+      }
+
+      emitLobbyStatus(lobby);
+
+      return startMatchFromLobby(lobby, 2);
+    } catch (error) {
+      console.error("[LOBBY_BOT] Injection failed:", error);
+
+      lobby.deadline = null;
+      lobby.status = "lobby";
+      emitLobbyStatus(lobby);
+      return;
+    }
+  }
+
+  if (count === 2) {
+    return startMatchFromLobby(lobby, 2);
+  }
+
+  if (count === 3) {
+    return startMatchFromLobby(lobby, 3);
+  }
+
+  if (count >= 4) {
+    return startMatchFromLobby(lobby, 4);
+  }
 }
+
+
 
 function getLobbyPhaseFromCount(count) {
   if (count <= 1) return 1;
@@ -1986,70 +2072,72 @@ function getLobbyPhaseFromCount(count) {
   return 4;
 }
 
+
 async function onLobbyPlayerJoined(tier) {
-  const lobby = tierLobbies.get(tier);
-  if (!lobby) return;
-
-  const count = lobby.playerUidsInOrder.length;
-  lobby.lobbyPhase = getLobbyPhaseFromCount(count);
-
-  if (count === 2) {
-    lobby.status = "lobby";
-    lobby.lobbyDeadlineAt = null;
-    lobby.lobbyPhase = 2;
-
-    emitLobbyStatus(lobby, {
-      phase: 2,
-      searchingFor: 3,
-      deadlineAt: null,
-      message: "در حال جستجوی نفر سوم...",
-      status: "SEARCHING_3",
-    });
-
-setLobbyDeadline(lobby, 30);
-
-emitLobbyStatus(lobby, {
-  phase: 2,
-  searchingFor: 3,
-  deadlineAt: lobby.lobbyDeadlineAt,
-  deadlineMs: 30000,
-  message: "در حال جستجوی نفر سوم... (۳۰ ثانیه)",
-  status: "SEARCHING_3",
-});
-
+  const lobby = tierLobbies.get(Number(tier));
+  if (!lobby || lobby.status !== "lobby") {
     return;
   }
 
-if (count === 3) {
-  lobby.lobbyPhase = 3;
-  setLobbyDeadline(lobby, 30);
+  const playerCount = lobby.playerUidsInOrder.length;
 
-  emitLobbyStatus(lobby, {
-    phase: 3,
-    searchingFor: 4,
-    deadlineAt: lobby.lobbyDeadlineAt,
-    deadlineMs: 30000,
-    message: "در حال جستجوی نفر چهارم... (۳۰ ثانیه)",
-    status: "SEARCHING_4",
-  });
-  return;
-}
+  if (playerCount === 1) {
+    if (LOBBY_BOT_TIERS.has(Number(tier))) {
+      setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
+      emitLobbyStatus(lobby, {
+        phase: 1,
+        searchingFor: 2,
+        deadlineAt: lobby.lobbyDeadlineAt,
+        message: "منتظر نفر دوم (یا حریف آزمایشی)...",
+        status: "SEARCHING_2",
+      });
+    } else {
+      lobby.lobbyDeadlineAt = null;
+      if (lobby.lobbyTimer) {
+        clearTimeout(lobby.lobbyTimer);
+        lobby.lobbyTimer = null;
+      }
+      emitLobbyStatus(lobby, {
+        phase: 1,
+        searchingFor: 2,
+        deadlineAt: null,
+        message: "منتظر نفر دوم...",
+        status: "WAIT_2",
+      });
+    }
+    return;
+  }
 
-
-  if (count >= 4) {
-    lobby.lobbyPhase = 4;
-
+  if (playerCount === 2) {
+    setLobbyDeadline(lobby, 30);
     emitLobbyStatus(lobby, {
-      phase: 4,
-      searchingFor: null,
+      phase: 2,
+      searchingFor: 3,
       deadlineAt: lobby.lobbyDeadlineAt,
-      message: "نفر چهارم پیدا شد ✅",
-      status: "FULL",
+      message: "منتظر نفر سوم...",
+      status: "SEARCHING_3",
     });
+    return;
+  }
 
-    await startMatchFromLobby(lobby, 4);
+  if (playerCount === 3) {
+    setLobbyDeadline(lobby, 30);
+    emitLobbyStatus(lobby, {
+      phase: 3,
+      searchingFor: 4,
+      deadlineAt: lobby.lobbyDeadlineAt,
+      message: "منتظر نفر چهارم...",
+      status: "SEARCHING_4",
+    });
+    return;
+  }
+
+  if (playerCount >= 4) {
+    return startMatchFromLobby(lobby, 4);
   }
 }
+
+
 
 async function startMatchFromLobby(lobby, filledColors) {
   if (!lobby || lobby.status !== "lobby") return;
@@ -2433,23 +2521,18 @@ emitLobbyStats();
       await onLobbyPlayerJoined(tier);
 
       if (filled < 2) {
-        emitLobbyStatus(lobby, {
-          phase: 1,
-          searchingFor: 3,
-          deadlineAt: null,
-          message: "منتظر نفر دوم...",
-          status: "WAIT_2",
-        });
+        const isBotTier = LOBBY_BOT_TIERS.has(Number(tier));
         return callback?.({
           success: true,
           waiting: true,
           matchId: lobby.matchId,
           tier,
           filledColors: filled,
-          status: "waiting",
-          startAfterMs: null,
+          status: isBotTier ? "SEARCHING_2" : "WAIT_2",
+          startAfterMs: isBotTier ? LOBBY_BOT_WAIT_SECONDS * 1000 : null,
         });
       }
+
 
       if (filled === 2) {
         return callback?.({
