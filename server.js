@@ -1947,21 +1947,25 @@ function nextTurn(match) {
       match.playerColors?.[colorOrder[match.game.currentTurn]] ?? null,
   });
 
-  // --- بخش جدید: فعال‌سازی ربات هوشمند ---
+  // --- بخش اصلاح‌شده: فعال‌سازی ربات هوشمند ---
+  // توجه: selectedColor قبلاً در کد اصلی تعریف شده است، پس آن را دوباره تعریف نمی‌کنیم.
   const currentUserId = match.playerColors?.[selectedColor];
-  const isBotTurn = match.players?.find(p => p.id === currentUserId && p.isBot);
+  
+  // بررسی امن وضعیت ربات (اگر match.players آرایه نبود، از Object.values استفاده می‌کنیم)
+  const playersList = Array.isArray(match.players) ? match.players : Object.values(match.players || {});
+  const isBotTurn = playersList.find(p => p.id === currentUserId && p.isBot);
 
   // طبق پروتکل: ربات فقط در اتاق‌های ۲۰ و ۵۰ هزار تومان فعال باشد
   const isCorrectTier = [20000, 50000].includes(match.tier);
 
   if (isBotTurn && isCorrectTier) {
     console.log(`[BOT_ACTIVATION] ربات در اتاق ${match.tier} فعال شد!`);
-    // فراخوانی موتور تصمیم‌گیرنده (که در مرحله بعد اضافه می‌کنیم)
     handleSmartBotTurn(match, selectedColor);
   } else {
     // اگر بازیکن انسانی بود، تایمر معمولی شروع شود
     startTurnTimeout(match);
   }
+
 }
 
 
