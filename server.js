@@ -3433,7 +3433,7 @@ const piece = m.game.pieces.find(
 
 // Start
 /**
- * --- موتور تصمیم‌گیرنده اصلاح‌شده: ربات تاج تاس (نسخه تهاجمی) ---
+ * موتور تصمیم‌گیرنده اصلاح‌شده: انتخاب سراسری بهترین حرکت (Global Optimizer)
  */
 
 async function handleSmartBotTurn(match, botColor) {
@@ -3443,7 +3443,7 @@ async function handleSmartBotTurn(match, botColor) {
   try {
     console.log(`[BOT_TURN] Starting Turn for ${botColor}`);
     
-    // شبیه‌سازی تاس
+    // شبیه‌سازی تاس (تولید تاس)
     const d1 = Math.floor(Math.random() * 6) + 1;
     const d2 = Math.floor(Math.random() * 6) + 1;
 
@@ -3453,20 +3453,19 @@ async function handleSmartBotTurn(match, botColor) {
     match.game.dice2 = d2;
     match.game.dice = d1 + d2;
 
-    let legalMoves = getAllLegalMoves(match, botColor, [d1, d2]);
+    // تا زمانی که حرکتی وجود دارد، بازی کن
+    while (match.game.pendingDice.length > 0) {
+      let legalMoves = getAllLegalMoves(match, botColor, match.game.pendingDice);
+      if (legalMoves.length === 0) break;
 
-    // حلقه حرکت ربات
-    while (legalMoves.length > 0) {
-      // مکث ۵ ثانیه‌ای قبل از هر حرکت برای جلوگیری از فشار به سرور و قطع اتصال
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      
+      // انتخاب بهترین حرکت از کلِ لیست (هم تاس ۱ و هم تاس ۲ با هم)
       const bestMove = selectBestMove(match, legalMoves);
-      if (!bestMove) break;
+      
+      // مکث اجباری ۵ ثانیه‌ای قبل از حرکت
+      console.log(`[BOT] Bot is thinking... waiting 5s before moving ${bestMove.pieceId} with ${bestMove.dieValue}`);
+      await new Promise(resolve => setTimeout(resolve, 5000));
 
       await executeBotMove(match, botColor, bestMove);
-      
-      // آپدیت وضعیت حرکات بعد از انجام حرکت قبلی
-      legalMoves = getAllLegalMoves(match, botColor, match.game.pendingDice);
     }
     
     match._botThinking = false;
@@ -3486,31 +3485,30 @@ function selectBestMove(match, legalMoves) {
   let bestMove = null;
   let maxScore = -Infinity;
 
+  // بررسی تمام حرکات ممکن (چه با تاس ۱، چه با تاس ۲)
   for (const move of legalMoves) {
     let score = 0;
     const targetPos = move.targetPosition;
     const piece = player.pieces.find(p => p.id === move.pieceId);
 
-    // اولویت ۱: خروج از خانه با تاس ۶ (حیاتی‌ترین)
-    if (piece.inBase && move.dieValue === 6) score += 100000;
+    // ۱. وزن فوق سنگین برای خروج از خانه (حیاتی)
+    if (piece.inBase && move.dieValue === 6) score += 500000;
     
-    // اولویت ۲: کشتن حریف
+    // ۲. وزن بسیار بالا برای کشتن حریف
     const isKill = opponent.pieces.some(p => p.position === targetPos && p.position > 0 && p.position < 52);
-    if (isKill) score += 80000;
+    if (isKill) score += 400000;
 
-    // اولویت ۳: رسیدن به خانه نهایی
-    if (targetPos >= 50) score += 60000;
+    // ۳. وزن بالا برای رسیدن به خانه نهایی
+    if (targetPos >= 50) score += 300000;
 
-    // اولویت ۴: استفاده از تاس ۶ در مسیر
-    if (move.dieValue === 6) score += 20000;
+    // ۴. وزن برای امنیت (خانه‌های امن)
+    if (safeSquares.includes(targetPos)) score += 50000;
 
-    // اولویت ۵: امنیت
-    if (safeSquares.includes(targetPos)) score += 10000;
-
-    // جریمه: نزدیک بودن به حریف (بدون خانه امن)
+    // ۵. جریمه برای حرکت در مناطق خطرناک
     const isVulnerable = opponent.pieces.some(p => Math.abs(targetPos - p.position) <= 6);
-    if (isVulnerable && !safeSquares.includes(targetPos)) score -= 30000;
+    if (isVulnerable && !safeSquares.includes(targetPos)) score -= 200000;
 
+    // انتخاب حرکت با بیشترین امتیاز
     if (score > maxScore) {
       maxScore = score;
       bestMove = move;
@@ -3531,7 +3529,7 @@ async function executeBotMove(match, botColor, move) {
     piece.position = move.targetPosition;
   }
 
-  // بررسی کشتن
+  // بررسی کشتن حریف
   const opponent = match.players[match.currentPlayer === 0 ? 1 : 0];
   const kill = opponent.pieces.find(p => p.position === piece.position && p.position > 0 && p.position < 52);
   if (kill) {
@@ -3539,7 +3537,12 @@ async function executeBotMove(match, botColor, move) {
     kill.position = 0;
   }
 
-  match.game.pendingDice = match.game.pendingDice.filter((_, index) => index !== move.diceIndex);
+  // حذف تاس مصرف شده از لیست pendingDice
+  const indexToRemove = match.game.pendingDice.indexOf(move.dieValue);
+  if (indexToRemove > -1) {
+    match.game.pendingDice.splice(indexToRemove, 1);
+  }
+  
   broadcastState(match);
 }
 
@@ -3547,13 +3550,14 @@ function getAllLegalMoves(match, color, diceValues) {
   const player = match.players[match.currentPlayer];
   const moves = [];
   
-  diceValues.forEach((die, index) => {
+  diceValues.forEach((die) => {
     player.pieces.forEach(piece => {
       if (canPieceMove(match.game, piece, die)) {
         moves.push({
+          pieceId: piecePieceMove(match.game, piece, die)) {
+        moves.push({
           pieceId: piece.id,
           dieValue: die,
-          diceIndex: index,
           targetPosition: piece.inBase ? 1 : (piece.position + die) % 52
         });
       }
