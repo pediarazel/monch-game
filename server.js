@@ -1379,7 +1379,7 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
     });
 
     // شبیه‌سازی فکر کردن قبل از شروع نوبت
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
     // اگر بازی در حین انتظار تمام شده باشد، متوقف شو
     if (!match.game || match.game.winner || match.turnId !== expectedTurnId) return;
@@ -1392,6 +1392,7 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
     ) {
       const d1 = getNextDiceValueFromMatch();
       const d2 = getNextDiceValueFromMatch();
+
 
       match.game.dice1 = d1;
       match.game.dice2 = d2;
@@ -2326,7 +2327,11 @@ io.on("connection", (socket) => {
   const uid = Number(socket.user?.userId);
   if (!Number.isInteger(uid) || uid <= 0) return;
 
+  // ذخیره uid در data برای دسترسی ایمن در رویداد disconnect
+  socket.data.uid = uid;
+
   connectedUsers.set(String(uid), socket.id);
+
   socket.join('lobby'); // اضافه کن: ورود به اتاق لابی
 emitLobbyStats();
   // سیستم Reconnect: اگر این کاربر قبلاً در حالت قطع اتصال بوده،
@@ -2752,6 +2757,9 @@ startAfterMs: 30000,
     socket.on("disconnect", () => {
         // --- START CUSTOM DISCONNECT HANDLING ---
         try {
+          const uid = socket.data.uid; // استفاده از uid ذخیره شده در data
+          if (!uid) return;
+
           // اگر کاربر با دکمه «خروج از بازی» خارج شده باشد،
           // disconnect فعلی نباید تایمر reconnect ۹۰ ثانیه‌ای ایجاد کند.
           if (socket.data.skipNextDisconnect === true) {
@@ -2843,6 +2851,7 @@ startAfterMs: 30000,
                   matchId: match.matchId,
                   disconnectedAt: Date.now(),
                   isBotPlaying: true
+
                 });
 
                 // فعال کردن بلافاصله ربات برای این مسابقه
@@ -3463,8 +3472,8 @@ async function handleSmartBotTurn(match, botColor) {
   try {
     console.log(`[BOT_TURN] Starting Turn for ${botColor}`);
 
-    // ۵ ثانیه صبر قبل از تاس ریختن ربات (شبیه‌سازی فکر کردن)
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // ۳ ثانیه صبر قبل از تاس ریختن ربات (شبیه‌سازی فکر کردن)
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
     // اگر حین صبر، بازی تمام شد یا نوبت عوض شد، ادامه نده
     if (
@@ -3478,6 +3487,7 @@ async function handleSmartBotTurn(match, botColor) {
     const d2 = Math.floor(Math.random() * 6) + 1;
 
     match.game.pendingDice = [d1, d2];
+
     match.game.rolled = true;
     match.game.dice1 = d1;
     match.game.dice2 = d2;
