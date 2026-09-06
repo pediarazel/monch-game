@@ -2090,17 +2090,22 @@ async function handleLobbyTimeout(lobby) {
     LOBBY_BOT_TIERS.has(Number(lobby.tier))
   ) {
     try {
-      const botUser = await ensureLobbyBotUser();
+      // جلوگیری از Query تکراری به دیتابیس (رفع لگ) و تزریق نام کاربری (رفع مشکل نمایش)
+      if (!lobby.botInjected) {
+        const botUser = await ensureLobbyBotUser();
+        if (!lobby.playerUidsInOrder.includes(botUser.id)) {
+          lobby.playerUidsInOrder.push(botUser.id);
+          lobby.botUserId = botUser.id;
+          lobby.botInjected = true;
+          
+          // ثبت نام کاربری در کش لابی برای دسترسی کلاینت (رفع مشکل نمایش نام)
+          lobby.playerNames = lobby.playerNames || {};
+          lobby.playerNames[botUser.id] = botUser.username;
 
-      if (!lobby.playerUidsInOrder.includes(botUser.id)) {
-        lobby.playerUidsInOrder.push(botUser.id);
-        lobby.botUserId = botUser.id;
-        lobby.botInjected = true;
-
-        console.log(
-          `[LOBBY_BOT] Injected bot into tier ${lobby.tier}`
-        );
+          console.log(`[LOBBY_BOT] Injected bot and set username for tier ${lobby.tier}`);
+        }
       }
+
 
       emitLobbyStatus(lobby);
 
