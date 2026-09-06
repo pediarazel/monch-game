@@ -943,13 +943,12 @@ async function ensureTreasuryUser() {
   });
 }
 async function ensureLobbyBotUser() {
-  // ربات اصلی لابی همیشه با نام ثابت tajdas_bot ساخته/پیدا می‌شود
-  const existingBot = await prisma.user.findUnique({
-    where: { username: LOBBY_BOT_USERNAME }
+  // ربات لابی را بر اساس نقش (نه نام) پیدا کن
+  const existingBot = await prisma.user.findFirst({
+    where: { role: "LOBBY_BOT" }
   });
 
   if (existingBot) {
-    // اگر موجودی ربات کم بود، شارژش کن
     if (Number(existingBot.coins || 0) < LOBBY_BOT_INITIAL_COINS) {
       await prisma.user.update({
         where: { id: existingBot.id },
@@ -959,26 +958,19 @@ async function ensureLobbyBotUser() {
     return existingBot;
   }
 
-  // اگر ربات اصلی وجود نداشت، بسازش
+  // اگر ربات نبود، با یک نام رندوم و نقش LOBBY_BOT بساز
   const newBot = await prisma.user.create({
     data: {
-      username: LOBBY_BOT_USERNAME,
-      password: await bcrypt.hash(
-        crypto.randomBytes(32).toString("hex"),
-        12
-      ),
-      role: "BOT",
+      username: getRandomBotName(), 
+      password: await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 12),
+      role: "LOBBY_BOT",
       coins: LOBBY_BOT_INITIAL_COINS
     }
   });
 
-  // اطمینان از اینکه username حتما در شیء بازگشتی وجود دارد
-  newBot.username = LOBBY_BOT_USERNAME;
-
-  console.log(`[LOBBY_BOT] Created main lobby bot: ${LOBBY_BOT_USERNAME}`);
+  console.log(`[LOBBY_BOT] Created lobby bot with random name: ${newBot.username}`);
   return newBot;
 }
-
 
 
 async function chargeTierFromPlayers(match) {
@@ -1478,14 +1470,7 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
         !selectedPiece ||
         selectedDieValue < 1
       ) {
-        console.log("[DISCONNECTED_BOT_NO_LEGAL_MOVE]", {
-          matchId: match.matchId,
-          turnId: expectedTurnId,
-          userId: expectedUserId,
-          color: currentColor,
-          pendingDice: match.game.pendingDice.slice(),
-        });
-
+        console.log(`[BOT] No legal move for match ${match.matchId}`);
         match.game.rolled = false;
         match.game.pendingDice = [];
         match.game.dice1 = 0;
@@ -1498,7 +1483,7 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
       }
 
       // تأخیر قبل از انجام حرکت (شبیه‌سازی فکر کردن به حرکت)
-    await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       if (!match.game || match.game.winner || match.turnId !== expectedTurnId) break;
 
@@ -1509,15 +1494,7 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
       );
 
       if (!moved) {
-        console.error("[DISCONNECTED_BOT_MOVE_FAILED]", {
-          matchId: match.matchId,
-          turnId: expectedTurnId,
-          userId: expectedUserId,
-          color: currentColor,
-          pieceId: selectedPiece.id,
-          dieValue: selectedDieValue,
-        });
-
+        console.error(`[BOT] Move failed for match ${match.matchId}`);
         match.game.rolled = false;
         match.game.pendingDice = [];
         match.game.dice1 = 0;
@@ -1530,24 +1507,12 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
       }
 
       match.game.pendingDice.splice(selectedDieIndex, 1);
-      match.game.dice1 = match.game.pendingDice[0]
-        ? Number(match.game.pendingDice[0])
-        : 0;
-      match.game.dice2 = match.game.pendingDice[1]
-        ? Number(match.game.pendingDice[1])
-        : 0;
+      match.game.dice1 = match.game.pendingDice[0] ? Number(match.game.pendingDice[0]) : 0;
+      match.game.dice2 = match.game.pendingDice[1] ? Number(match.game.pendingDice[1]) : 0;
       match.game.dice = match.game.dice1 + match.game.dice2;
       match.game.turnMoved = true;
 
-      console.log("[DISCONNECTED_BOT_MOVE]", {
-        matchId: match.matchId,
-        turnId: expectedTurnId,
-        userId: expectedUserId,
-        color: currentColor,
-        pieceId: selectedPiece.id,
-        dieValue: selectedDieValue,
-        remainingDice: match.game.pendingDice.slice(),
-      });
+      console.log(`[BOT] Moved in match ${match.matchId}`);
 
       const hasWon = checkWinner(match.game, currentColor);
 
@@ -1559,26 +1524,20 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
         match.game.dice2 = 0;
         match.game.dice = 0;
         match.game.turnDeadlineAt = null;
-        match.turnDeadlineAt = null;
 
         if (match.pendingTurnTimer) {
           clearTimeout(match.pendingTurnTimer);
           match.pendingTurnTimer = null;
         }
 
-        console.log("[DISCONNECTED_BOT_WINNER]", {
-          matchId: match.matchId,
-          turnId: expectedTurnId,
-          userId: expectedUserId,
-          winnerColor: currentColor,
-        });
-
+        console.log(`[BOT] Winner: ${currentColor} in match ${match.matchId}`);
         broadcastState(match);
         await finalizeDisconnectedBotWinner(match, currentColor);
         return;
       }
 
       broadcastState(match);
+
     }
 
 
