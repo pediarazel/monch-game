@@ -975,8 +975,12 @@ async function ensureLobbyBotUser() {
     }
   });
 
+  // اطمینان از اینکه username حتما در شیء بازگشتی وجود دارد
+  newBot.username = newBotName;
+
   console.log(`[LOBBY_BOT] Created new human-like bot: ${newBotName}`);
   return newBot;
+
 }
 
 
