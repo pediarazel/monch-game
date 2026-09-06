@@ -1393,16 +1393,6 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
       return;
     }
 
-    console.log("[DISCONNECTED_BOT_START]", {
-      matchId: match.matchId,
-      turnId: expectedTurnId,
-      userId: expectedUserId,
-      color: currentColor,
-      alreadyRolled: match.game.rolled,
-      pendingDice: Array.isArray(match.game.pendingDice)
-        ? match.game.pendingDice.slice()
-        : [],
-    });
 
     // شبیه‌سازی فکر کردن قبل از شروع نوبت
     await new Promise(resolve => setTimeout(resolve, 3000));
@@ -1702,12 +1692,6 @@ function scheduleDisconnectedPlayerBot(match) {
   match.pendingBotTurnId = expectedTurnId;
   match.pendingBotUserId = expectedUserId;
 
-  console.log("[DISCONNECTED_BOT_SCHEDULED]", {
-    matchId: expectedMatchId,
-    turnId: expectedTurnId,
-    userId: expectedUserId,
-    color: currentColor,
-  });
 
   match.pendingBotTimer = setTimeout(() => {
     match.pendingBotTimer = null;
@@ -1728,11 +1712,7 @@ function scheduleDisconnectedPlayerBot(match) {
     if (connectedUsers.has(String(expectedUserId))) return;
 
 if (currentMatch.game.transitioning) {
-  console.log("[DISCONNECTED_BOT_RETRY_TRANSITION]", {
-    matchId: expectedMatchId,
-    turnId: expectedTurnId,
-    userId: expectedUserId,
-  });
+
 
   // هنگام transition، تایمر نوبت را هم متوقف کن تا با ربات/ترنزیشن تداخل نکند
   if (currentMatch.pendingTurnTimer) {
