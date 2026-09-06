@@ -186,11 +186,16 @@ app.post("/api/auth/login", async (req, res) => {
     }
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ message: "نام کاربری یا رمز عبور اشتباه است" });
+
+    // صدور توکن موفقیت‌آمیز
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "24h" });
+    return res.json({ token });
   } catch (error) {
     console.error("❌ CRITICAL LOGIN ERROR:", error);
     return res.status(500).json({ message: "خطای داخلی سرور" });
   }
 });
+
 
 
 app.post("/api/auth/register", async (req, res) => {
