@@ -1378,6 +1378,12 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
         : [],
     });
 
+    // شبیه‌سازی فکر کردن قبل از شروع نوبت
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // اگر بازی در حین انتظار تمام شده باشد، متوقف شو
+    if (!match.game || match.game.winner || match.turnId !== expectedTurnId) return;
+
     // اگر بازیکن پیش از Disconnect تاس نریخته باشد، ربات دو تاس می‌اندازد.
     if (
       !match.game.rolled ||
@@ -1394,10 +1400,7 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
       match.game.rolled = true;
       match.game.turnMoved = false;
 
-      // این مقدار تا مصرف هر دو تاس باقی می‌ماند.
-      // اگر هر دو تاس ۶ باشند، ربات پس از حرکت‌ها یک تاس‌ریزی جایزه دارد.
       match.game.isDoubleSixRoll = d1 === 6 && d2 === 6;
-
 
       console.log("[DISCONNECTED_BOT_ROLL]", {
         matchId: match.matchId,
@@ -1409,8 +1412,8 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
       });
 
       broadcastState(match);
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
+      // تأخیر کوتاه بعد از ریختن تاس
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
     while (
@@ -1420,7 +1423,9 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
       Array.isArray(match.game.pendingDice) &&
       match.game.pendingDice.length > 0
     ) {
-      // در هر مرحله اولین تاسی را پیدا می‌کنیم که حداقل یک حرکت قانونی دارد.
+      // بررسی سلامت بازی در هر مرحله از حلقه
+      if (!match.game || match.game.winner || match.turnId !== expectedTurnId) break;
+
       let selectedDieIndex = -1;
       let selectedDieValue = 0;
       let selectedPiece = null;
@@ -1446,7 +1451,6 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
         }
       }
 
-      // هیچ‌کدام از تاس‌های باقی‌مانده حرکت قانونی ندارند.
       if (
         selectedDieIndex === -1 ||
         !selectedPiece ||
@@ -1466,12 +1470,14 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
         match.game.dice2 = 0;
         match.game.dice = 0;
         match.game.turnMoved = true;
-
-match.game.transitioning = false;
-nextTurn(match);
-
+        match.game.transitioning = false;
+        nextTurn(match);
         return;
       }
+
+      // تأخیر قبل از انجام حرکت (شبیه‌سازی فکر کردن به حرکت)
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      if (!match.game || match.game.winner || match.turnId !== expectedTurnId) break;
 
       const moved = movePiece(
         match.game,
@@ -1495,10 +1501,8 @@ nextTurn(match);
         match.game.dice2 = 0;
         match.game.dice = 0;
         match.game.turnMoved = true;
-
-match.game.transitioning = false;
-nextTurn(match);
-
+        match.game.transitioning = false;
+        nextTurn(match);
         return;
       }
 
@@ -1553,6 +1557,7 @@ nextTurn(match);
 
       broadcastState(match);
     }
+
 
     // هر دو تاس مصرف شده‌اند.
     if (
@@ -3627,18 +3632,20 @@ function getBotOpponentByColor(match, botColor) {
 }
 
 function getPieceTargetCell(match, color, piece, dieValue) {
-  // سلول مقصد مهره روی صفحه را برمی‌گرداند (برای تشخیص زدن و خطر)
-  if (piece.state === "yard") {
-    return layout.startCells[color];
+  try {
+    if (piece.state === "yard") return layout.startCells[color];
+    if (piece.state === "start") {
+      const entryIdx = layout.entryPathIndexes[color];
+      return layout.mainPath[(entryIdx + dieValue - 1) % 36];
+    }
+    if (piece.state === "path") {
+      return layout.mainPath[(piece.pathIndex + dieValue) % 36];
+    }
+    if (piece.state === "home") return null;
+    return null;
+  } catch (e) {
+    return null;
   }
-  if (piece.state === "start") {
-    const entryIndex = layout.entryPathIndexes[color];
-    return layout.mainPath[(entryIndex + dieValue - 1) % 36];
-  }
-  if (piece.state === "path") {
-    return layout.mainPath[(piece.pathIndex + dieValue) % 36];
-  }
-  return null; // home
 }
 
 function selectBestMove(match, legalMoves) {
@@ -3654,39 +3661,45 @@ function selectBestMove(match, legalMoves) {
   for (const move of legalMoves) {
     const piece = game.pieces.find(p => p.id === move.pieceId);
     if (!piece) continue;
-    const targetCell = getPieceTargetCell(match, botColor, piece, move.dieValue);
 
+    const targetCell = getPieceTargetCell(match, botColor, piece, move.dieValue);
     let score = 0;
 
-    // خارج کردن مهره از حیاط با تاس ۶
+    // ۱. اولویت مطلق: رسیدن به مقصد (Home)
+    if (piece.state === "path" && targetCell === null) {
+      score += 1000000;
+    }
+
+    // ۲. اولویت بسیار بالا: خروج از حیاط (Yard)
     if (piece.state === "yard" && move.dieValue === 6) {
       score += 500000;
     }
 
-    // زدن مهره حریف
-    const isKill = targetCell != null && game.pieces.some(p =>
+    // ۳. اولویت بالا: زدن مهره حریف (Kill)
+    const isKill = targetCell !== null && game.pieces.some(p =>
       opponentColors.includes(p.color) &&
       p.state === "path" &&
       layout.mainPath[p.pathIndex] === targetCell
     );
-    if (isKill) score += 400000;
+    if (isKill) score += 450000;
 
-    // نزدیک شدن به خانه
-    if (piece.state === "home") score += 300000;
-
-    // ورود به مسیر
+    // ۴. اولویت متوسط: ورود به مسیر اصلی
     if (piece.state === "start") score += 100000;
 
-    // خطر زده شدن: حریفی که ۱ تا ۶ خانه پشت سلول مقصد است
-    const isVulnerable = targetCell != null && game.pieces.some(p => {
+    // ۵. مدیریت ریسک: جلوگیری از رفتن به خانه‌های خطرناک
+    const isVulnerable = targetCell !== null && game.pieces.some(p => {
       if (!opponentColors.includes(p.color) || p.state !== "path") return false;
-      const oppIdx = layout.mainPath.indexOf(targetCell);
-      const myIdx = p.pathIndex;
-      if (oppIdx < 0 || myIdx < 0) return false;
-      const dist = (oppIdx - myIdx + 36) % 36;
+      const targetIdx = layout.mainPath.indexOf(targetCell);
+      const oppIdx = p.pathIndex;
+      const dist = (targetIdx - oppIdx + 36) % 36;
       return dist >= 1 && dist <= 6;
     });
-    if (isVulnerable) score -= 200000;
+    if (isVulnerable) score -= 300000;
+
+    // ۶. استراتژی پیشروی
+    if (piece.state === "path") {
+      score += (piece.pathIndex * 100);
+    }
 
     if (score > maxScore) {
       maxScore = score;
@@ -3696,7 +3709,6 @@ function selectBestMove(match, legalMoves) {
 
   return bestMove || legalMoves[0];
 }
-
 
 
 async function executeBotMove(match, botColor, move) {
