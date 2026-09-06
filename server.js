@@ -1476,7 +1476,8 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
       }
 
       // تأخیر قبل از انجام حرکت (شبیه‌سازی فکر کردن به حرکت)
-      await new Promise(resolve => setTimeout(resolve, 5000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
       if (!match.game || match.game.winner || match.turnId !== expectedTurnId) break;
 
       const moved = movePiece(
@@ -3513,7 +3514,8 @@ async function handleSmartBotTurn(match, botColor) {
         pendingDice: match.game.pendingDice.slice(),
       });
 
-      await new Promise(resolve => setTimeout(resolve, 5000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
 
       if (
         match.game.winner ||
