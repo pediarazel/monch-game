@@ -938,34 +938,26 @@ async function ensureTreasuryUser() {
   });
 }
 async function ensureLobbyBotUser() {
-  // ۱. ابتدا سعی می‌کنیم یکی از ربات‌های موجود را که نامشان در لیست‌های ماست پیدا کنیم
-  const allBotNames = [...BOT_NAMES_FA, ...BOT_NAMES_EN];
-  
-  const existingBots = await prisma.user.findMany({
-    where: {
-      username: { in: allBotNames }
-    }
+  // ربات اصلی لابی همیشه با نام ثابت tajdas_bot ساخته/پیدا می‌شود
+  const existingBot = await prisma.user.findUnique({
+    where: { username: LOBBY_BOT_USERNAME }
   });
 
-  if (existingBots.length > 0) {
-    // اگر رباتی وجود داشت، یکی را تصادفی انتخاب کن
-    const randomBot = existingBots[Math.floor(Math.random() * existingBots.length)];
-    
+  if (existingBot) {
     // اگر موجودی ربات کم بود، شارژش کن
-    if (Number(randomBot.coins || 0) < LOBBY_BOT_INITIAL_COINS) {
+    if (Number(existingBot.coins || 0) < LOBBY_BOT_INITIAL_COINS) {
       await prisma.user.update({
-        where: { id: randomBot.id },
+        where: { id: existingBot.id },
         data: { coins: LOBBY_BOT_INITIAL_COINS }
       });
     }
-    return randomBot;
+    return existingBot;
   }
 
-  // ۲. اگر هیچ رباتی در دیتابیس نبود، یک ربات جدید با نام تصادفی بساز
-  const newBotName = getRandomBotName();
+  // اگر ربات اصلی وجود نداشت، بسازش
   const newBot = await prisma.user.create({
     data: {
-      username: newBotName,
+      username: LOBBY_BOT_USERNAME,
       password: await bcrypt.hash(
         crypto.randomBytes(32).toString("hex"),
         12
@@ -976,12 +968,12 @@ async function ensureLobbyBotUser() {
   });
 
   // اطمینان از اینکه username حتما در شیء بازگشتی وجود دارد
-  newBot.username = newBotName;
+  newBot.username = LOBBY_BOT_USERNAME;
 
-  console.log(`[LOBBY_BOT] Created new human-like bot: ${newBotName}`);
+  console.log(`[LOBBY_BOT] Created main lobby bot: ${LOBBY_BOT_USERNAME}`);
   return newBot;
-
 }
+
 
 
 async function chargeTierFromPlayers(match) {
@@ -1679,6 +1671,10 @@ nextTurn(match);
 function scheduleDisconnectedPlayerBot(match) {
   if (!match) return;
 
+  // ربات جایگزین قطع اتصال فقط در اتاق‌های ۲۰ و ۵۰ تومان فعال است
+  const tierNum = Number(match.tier);
+  if (!LOBBY_BOT_TIERS.has(tierNum)) return;
+
   if (match.pendingBotTimer) {
     clearTimeout(match.pendingBotTimer);
     match.pendingBotTimer = null;
@@ -1689,6 +1685,7 @@ function scheduleDisconnectedPlayerBot(match) {
 
   if (!match.game || match.game.winner) return;
   if (match.status !== "playing") return;
+
 
   const currentColor = colorOrder[match.game.currentTurn];
   const currentUserId = match.playerColors?.[currentColor];
@@ -1782,13 +1779,19 @@ if (currentMatch.game.transitioning) {
 }, 1500);
 
 }
-function clearGameTimers(match) {
+function clearTurnTimer(match) {
   if (!match) return;
 
   if (match.pendingTurnTimer) {
     clearTimeout(match.pendingTurnTimer);
     match.pendingTurnTimer = null;
   }
+}
+
+function clearGameTimers(match) {
+  if (!match) return;
+
+  clearTurnTimer(match);
 
   if (match.pendingBotTimer) {
     clearTimeout(match.pendingBotTimer);
@@ -1798,6 +1801,7 @@ function clearGameTimers(match) {
   match.pendingBotTurnId = null;
   match.pendingBotUserId = null;
 }
+
 function clearBotTimers(match) {
   if (!match) return;
 
@@ -1812,11 +1816,12 @@ function clearBotTimers(match) {
 function startTurnTimeout(match) {
   if (!match || !match.game || match.game.winner) return;
 
-  // تایمرهای مربوط به نوبت قبلی کاملاً لغو می‌شوند.
-  clearGameTimers(match);
+  // فقط تایمر نوبت قبلی لغو می‌شود تا تایمر ربات دیسکانکت‌شده پاک نشود.
+  clearTurnTimer(match);
 
   // برای هر نوبت، یک شناسهٔ مستقل برای تایمر ساخته می‌شود.
   match.turnTimerToken = Number(match.turnTimerToken || 0) + 1;
+
 
   const expectedMatchId = String(match.matchId);
   const expectedTurnId = Number(match.turnId);
@@ -1825,76 +1830,30 @@ function startTurnTimeout(match) {
   match.game.turnDeadlineAt = Date.now() + TURN_MS;
   match.turnDeadlineAt = match.game.turnDeadlineAt;
 
-  console.log("[TURN_TIMER_STARTED]", {
-    matchId: expectedMatchId,
-    turnId: expectedTurnId,
-    timerToken: expectedTimerToken,
-    currentTurn: match.game.currentTurn,
-    currentColor: colorOrder[match.game.currentTurn],
-    deadlineAt: match.game.turnDeadlineAt,
-  });
-
   broadcastState(match);
+
 
   match.pendingTurnTimer = setTimeout(() => {
     match.pendingTurnTimer = null;
 
     const currentMatch = matches.get(expectedMatchId);
 
-    if (!currentMatch) {
-      console.log("[TURN_TIMEOUT_IGNORED] match not found", {
-        matchId: expectedMatchId,
-        turnId: expectedTurnId,
-        timerToken: expectedTimerToken,
-      });
-      return;
-    }
+    if (!currentMatch) return;
 
-    if (!currentMatch.game || currentMatch.game.winner) {
-      console.log("[TURN_TIMEOUT_IGNORED] game ended", {
-        matchId: expectedMatchId,
-        turnId: expectedTurnId,
-        timerToken: expectedTimerToken,
-      });
-      return;
-    }
+
+    if (!currentMatch.game || currentMatch.game.winner) return;
+
 
     // جلوگیری از اجرای تایمر متعلق به نوبت قدیمی
-    if (Number(currentMatch.turnId) !== expectedTurnId) {
-      console.log("[TURN_TIMEOUT_IGNORED] old turnId", {
-        matchId: expectedMatchId,
-        expectedTurnId,
-        actualTurnId: currentMatch.turnId,
-        timerToken: expectedTimerToken,
-      });
-      return;
-    }
+    if (Number(currentMatch.turnId) !== expectedTurnId) return;
+
 
     // جلوگیری از اجرای تایمر قدیمی پس از ساخته‌شدن تایمر جدید
-    if (currentMatch.turnTimerToken !== expectedTimerToken) {
-      console.log("[TURN_TIMEOUT_IGNORED] old timerToken", {
-        matchId: expectedMatchId,
-        turnId: expectedTurnId,
-        expectedTimerToken,
-        actualTimerToken: currentMatch.turnTimerToken,
-      });
-      return;
-    }
+    if (currentMatch.turnTimerToken !== expectedTimerToken) return;
 
-    console.log("[TURN_TIMEOUT_FIRE]", {
-      matchId: currentMatch.matchId,
-      turnId: currentMatch.turnId,
-      timerToken: currentMatch.turnTimerToken,
-      currentTurn: currentMatch.game.currentTurn,
-      currentColor: colorOrder[currentMatch.game.currentTurn],
-      transitioningBeforeReset: currentMatch.game.transitioning,
-      rolledBeforeReset: currentMatch.game.rolled,
-      pendingDiceBeforeReset: Array.isArray(currentMatch.game.pendingDice)
-        ? currentMatch.game.pendingDice.slice()
-        : [],
-    });
 
     currentMatch.game.transitioning = false;
+
     currentMatch.game.rolled = false;
     currentMatch.game.pendingDice = [];
     currentMatch.game.dice1 = 0;
@@ -1915,20 +1874,9 @@ function startTurnTimeout(match) {
 function nextTurn(match) {
   if (!match || !match.game || match.game.winner) return;
 
-  console.log("[NEXT_TURN] start", {
-    matchId: match.matchId,
-    turnIdBefore: match.turnId,
-    currentTurnBefore: match.game.currentTurn,
-    currentTurnColorBefore: colorOrder[match.game.currentTurn],
-    transitioningBefore: match.game.transitioning,
-    rolledBefore: match.game.rolled,
-    pendingDiceBefore: Array.isArray(match.game.pendingDice)
-      ? match.game.pendingDice.slice()
-      : [],
-  });
+  // فقط تایمر نوبت قبلی پاک می‌شود تا تایمر ربات جایگزین (Takeover) حفظ شود
+  clearTurnTimer(match);
 
-  // همهٔ تایمرهای نوبت قبلی لغو می‌شوند.
-  clearGameTimers(match);
 
   // آزادسازی کامل وضعیت پردازشی نوبت قبلی
   match.game.transitioning = false;
@@ -1979,16 +1927,8 @@ function nextTurn(match) {
 
   match.turnId = Number(match.turnId || 0) + 1;
 
-  console.log("[NEXT_TURN] after change", {
-    matchId: match.matchId,
-    turnIdAfter: match.turnId,
-    currentTurnAfter: match.game.currentTurn,
-    currentTurnColorAfter: colorOrder[match.game.currentTurn],
-    nextUserId:
-      match.playerColors?.[colorOrder[match.game.currentTurn]] ?? null,
-  });
-
   const currentUserId = match.playerColors?.[selectedColor] ?? null;
+
   const playersList = Array.isArray(match.players)
     ? match.players
     : Object.values(match.players || {});
@@ -1998,7 +1938,8 @@ function nextTurn(match) {
   );
 
   const tierNum = Number(match.tier);
-  const isCorrectTier = [20000, 50000].includes(tierNum);
+  const isCorrectTier = [20, 50].includes(tierNum);
+
 
 
   if (isBotTurn && isCorrectTier) {
