@@ -180,16 +180,18 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { username } });
     if (!user) return res.status(401).json({ message: "نام کاربری یا رمز عبور اشتباه است" });
+    if (!password || !user.password) {
+      console.error("❌ Login Error: Missing password in request or database");
+      return res.status(401).json({ message: "نام کاربری یا رمز عبور اشتباه است" });
+    }
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ message: "نام کاربری یا رمز عبور اشتباه است" });
-
-
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "1h" });
-    return res.json({ token });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    console.error("❌ CRITICAL LOGIN ERROR:", error);
+    return res.status(500).json({ message: "خطای داخلی سرور" });
   }
 });
+
 
 app.post("/api/auth/register", async (req, res) => {
   try {
@@ -788,7 +790,29 @@ function createLobby(tier) {
 const LOBBY_TIERS = [20, 50, 100, 200];
 const LOBBY_BOT_TIERS = new Set([20, 50]);
 const LOBBY_BOT_WAIT_SECONDS = 30;
-const LOBBY_BOT_USERNAME = "tajdas_bot";
+
+const LOBBY_BOT_USERNAME = "tajdas_bot"; // نام پیش‌فرض برای سیستم‌های داخلی
+
+const BOT_NAMES_FA = [
+  "امیر_شاه", "رضا_تاس", "علی-پادشاه", "حمید_برنده", "مهدی_غول",
+  "آرش_جنگجو", "سهراب-گینگ", "بهرام_سلطان", "امید_پیروز", "یاسین_قهرمان"
+];
+
+const BOT_NAMES_EN = [
+  "Saeed_King", "Sara_Pro", "Reza_Winner", "Ali.Master", "Hamed_God",
+  "Mehdi_Hero", "Amir_Ace", "Sohrab_Star", "Behram_Boss", "Omid_Champion"
+];
+
+/**
+ * انتخاب تصادفی یک نام از لیست‌های فارسی یا فینگلیش
+ */
+function getRandomBotName() {
+  const useFa = Math.random() > 0.5;
+  const list = useFa ? BOT_NAMES_FA : BOT_NAMES_EN;
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+
 const LOBBY_BOT_INITIAL_COINS = 100000000;
 function computeLobbyStats() {
   const stats = {
@@ -914,41 +938,47 @@ async function ensureTreasuryUser() {
   });
 }
 async function ensureLobbyBotUser() {
-  let botUser = await prisma.user.findUnique({
+  // ۱. ابتدا سعی می‌کنیم یکی از ربات‌های موجود را که نامشان در لیست‌های ماست پیدا کنیم
+  const allBotNames = [...BOT_NAMES_FA, ...BOT_NAMES_EN];
+  
+  const existingBots = await prisma.user.findMany({
     where: {
-      username: LOBBY_BOT_USERNAME
+      username: { in: allBotNames }
     }
   });
 
-  if (!botUser) {
-    botUser = await prisma.user.create({
-      data: {
-        username: LOBBY_BOT_USERNAME,
-        password: await bcrypt.hash(
-          crypto.randomBytes(32).toString("hex"),
-          12
-        ),
-        role: "BOT",
-        coins: LOBBY_BOT_INITIAL_COINS
-      }
-    });
-
-    console.log(`[LOBBY_BOT] Created bot user: ${LOBBY_BOT_USERNAME}`);
-  } else if (Number(botUser.coins || 0) < LOBBY_BOT_INITIAL_COINS) {
-    botUser = await prisma.user.update({
-      where: {
-        id: botUser.id
-      },
-      data: {
-        coins: LOBBY_BOT_INITIAL_COINS
-      }
-    });
-
-    console.log(`[LOBBY_BOT] Bot balance restored: ${LOBBY_BOT_USERNAME}`);
+  if (existingBots.length > 0) {
+    // اگر رباتی وجود داشت، یکی را تصادفی انتخاب کن
+    const randomBot = existingBots[Math.floor(Math.random() * existingBots.length)];
+    
+    // اگر موجودی ربات کم بود، شارژش کن
+    if (Number(randomBot.coins || 0) < LOBBY_BOT_INITIAL_COINS) {
+      await prisma.user.update({
+        where: { id: randomBot.id },
+        data: { coins: LOBBY_BOT_INITIAL_COINS }
+      });
+    }
+    return randomBot;
   }
 
-  return botUser;
+  // ۲. اگر هیچ رباتی در دیتابیس نبود، یک ربات جدید با نام تصادفی بساز
+  const newBotName = getRandomBotName();
+  const newBot = await prisma.user.create({
+    data: {
+      username: newBotName,
+      password: await bcrypt.hash(
+        crypto.randomBytes(32).toString("hex"),
+        12
+      ),
+      role: "BOT",
+      coins: LOBBY_BOT_INITIAL_COINS
+    }
+  });
+
+  console.log(`[LOBBY_BOT] Created new human-like bot: ${newBotName}`);
+  return newBot;
 }
+
 
 async function chargeTierFromPlayers(match) {
   if (match.chargedEntry) return;
