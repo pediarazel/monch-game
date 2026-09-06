@@ -1953,18 +1953,20 @@ function nextTurn(match) {
     : Object.values(match.players || {});
 
   const isBotTurn = playersList.some(
-    p => p && p.id === currentUserId && p.isBot
+    p => p && String(p.id) === String(currentUserId) && p.isBot
   );
 
-  const isCorrectTier = [20000, 50000].includes(Number(match.tier));
+  const tierNum = Number(match.tier);
+  const isCorrectTier = [20, 50, 20000, 50000].includes(tierNum);
 
   if (isBotTurn && isCorrectTier) {
-    console.log(`[BOT_ACTIVATION] ربات در اتاق ${match.tier} فعال شد!`);
+    console.log(`[BOT_ACTIVATION] ربات در اتاق ${match.tier} فعال شد! (رنگ: ${selectedColor})`);
     if (!match._botThinking) {
       handleSmartBotTurn(match, selectedColor);
     }
     return;
   }
+
 
   startTurnTimeout(match);
 
@@ -3436,13 +3438,24 @@ const piece = m.game.pieces.find(
  */
 
 async function handleSmartBotTurn(match, botColor) {
+  if (!match || !match.game || match.game.winner) return;
   if (match._botThinking) return;
+
+  const currentColor = colorOrder[match.game.currentTurn];
+  if (currentColor !== botColor) {
+    console.warn("[BOT_TURN_SKIPPED_WRONG_COLOR]", {
+      matchId: match.matchId,
+      botColor,
+      currentColor,
+    });
+    return;
+  }
+
   match._botThinking = true;
 
   try {
     console.log(`[BOT_TURN] Starting Turn for ${botColor}`);
-    
-    // ۱. ریختن تاس و ثبت در وضعیت بازی
+
     const d1 = Math.floor(Math.random() * 6) + 1;
     const d2 = Math.floor(Math.random() * 6) + 1;
 
@@ -3451,80 +3464,235 @@ async function handleSmartBotTurn(match, botColor) {
     match.game.dice1 = d1;
     match.game.dice2 = d2;
     match.game.dice = d1 + d2;
-    
-    // ارسال فوری تاس به کلاینت‌ها تا بازیکن تاس‌ها را ببیند
+    match.game.turnMoved = false;
+
     broadcastState(match);
 
-    // ۲. اجرای دانه به دانه حرکات با مکث ۵ ثانیه قبل از هر حرکت
-    while (match.game.pendingDice.length > 0) {
-      const legalMoves = getAllLegalMoves(match, botColor, match.game.pendingDice);
+    while (
+      !match.game.winner &&
+      colorOrder[match.game.currentTurn] === botColor &&
+      Array.isArray(match.game.pendingDice) &&
+      match.game.pendingDice.length > 0
+    ) {
+      const legalMoves = getAllLegalMoves(
+        match,
+        botColor,
+        match.game.pendingDice
+      );
+
       if (!legalMoves || legalMoves.length === 0) {
+        console.log("[BOT_NO_LEGAL_MOVE]", {
+          matchId: match.matchId,
+          botColor,
+          pendingDice: match.game.pendingDice.slice(),
+        });
         break;
       }
 
-      // مکث ۵ ثانیه‌ای انسانی برای فکر کردن
-      console.log(`[BOT] Thinking for 5 seconds before next move...`);
+      console.log("[BOT_WAITING_BEFORE_MOVE]", {
+        matchId: match.matchId,
+        botColor,
+        pendingDice: match.game.pendingDice.slice(),
+      });
+
       await new Promise(resolve => setTimeout(resolve, 5000));
 
-      // انتخاب بهترین حرکت ممکن
-      const bestMove = selectBestMove(match, legalMoves);
-      if (!bestMove) break;
+      if (
+        match.game.winner ||
+        colorOrder[match.game.currentTurn] !== botColor ||
+        !Array.isArray(match.game.pendingDice) ||
+        match.game.pendingDice.length === 0
+      ) {
+        break;
+      }
 
-      console.log(`[BOT] Executing move piece=${bestMove.pieceId} die=${bestMove.dieValue}`);
-      await executeBotMove(match, botColor, bestMove);
+      const refreshedLegalMoves = getAllLegalMoves(
+        match,
+        botColor,
+        match.game.pendingDice
+      );
+
+      const bestMove = selectBestMove(match, refreshedLegalMoves);
+
+      if (!bestMove) {
+        console.log("[BOT_NO_MOVE_AFTER_WAIT]", {
+          matchId: match.matchId,
+          botColor,
+          pendingDice: match.game.pendingDice.slice(),
+        });
+        break;
+      }
+
+      console.log(
+        `[BOT] Executing move piece=${bestMove.pieceId} die=${bestMove.dieValue}`
+      );
+
+      const moved = await executeBotMove(match, botColor, bestMove);
+
+      if (!moved) {
+        console.warn("[BOT_MOVE_NOT_EXECUTED]", {
+          matchId: match.matchId,
+          botColor,
+          pieceId: bestMove.pieceId,
+          dieValue: bestMove.dieValue,
+        });
+        break;
+      }
     }
-    
-    match._botThinking = false;
+
+    if (!match.game.winner) {
+      match.game.rolled = false;
+      match.game.pendingDice = [];
+      match.game.dice1 = 0;
+      match.game.dice2 = 0;
+      match.game.dice = 0;
+      match.game.turnMoved = true;
+      match.game.transitioning = false;
+      match.game.turnDeadlineAt = null;
+      match.turnDeadlineAt = null;
+
+      broadcastState(match);
+      nextTurn(match);
+    }
   } catch (error) {
     console.error("[BOT_ERROR] handleSmartBotTurn:", error);
+
+    if (match && match.game && !match.game.winner) {
+      match.game.rolled = false;
+      match.game.pendingDice = [];
+      match.game.dice1 = 0;
+      match.game.dice2 = 0;
+      match.game.dice = 0;
+      match.game.turnMoved = true;
+      match.game.transitioning = false;
+      match.game.turnDeadlineAt = null;
+      match.turnDeadlineAt = null;
+
+      broadcastState(match);
+      nextTurn(match);
+    }
+  } finally {
     match._botThinking = false;
   }
 }
 
+
+function getBotPlayerByColor(match, botColor) {
+  if (!match || !botColor) return null;
+
+  const playersList = Array.isArray(match.players)
+    ? match.players
+    : Object.values(match.players || {});
+
+  return playersList.find(player => {
+    if (!player) return false;
+    if (player.color === botColor) return true;
+    if (player.playerColor === botColor) return true;
+    return match.playerColors?.[botColor] != null &&
+      String(player.id) === String(match.playerColors[botColor]);
+  }) || null;
+}
+
+function getBotOpponentByColor(match, botColor) {
+  if (!match || !botColor) return null;
+
+  const playersList = Array.isArray(match.players)
+    ? match.players
+    : Object.values(match.players || {});
+
+  return playersList.find(player => {
+    if (!player) return false;
+    if (player.color === botColor) return false;
+    if (player.playerColor === botColor) return false;
+
+    return colorOrder.some(color => {
+      if (color === botColor) return false;
+      return match.playerColors?.[color] != null &&
+        String(player.id) === String(match.playerColors[color]);
+    });
+  }) || null;
+}
+
 function selectBestMove(match, legalMoves) {
   if (!legalMoves || legalMoves.length === 0) return null;
-  
-  const player = match.players[match.currentPlayer];
-  const opponent = match.players[match.currentPlayer === 0 ? 1 : 0];
+
+  const player = getBotPlayerByColor(match, colorOrder[match.game.currentTurn]);
+  const opponent = getBotOpponentByColor(
+    match,
+    colorOrder[match.game.currentTurn]
+  );
+
+  if (!player || !Array.isArray(player.pieces)) return null;
+
   const safeSquares = [1, 9, 14, 22, 27, 35, 40, 48];
 
   let bestMove = null;
   let maxScore = -Infinity;
 
   for (const move of legalMoves) {
-    let score = 0;
-    const targetPos = move.targetPosition;
     const piece = player.pieces.find(p => p.id === move.pieceId);
+    if (!piece) continue;
 
-    // ۱. خروج از خانه با تاس ۶ (بسیار حیاتی)
-    if (piece && piece.inBase && move.dieValue === 6) score += 500000;
-    
-    // ۲. زدن مهره حریف
-    const isKill = opponent && opponent.pieces.some(p => p.position === targetPos && p.position > 0 && p.position < 52);
+    let score = 0;
+    const targetPos = Number(move.targetPosition);
+
+    if (piece.inBase && Number(move.dieValue) === 6) {
+      score += 500000;
+    }
+
+    const isKill = opponent &&
+      Array.isArray(opponent.pieces) &&
+      opponent.pieces.some(p =>
+        p.position === targetPos &&
+        p.position > 0 &&
+        p.position < 52
+      );
+
     if (isKill) score += 400000;
-
-    // ۳. رسیدن به خانه امن نهایی
     if (targetPos >= 50) score += 300000;
-
-    // ۴. قرار گرفتن در خانه‌های امن
     if (safeSquares.includes(targetPos)) score += 50000;
 
-    // ۵. جریمه برای قرارگیری در تیررس حریف
-    const isVulnerable = opponent && opponent.pieces.some(p => Math.abs(targetPos - p.position) <= 6);
-    if (isVulnerable && !safeSquares.includes(targetPos)) score -= 200000;
+    const isVulnerable = opponent &&
+      Array.isArray(opponent.pieces) &&
+      opponent.pieces.some(p =>
+        Math.abs(Number(targetPos) - Number(p.position)) <= 6
+      );
+
+    if (isVulnerable && !safeSquares.includes(targetPos)) {
+      score -= 200000;
+    }
 
     if (score > maxScore) {
       maxScore = score;
       bestMove = move;
     }
   }
+
   return bestMove;
 }
 
 async function executeBotMove(match, botColor, move) {
-  const player = match.players[match.currentPlayer];
+  if (
+    !match ||
+    !match.game ||
+    match.game.winner ||
+    colorOrder[match.game.currentTurn] !== botColor
+  ) {
+    return false;
+  }
+
+  const player = getBotPlayerByColor(match, botColor);
+  if (!player || !Array.isArray(player.pieces)) {
+    console.error("[BOT_PLAYER_NOT_FOUND]", {
+      matchId: match?.matchId,
+      botColor,
+      currentTurn: match?.game?.currentTurn,
+    });
+    return false;
+  }
+
   const piece = player.pieces.find(p => p.id === move.pieceId);
-  if (!piece) return;
+  if (!piece) return false;
 
   if (piece.inBase) {
     piece.inBase = false;
@@ -3533,45 +3701,83 @@ async function executeBotMove(match, botColor, move) {
     piece.position = move.targetPosition;
   }
 
-  // بررسی زدن مهره حریف
-  const opponent = match.players[match.currentPlayer === 0 ? 1 : 0];
-  if (opponent) {
-    const kill = opponent.pieces.find(p => p.position === piece.position && p.position > 0 && p.position < 52);
+  const opponent = getBotOpponentByColor(match, botColor);
+
+  if (opponent && Array.isArray(opponent.pieces)) {
+    const kill = opponent.pieces.find(p =>
+      p.position === piece.position &&
+      p.position > 0 &&
+      p.position < 52
+    );
+
     if (kill) {
       kill.inBase = true;
       kill.position = 0;
     }
   }
 
-  // حذف تاس مصرف شده
   const indexToRemove = match.game.pendingDice.indexOf(move.dieValue);
+
   if (indexToRemove > -1) {
     match.game.pendingDice.splice(indexToRemove, 1);
+  } else {
+    console.warn("[BOT_DICE_NOT_FOUND]", {
+      matchId: match.matchId,
+      botColor,
+      dieValue: move.dieValue,
+      pendingDice: match.game.pendingDice.slice(),
+    });
+    return false;
   }
-  
+
+  match.game.dice1 = match.game.pendingDice[0]
+    ? Number(match.game.pendingDice[0])
+    : 0;
+
+  match.game.dice2 = match.game.pendingDice[1]
+    ? Number(match.game.pendingDice[1])
+    : 0;
+
+  match.game.dice = match.game.dice1 + match.game.dice2;
+  match.game.turnMoved = true;
+
   broadcastState(match);
+  return true;
 }
 
 function getAllLegalMoves(match, color, diceValues) {
-  const player = match.players[match.currentPlayer];
-  if (!player || !player.pieces) return [];
+  if (
+    !match ||
+    !match.game ||
+    colorOrder[match.game.currentTurn] !== color
+  ) {
+    return [];
+  }
+
+  const player = getBotPlayerByColor(match, color);
+
+  if (!player || !Array.isArray(player.pieces)) return [];
+
   const moves = [];
-  
-  diceValues.forEach((die) => {
+
+  diceValues.forEach(die => {
     player.pieces.forEach(piece => {
       if (canPieceMove(match.game, piece, die)) {
-        const targetPos = piece.inBase ? 1 : (piece.position + die) % 52;
+        const targetPos = piece.inBase
+          ? 1
+          : (piece.position + die) % 52;
+
         moves.push({
           pieceId: piece.id,
           dieValue: die,
-          targetPosition: targetPos
+          targetPosition: targetPos,
         });
       }
     });
   });
+
   return moves;
 }
-
 
 
 httpServer.listen(PORT, () => {
