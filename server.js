@@ -3682,23 +3682,31 @@ function selectBestMove(match, legalMoves) {
       score += 1000000;
     }
 
-    // ۲. اولویت بسیار بالا: خروج از حیاط (Yard)
+    // ۲. اولویت بسیار بالا: خروج از حیاط (آماده‌سازی ارتش)
     if (piece.state === "yard" && move.dieValue === 6) {
-      score += 500000;
+      score += 800000;
     }
 
-    // ۳. اولویت بالا: زدن مهره حریف (Kill)
+    // ۳. اولویت تهاجمی: زدن مهره حریف (Kill)
     const isKill = targetCell !== null && game.pieces.some(p =>
       opponentColors.includes(p.color) &&
       p.state === "path" &&
       layout.mainPath[p.pathIndex] === targetCell
     );
-    if (isKill) score += 450000;
+    if (isKill) score += 750000;
 
-    // ۴. اولویت متوسط: ورود به مسیر اصلی
-    if (piece.state === "start") score += 100000;
+    // ۴. استراتژی حفظ موقعیت: ماندن در نقطه شروع (S) برای کمین
+    if (piece.state === "start") {
+      score += 500000;
+    }
 
-    // ۵. مدیریت ریسک: جلوگیری از رفتن به خانه‌های خطرناک
+    // ۵. استراتژی تله‌گذاری: اولویت برای خانه‌های استراتژیک نزدیک S
+    // اگر مهره در خانه‌ای باشد که حریف را مجبور به عبور از مسیر مهره ما کند
+    if (piece.state === "path" && piece.pathIndex <= 5) {
+      score += 300000;
+    }
+
+    // ۶. مدیریت ریسک شدید: جلوگیری از آسیب‌پذیری (Vulnerable)
     const isVulnerable = targetCell !== null && game.pieces.some(p => {
       if (!opponentColors.includes(p.color) || p.state !== "path") return false;
       const targetIdx = layout.mainPath.indexOf(targetCell);
@@ -3706,12 +3714,13 @@ function selectBestMove(match, legalMoves) {
       const dist = (targetIdx - oppIdx + 36) % 36;
       return dist >= 1 && dist <= 6;
     });
-    if (isVulnerable) score -= 300000;
+    if (isVulnerable) score -= 600000;
 
-    // ۶. استراتژی پیشروی
+    // ۷. استراتژی پیشروی هوشمند (کاهش وزن پیشروی مستقیم)
     if (piece.state === "path") {
-      score += (piece.pathIndex * 100);
+      score += (piece.pathIndex * 10);
     }
+
 
     if (score > maxScore) {
       maxScore = score;

@@ -1149,7 +1149,8 @@ requestBoardDraw();
           return;
         }
 
-        // ۲. اول عملیات قطع سوکت را انجام می‌دهیم (بدون استفاده از try/catch سنگین)
+        // ۲. فعال کردن فلگ خروج عمدی و قطع سوکت
+        window.isIntentionalLeave = true;
         if (socket) {
           try {
             socket.disconnect();
@@ -1159,6 +1160,7 @@ requestBoardDraw();
             console.error("Error during socket disconnect:", e);
           }
         }
+
 
         // ۳. حالا با اطمینان کامل، کاربر را به لابی می‌فرستیم
         // استفاده از setTimeout بسیار کوچک (۵۰ میلی‌ثانیه) باعث می‌شود مرورگر فرصت رندر کردن خروج را داشته باشد
@@ -1332,13 +1334,20 @@ requestBoardDraw();
         }
         updatePingUI(999);
 
-
         moveInFlight = false;
         stopDiceAnimation();
         stopLobbyCountdown();
+
+        // اگر خروج عمدی است، هیچ مودال خطایی نمایش نده
+        if (typeof window.isIntentionalLeave !== "undefined" && window.isIntentionalLeave) {
+          console.log("[CLIENT_INFO] Manual disconnect, skipping alert.");
+          return;
+        }
+
         showNetAlert("⚠️ اتصال به سرور قطع شد (" + (reason || "نامشخص") + "). در حال اتصال مجدد...", false);
         socketStatusEl.textContent = "⚠️ قطع شد: " + (reason || "نامشخص");
       });
+
 
       socket.on("lobby:status", data => {
         if (!data) return;
