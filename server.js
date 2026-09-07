@@ -895,6 +895,7 @@ function assignColorsToLobbyPlayers(lobby) {
 }
 
 function emitLobbyStatus(lobby, data) {
+  if (!lobby || !lobby.matchId) return;
   const payload = {
     success: true,
     matchId: lobby.matchId,
@@ -909,6 +910,7 @@ function emitLobbyStatus(lobby, data) {
   };
   io.to(`match:${lobby.matchId}`).emit("lobby:status", payload);
 }
+
 
 function stopLobbyTimer(lobby) {
   lobby.timerToken++;
@@ -2665,15 +2667,10 @@ startAfterMs: 30000,
         // خروج دستی در بازیِ در حال اجرا = فورفیت فوری؛ بدون انتظار ۹۰ ثانیه.
         await handleForfeit(match, uid, "manual_leave");
 
-        // ✅ اضافه شده برای بازگرداندن به لابی
-        await emitLobbyStatus(null, {
-          message: "بازی تمام شد. به لابی برگشتی.",
-          status: "lobby",
-          phase: null,
-        });
         emitLobbyStats();
 
         await socket.leave(`match:${match.matchId}`);
+
 
         // کلاینت پس از دریافت پاسخ، سوکت را قطع می‌کند.
         // این فلگ نمی‌گذارد disconnect به‌عنوان قطع اینترنت پردازش شود.
@@ -3631,7 +3628,7 @@ function selectBestMove(match, legalMoves) {
 
     // ۲. اولویت خروج از حیاط (Yard Entry)
     if (piece.state === "yard" && move.dieValue === 6) {
-      score += 800000;
+      score += 1000000;
     }
 
     // ۳. اولویت تهاجمی: زدن مهره حریف (Kill)
@@ -3640,16 +3637,16 @@ function selectBestMove(match, legalMoves) {
       p.state === "path" &&
       layout.mainPath[p.pathIndex] === targetCell
     );
-    if (isKill) score += 750000;
+    if (isKill) score += 900000;
 
     // ۴. استراتژی حفظ موقعیت در نقطه شروع (Start Point)
     if (piece.state === "start") {
-      score += 700000;
+      score += 900000;
     }
 
     // ۵. استراتژی تله‌گذاری: اولویت برای خانه‌های استراتژیک نزدیک S
     if (piece.state === "path" && piece.pathIndex <= 5) {
-      score += 600000;
+      score += 900000;
     }
 
     // ۶. مدیریت ریسک: جلوگیری از آسیب‌پذیری (Vulnerable)
@@ -3666,8 +3663,6 @@ function selectBestMove(match, legalMoves) {
     if (piece.state === "path") {
       score += (piece.pathIndex * 10);
     }
-
-
 
     if (score > maxScore) {
       maxScore = score;
