@@ -1983,11 +1983,15 @@ async function handleLobbyTimeout(lobby) {
           lobby.botUserId = botUser.id;
           lobby.botInjected = true;
           
-          // ثبت نام کاربری در کش لابی برای دسترسی کلاینت (رفع مشکل نمایش نام)
+          // ثبت نام کاربری در هر دو کش لابی برای نمایش درست در لابی و Canvas بازی
           lobby.playerNames = lobby.playerNames || {};
           lobby.playerNames[botUser.id] = botUser.username;
 
-          console.log(`[LOBBY_BOT] Injected bot and set username for tier ${lobby.tier}`);
+          lobby.playerNamesByUserId = lobby.playerNamesByUserId || {};
+          lobby.playerNamesByUserId[String(botUser.id)] = botUser.username;
+
+          console.log(`[LOBBY_BOT] Injected bot ${botUser.username} (${botUser.id}) for tier ${lobby.tier}`);
+
         }
       }
 
