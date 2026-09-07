@@ -2406,6 +2406,13 @@ if (
         return callback?.({ success: false, message: "tier لازم است." });
       }
       assertValidTier(tier);
+
+      // ریست فلگ قطع اتصال عمدی؛ هر بار ورود به لابی، 
+      // تا قطع واقعی بعدی، نادیده گرفته نشود.		
+      if (socket.data.skipNextDisconnect === true) {
+        socket.data.skipNextDisconnect = false;
+      }
+
       // پاکسازی کامل کاربر از تمام لابی‌های قبلی؛ جلوگیری از تداخل Tierها
       for (const [oldTier, oldLobby] of tierLobbies.entries()) {
         const oldIndex = oldLobby.playerUidsInOrder.indexOf(uid);
