@@ -3637,34 +3637,43 @@ function selectBestMove(match, legalMoves) {
   if (!legalMoves || legalMoves.length === 0) return null;
   const game = match.game;
   const botColor = colorOrder[game.currentTurn];
-  const oppColor = colorOrder.find(c => c !== botColor && match.playerColors?.[c] != null);
-  const botEntryIdx = layout?.entryIndices?.[botColor] ?? (botColor === "red" ? 0 : 18);
-  const oppEntryIdx = oppColor ? (layout?.entryIndices?.[oppColor] ?? (oppColor === "red" ? 0 : 18)) : (botEntryIdx + 18) % 36;
 
-  let bestMove = null;
-  let maxScore = -Infinity;
+  // ۱. اولویت ورود به بازی (تاس ۶ و مهره در حیاط)
+  const entryMoves = legalMoves.filter(m => {
+    const p = game.pieces.find(piece => piece.id === m.pieceId);
+    return p && p.state === 'yard' && m.dieValue === 6;
+  });
+  if (entryMoves.length > 0) return entryMoves[0];
+
+  // ۲. اولویت شکار حریف (Capture)
+  const captureMoves = legalMoves.filter(m => {
+    const p = game.pieces.find(piece => piece.id === m.pieceId);
+    return p && p.state === 'path' && isCapture(match, game, botColor, p, m.dieValue);
+  });
+  if (captureMoves.length > 0) return captureMoves[0];
+
+  // ۳. اولویت ورود به خانه (Finish)
+  const finishMoves = legalMoves.filter(m => {
+    const p = game.pieces.find(piece => piece.id === m.pieceId);
+    return p && p.state === 'path' && getPieceTargetCell(match, botColor, p, m.dieValue) === null;
+  });
+  if (finishMoves.length > 0) return finishMoves[0];
+
+  // ۴. استراتژی تهاجمی (حمله و حرکت)
+  let bestMove = legalMoves[0];
+  let maxScore = -999999;
 
   for (const move of legalMoves) {
-    const piece = game.pieces.find(p => p.id === move.pieceId);
-    if (!piece) continue;
-
-    let score = 0;
-    const isYard = piece.state === "yard";
-    const isPath = piece.state === "path";
-
-    if (isYard && move.dieValue === 6) score += 900000;
+    const p = game.pieces.find(piece => piece.id === move.pieceId);
+    if (!p) continue;
     
-    if (isPath) {
-      if (isCapture(match, game, botColor, piece, move.dieValue)) score += 1200000;
-      
-      const nextIdx = (piece.pathIndex + move.dieValue) % 36;
-      if (getPieceTargetCell(match, botColor, piece, move.dieValue) === null) score += 700000;
-      
-      const distToOpp = (oppEntryIdx - nextIdx + 36) % 36;
-      if (distToOpp >= 1 && distToOpp <= 4) score += 200000;
-      
-      if (isVulnerable(match, game, botColor, piece, move.dieValue)) score -= 500000;
-      score += (piece.pathIndex * 10);
+    let score = 0;
+    // امتیاز برای پیشروی در مسیر (برای تشویق به وارد کردن همه مهره‌ها)
+    score += (p.pathIndex || 0) * 10;
+
+    // جریمه سنگین برای در معرض خطر بودن (برای جلوگیری از کشته شدن)
+    if (isVulnerable(match, game, botColor, p, move.dieValue)) {
+        score -= 50000; 
     }
 
     if (score > maxScore) {
@@ -3672,8 +3681,10 @@ function selectBestMove(match, legalMoves) {
       bestMove = move;
     }
   }
-  return bestMove || legalMoves[0];
+  
+  return bestMove;
 }
+
 
 async function executeBotMove(match, botColor, move) {
   if (!match?.game || match.game.winner || colorOrder[match.game.currentTurn] !== botColor) return false;
