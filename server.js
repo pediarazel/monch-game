@@ -620,23 +620,11 @@ function canPieceMove(game, piece, dieValue) {
   if (Date.now() > game.turnDeadlineAt) return false;
 
 if (piece.state === "yard") {
+  // برای ورود از حیاط، حتماً باید تاس 6 باشد
   if (Number(dieValue) !== 6) return false;
-
-
-  // خانه شروع مخصوص رنگ این مهره
-  const sCell = layout.startCells[piece.color]; // S_R / S_B / S_G / S_Y
-
-  // فقط یک مهره هم‌رنگ می‌تواند در همان S باشد
-  const occupiedStart = game.pieces.some(
-    (p) =>
-      p.id !== piece.id &&
-      p.color === piece.color &&
-      p.state === "start" &&
-      layout.startCells[p.color] === sCell
-  );
-
-  return !occupiedStart;
+  return true;
 }
+
 
   if (piece.state === "start") {
     const entryIndex = layout.entryPathIndexes[piece.color];
@@ -3642,6 +3630,7 @@ function selectBestMove(match, legalMoves) {
   if (!legalMoves || legalMoves.length === 0) return null;
   const game = match.game;
   const botColor = colorOrder[game.currentTurn];
+  const die = Number(game.lastDieValue) || 6; // استفاده از دایس اصلی بازی به عنوان پشتیبان
 
   let bestMove = null;
   let maxScore = -Infinity;
@@ -3653,42 +3642,27 @@ function selectBestMove(match, legalMoves) {
     let score = 0;
     const currentPathIdx = Number(p.pathIndex || 0);
 
-    // --- ۱. توسعه نیرو (Entry) ---
-    // اولویت اول: آوردن تمام مهره‌ها از حیاط به زمین
-    if (p.state === 'yard' && Number(move.dieValue) === 6) {
+    // ۱. توسعه نیرو (Entry) - بالاترین اولویت
+    if (p.state === 'yard' && die === 6) {
+      score += 20000; 
+    }
+
+    // ۲. شکار (Capture)
+    if (p.state === 'path' && typeof isCapture === 'function' && isCapture(match, game, botColor, p, die)) {
+      score += 15000;
+    }
+
+    // ۳. حرکت در نزدیکی ورودی حریف (پیشروی قبل از ورود حریف)
+    // اولویت به مهره‌هایی که بین خانه 30 تا 36 هستند (نزدیک خانه هدف/ورودی)
+    if (p.state === 'path' && currentPathIdx >= 30 && currentPathIdx < 36) {
       score += 10000;
     }
 
-    // --- ۲. شکار (Capture) ---
-    // اولویت دوم: حذف مهره حریف
-    if (p.state === 'path' && typeof isCapture === 'function' && isCapture(match, game, botColor, p, move.dieValue)) {
-      score += 8000;
-    }
-
-    // --- ۳. کمین و زنجیره (Ambush & Chain) ---
-    // اولویت سوم: قرار گرفتن در خانه‌های استراتژیک (پشت سر ورودی حریف) 
-    // و حرکت دادن مهره‌هایی که در نزدیکی ورودی حریف هستند برای ایجاد بلوک
+    // ۴. پیشروی عادی (Progression)
     if (p.state === 'path') {
-      const distanceToOpponentHome = 36 - currentPathIdx;
-      if (distanceToOpponentHome >= 0 && distanceToOpponentHome <= 6) {
-        score += 5000; // امتیاز بالا برای استقرار در منطقه کمین
-      }
-      
-      // اگر حریف در نزدیکی ماست، فرار (بسیار کم‌اولویت، فقط در صورت اجبار)
-      if (typeof isVulnerable === 'function' && isVulnerable(match, game, botColor, p, move.dieValue)) {
-        score -= 2000; // جریمه کمتر نسبت به نسخه قبل (اجازه تهاجم بیشتر)
-      } else {
-        score += 500;
-      }
+      score += (currentPathIdx * 5);
     }
 
-    // --- ۴. پیشروی (Progression) ---
-    // اولویت چهارم: حرکت به سمت خانه هدف
-    if (p.state === 'path') {
-      score += (currentPathIdx * 10);
-    }
-
-    // انتخاب بهترین حرکت
     if (score > maxScore) {
       maxScore = score;
       bestMove = move;
