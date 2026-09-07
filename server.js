@@ -3432,72 +3432,23 @@ async function handleSmartBotTurn(match, botColor) {
       Array.isArray(match.game.pendingDice) &&
       match.game.pendingDice.length > 0
     ) {
-      const legalMoves = getAllLegalMoves(
-        match,
-        botColor,
-        match.game.pendingDice
-      );
+      const legalMoves = getAllLegalMoves(match, botColor, match.game.pendingDice);
 
       if (!legalMoves || legalMoves.length === 0) {
-        console.log("[BOT_NO_LEGAL_MOVE]", {
-          matchId: match.matchId,
-          botColor,
-          pendingDice: match.game.pendingDice.slice(),
-        });
-        break;
+        break; 
       }
 
-      console.log("[BOT_WAITING_BEFORE_MOVE]", {
-        matchId: match.matchId,
-        botColor,
-        pendingDice: match.game.pendingDice.slice(),
-      });
+      const bestMove = selectBestMove(match, legalMoves);
 
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-
-      if (
-        match.game.winner ||
-        colorOrder[match.game.currentTurn] !== botColor ||
-        !Array.isArray(match.game.pendingDice) ||
-        match.game.pendingDice.length === 0
-      ) {
-        break;
-      }
-
-      const refreshedLegalMoves = getAllLegalMoves(
-        match,
-        botColor,
-        match.game.pendingDice
-      );
-
-      const bestMove = selectBestMove(match, refreshedLegalMoves);
-
-      if (!bestMove) {
-        console.log("[BOT_NO_MOVE_AFTER_WAIT]", {
-          matchId: match.matchId,
-          botColor,
-          pendingDice: match.game.pendingDice.slice(),
-        });
-        break;
-      }
-
-      console.log(
-        `[BOT] Executing move piece=${bestMove.pieceId} die=${bestMove.dieValue}`
-      );
+      if (!bestMove) break;
 
       const moved = await executeBotMove(match, botColor, bestMove);
 
-      if (!moved) {
-        console.warn("[BOT_MOVE_NOT_EXECUTED]", {
-          matchId: match.matchId,
-          botColor,
-          pieceId: bestMove.pieceId,
-          dieValue: bestMove.dieValue,
-        });
-        break;
-      }
+      if (!moved) break;
+      
+      await new Promise(resolve => setTimeout(resolve, 800));
     }
+
 
     if (!match.game.winner) {
       match.game.rolled = false;
@@ -3642,7 +3593,7 @@ function selectBestMove(match, legalMoves) {
     let score = 0;
     const currentPathIdx = Number(p.pathIndex || 0);
 
-    // ۱. توسعه نیرو (Entry): هر مهره‌ای در حیاط با تاس ۶ بالاترین اولویت مطلق را دارد
+    // ۱. توسعه نیرو (Entry): اولویت مطلق برای ورود مهره‌ها به زمین با تاس ۶
     if (p.state === 'yard' && moveDie === 6) {
       score += 50000;
     }
@@ -3652,14 +3603,14 @@ function selectBestMove(match, legalMoves) {
       score += 25000;
     }
 
-    // ۳. حرکت به سمت ورودی حریف (خانه‌های ۳۰ تا ۳۵)
+    // ۳. اولویت ۶ (جدید): حرکت دادن مهره‌ها به سمت خانه‌های ورودی حریف (ستون‌های حساس ۳۰ تا ۳۵)
     if (p.state === 'path' && currentPathIdx >= 30 && currentPathIdx < 36) {
-      score += 10000 + currentPathIdx;
+      score += 15000;
     }
 
     // ۴. پیشروی عادی در مسیر
     if (p.state === 'path' || p.state === 'start') {
-      score += (currentPathIdx * 10);
+      score += (currentPathIdx * 5);
     }
 
     // ۵. پیشروی در خانه امن (Home)
