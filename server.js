@@ -2673,11 +2673,15 @@ startAfterMs: 30000,
           matchId: match.matchId,
         });
 
+        // ارسال سیگنال به کلاینت برای بازگشت به لابی
+        socket.emit("force_redirect_to_lobby", { reason: "manual_leave" });
+
         return callback?.({
           success: true,
           type: "game_forfeit",
           message: "از بازی خارج شدی.",
         });
+
 
       } catch (error) {
         console.error("[GAME_LEAVE_ERROR]", error);
@@ -3638,28 +3642,28 @@ function selectBestMove(match, legalMoves) {
   const game = match.game;
   const botColor = colorOrder[game.currentTurn];
 
-  // ۱. اولویت ورود به بازی (تاس ۶ و مهره در حیاط)
+  // ۱. اولویت مطلق ورود به بازی: اگر تاس ۶ هست و مهره‌ای در حیاط داریم که می‌تواند وارد شود
   const entryMoves = legalMoves.filter(m => {
     const p = game.pieces.find(piece => piece.id === m.pieceId);
-    return p && p.state === 'yard' && m.dieValue === 6;
+    return p && p.state === 'yard' && Number(m.dieValue) === 6;
   });
   if (entryMoves.length > 0) return entryMoves[0];
 
-  // ۲. اولویت شکار حریف (Capture)
+  // ۲. اولویت دوم: شکار مهره حریف (Capture)
   const captureMoves = legalMoves.filter(m => {
     const p = game.pieces.find(piece => piece.id === m.pieceId);
     return p && p.state === 'path' && isCapture(match, game, botColor, p, m.dieValue);
   });
   if (captureMoves.length > 0) return captureMoves[0];
 
-  // ۳. اولویت ورود به خانه (Finish)
+  // ۳. اولویت سوم: ورود به خانه پایانی (Finish)
   const finishMoves = legalMoves.filter(m => {
     const p = game.pieces.find(piece => piece.id === m.pieceId);
     return p && p.state === 'path' && getPieceTargetCell(match, botColor, p, m.dieValue) === null;
   });
   if (finishMoves.length > 0) return finishMoves[0];
 
-  // ۴. استراتژی تهاجمی (حمله و حرکت)
+  // ۴. استراتژی تهاجمی و پیشروی
   let bestMove = legalMoves[0];
   let maxScore = -999999;
 
@@ -3668,12 +3672,10 @@ function selectBestMove(match, legalMoves) {
     if (!p) continue;
     
     let score = 0;
-    // امتیاز برای پیشروی در مسیر (برای تشویق به وارد کردن همه مهره‌ها)
-    score += (p.pathIndex || 0) * 10;
+    score += (p.pathIndex || 0) * 5;
 
-    // جریمه سنگین برای در معرض خطر بودن (برای جلوگیری از کشته شدن)
     if (isVulnerable(match, game, botColor, p, move.dieValue)) {
-        score -= 50000; 
+      score -= 100000;
     }
 
     if (score > maxScore) {
@@ -3681,9 +3683,11 @@ function selectBestMove(match, legalMoves) {
       bestMove = move;
     }
   }
-  
-  return bestMove;
+
+  return bestMove || legalMoves[0];
 }
+
+
 
 
 async function executeBotMove(match, botColor, move) {
