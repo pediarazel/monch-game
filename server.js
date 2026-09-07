@@ -3593,29 +3593,26 @@ function selectBestMove(match, legalMoves) {
     let score = 0;
     const currentPathIdx = Number(p.pathIndex || 0);
 
-    // ۱. توسعه نیرو (Entry): اولویت بسیار بالا برای ورود مهره‌های در حیاط (Yard) با تاس ۶
+    // ۱. توسعه نیرو (Entry): اولویت مطلق برای ورود مهره‌های از Yard به زمین با تاس ۶
+    // استفاده از ELSE IF تضمین می‌کند اگر این شرط برقرار بود، بقیه امتیازها محاسبه نشوند
     if (p.state === 'yard' && moveDie === 6) {
-      score += 100000; // امتیاز ورود را به ۱۰۰,۰۰۰ افزایش دادیم تا حتماً اولویت اول باشد
-    }
-
+      score = 100000; 
+    } 
     // ۲. شکار مهره حریف (Capture)
     else if (p.state === 'path' && typeof isCapture === 'function' && isCapture(match, game, botColor, p, moveDie)) {
-      score += 25000;
+      score = 25000;
     }
-
-    // ۳. حرکت به سمت خانه‌های ورودی حریف (ستون‌های ۳۰ تا ۳۵)
+    // ۳. حرکت به سمت خانه‌های ورودی حریف (ستون‌های حساس)
     else if (p.state === 'path' && currentPathIdx >= 30 && currentPathIdx < 36) {
-      score += 15000;
+      score = 15000;
     }
-
     // ۴. پیشروی عادی در مسیر
     else if (p.state === 'path' || p.state === 'start') {
-      score += (currentPathIdx * 5);
+      score = (currentPathIdx * 5);
     }
-
     // ۵. پیشروی در خانه امن (Home)
     else if (p.state === 'home') {
-      score += 5000 + (Number(p.homeIndex || 0) * 100);
+      score = 5000 + (Number(p.homeIndex || 0) * 100);
     }
 
     if (score > maxScore) {
@@ -3626,7 +3623,6 @@ function selectBestMove(match, legalMoves) {
 
   return bestMove;
 }
-
 
 async function executeBotMove(match, botColor, move) {
   if (!match?.game || match.game.winner || colorOrder[match.game.currentTurn] !== botColor) return false;
