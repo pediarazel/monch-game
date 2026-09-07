@@ -3630,7 +3630,6 @@ function selectBestMove(match, legalMoves) {
   if (!legalMoves || legalMoves.length === 0) return null;
   const game = match.game;
   const botColor = colorOrder[game.currentTurn];
-  const die = Number(game.lastDieValue) || 6; // استفاده از دایس اصلی بازی به عنوان پشتیبان
 
   let bestMove = null;
   let maxScore = -Infinity;
@@ -3639,28 +3638,33 @@ function selectBestMove(match, legalMoves) {
     const p = game.pieces.find(piece => piece.id === move.pieceId);
     if (!p) continue;
 
+    const moveDie = Number(move.dieValue);
     let score = 0;
     const currentPathIdx = Number(p.pathIndex || 0);
 
-    // ۱. توسعه نیرو (Entry) - بالاترین اولویت
-    if (p.state === 'yard' && die === 6) {
-      score += 20000; 
+    // ۱. توسعه نیرو (Entry): هر مهره‌ای در حیاط با تاس ۶ بالاترین اولویت مطلق را دارد
+    if (p.state === 'yard' && moveDie === 6) {
+      score += 50000;
     }
 
-    // ۲. شکار (Capture)
-    if (p.state === 'path' && typeof isCapture === 'function' && isCapture(match, game, botColor, p, die)) {
-      score += 15000;
+    // ۲. شکار مهره حریف (Capture)
+    if (p.state === 'path' && typeof isCapture === 'function' && isCapture(match, game, botColor, p, moveDie)) {
+      score += 25000;
     }
 
-    // ۳. حرکت در نزدیکی ورودی حریف (پیشروی قبل از ورود حریف)
-    // اولویت به مهره‌هایی که بین خانه 30 تا 36 هستند (نزدیک خانه هدف/ورودی)
+    // ۳. حرکت به سمت ورودی حریف (خانه‌های ۳۰ تا ۳۵)
     if (p.state === 'path' && currentPathIdx >= 30 && currentPathIdx < 36) {
-      score += 10000;
+      score += 10000 + currentPathIdx;
     }
 
-    // ۴. پیشروی عادی (Progression)
-    if (p.state === 'path') {
-      score += (currentPathIdx * 5);
+    // ۴. پیشروی عادی در مسیر
+    if (p.state === 'path' || p.state === 'start') {
+      score += (currentPathIdx * 10);
+    }
+
+    // ۵. پیشروی در خانه امن (Home)
+    if (p.state === 'home') {
+      score += 5000 + (Number(p.homeIndex || 0) * 100);
     }
 
     if (score > maxScore) {
