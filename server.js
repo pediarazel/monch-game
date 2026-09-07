@@ -955,7 +955,19 @@ async function ensureLobbyBotUser() {
         data: { coins: LOBBY_BOT_INITIAL_COINS }
       });
     }
-    return existingBot;
+    // ✅ هر بار که ربات پیدا شد، نام جدید رندوم بزنه (حتی اگر قبلاً وجود داشته باشه)
+    // این باعث می‌شه هر ورود ربات جدید نام متفاوتی داشته باشه
+    const newBot = await prisma.user.create({
+      data: {
+        username: getRandomBotName(), 
+        password: await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 12),
+        role: "LOBBY_BOT",
+        coins: LOBBY_BOT_INITIAL_COINS
+      }
+    });
+
+    console.log(`[LOBBY_BOT] Created lobby bot with random name: ${newBot.username}`);
+    return newBot;
   }
 
   // اگر ربات نبود، با یک نام رندوم و نقش LOBBY_BOT بساز
@@ -971,6 +983,7 @@ async function ensureLobbyBotUser() {
   console.log(`[LOBBY_BOT] Created lobby bot with random name: ${newBot.username}`);
   return newBot;
 }
+
 
 
 async function chargeTierFromPlayers(match) {
@@ -2651,9 +2664,14 @@ startAfterMs: 30000,
 
         // خروج دستی در بازیِ در حال اجرا = فورفیت فوری؛ بدون انتظار ۹۰ ثانیه.
         await handleForfeit(match, uid, "manual_leave");
-        emitLobbyStats(); // اضافه شد
 
-
+        // ✅ اضافه شده برای بازگرداندن به لابی
+        await emitLobbyStatus(null, {
+          message: "بازی تمام شد. به لابی برگشتی.",
+          status: "lobby",
+          phase: null,
+        });
+        emitLobbyStats();
 
         await socket.leave(`match:${match.matchId}`);
 
@@ -2671,6 +2689,7 @@ startAfterMs: 30000,
           type: "game_forfeit",
           message: "از بازی خارج شدی.",
         });
+
       } catch (error) {
         console.error("[GAME_LEAVE_ERROR]", error);
 
@@ -3605,12 +3624,12 @@ function selectBestMove(match, legalMoves) {
     const targetCell = getPieceTargetCell(match, botColor, piece, move.dieValue);
     let score = 0;
 
-    // ۱. اولویت مطلق: رسیدن به مقصد (Home)
+    // ۱. اولویت رسیدن به مقصد (Home)
     if (piece.state === "path" && targetCell === null) {
-      score += 1000000;
+      score += 550000;
     }
 
-    // ۲. اولویت بسیار بالا: خروج از حیاط (آماده‌سازی ارتش)
+    // ۲. اولویت خروج از حیاط (Yard Entry)
     if (piece.state === "yard" && move.dieValue === 6) {
       score += 800000;
     }
@@ -3623,18 +3642,17 @@ function selectBestMove(match, legalMoves) {
     );
     if (isKill) score += 750000;
 
-    // ۴. استراتژی حفظ موقعیت: ماندن در نقطه شروع (S) برای کمین
+    // ۴. استراتژی حفظ موقعیت در نقطه شروع (Start Point)
     if (piece.state === "start") {
-      score += 500000;
+      score += 700000;
     }
 
     // ۵. استراتژی تله‌گذاری: اولویت برای خانه‌های استراتژیک نزدیک S
-    // اگر مهره در خانه‌ای باشد که حریف را مجبور به عبور از مسیر مهره ما کند
     if (piece.state === "path" && piece.pathIndex <= 5) {
-      score += 300000;
+      score += 600000;
     }
 
-    // ۶. مدیریت ریسک شدید: جلوگیری از آسیب‌پذیری (Vulnerable)
+    // ۶. مدیریت ریسک: جلوگیری از آسیب‌پذیری (Vulnerable)
     const isVulnerable = targetCell !== null && game.pieces.some(p => {
       if (!opponentColors.includes(p.color) || p.state !== "path") return false;
       const targetIdx = layout.mainPath.indexOf(targetCell);
@@ -3644,10 +3662,11 @@ function selectBestMove(match, legalMoves) {
     });
     if (isVulnerable) score -= 600000;
 
-    // ۷. استراتژی پیشروی هوشمند (کاهش وزن پیشروی مستقیم)
+    // ۷. استراتژی پیشروی هوشمند
     if (piece.state === "path") {
       score += (piece.pathIndex * 10);
     }
+
 
 
     if (score > maxScore) {
