@@ -2649,14 +2649,12 @@ startAfterMs: 30000,
         if (match.game?.winner) {
           await socket.leave(`match:${match.matchId}`);
 
-          // قطع اتصال بعدیِ ناشی از خروج عمدی، قطع اینترنت حساب نشود.
-          socket.data.skipNextDisconnect = true;
-
           console.log("[PLAYER_LEAVE_FINISHED_GAME]", {
             userId: uid,
             matchId: match.matchId,
             winnerColor: match.game.winner,
           });
+
 
           return callback?.({
             success: true,
