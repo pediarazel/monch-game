@@ -3609,12 +3609,47 @@ function getPieceTargetCell(match, color, piece, dieValue) {
   }
 }
 
+function isCapture(match, game, botColor, piece, dieValue) {
+  try {
+    const targetCell = getPieceTargetCell(match, botColor, piece, dieValue);
+    if (!targetCell) return false;
+    return game.pieces.some(p => {
+      if (p.color === botColor || p.state !== "path") return false;
+      const oppCell = layout.mainPath[p.pathIndex];
+      return oppCell && oppCell.x === targetCell.x && oppCell.y === targetCell.y;
+    });
+  } catch (e) {
+    return false;
+  }
+}
+
+function isVulnerable(match, game, botColor, piece, dieValue) {
+  try {
+    const targetCell = getPieceTargetCell(match, botColor, piece, dieValue);
+    if (!targetCell) return false;
+    // بررسی اینکه آیا مهره حریف در فاصله ۱ تا ۶ خانه پشت این خانه قرار دارد یا نه
+    return game.pieces.some(p => {
+      if (p.color === botColor || p.state !== "path") return false;
+      const oppCell = layout.mainPath[p.pathIndex];
+      if (!oppCell) return false;
+      for (let step = 1; step <= 6; step++) {
+        const checkCell = layout.mainPath[(p.pathIndex + step) % 36];
+        if (checkCell && checkCell.x === targetCell.x && checkCell.y === targetCell.y) {
+          return true;
+        }
+      }
+      return false;
+    });
+  } catch (e) {
+    return false;
+  }
+}
+
 function selectBestMove(match, legalMoves) {
   if (!legalMoves || legalMoves.length === 0) return null;
 
   const game = match.game;
   const botColor = colorOrder[game.currentTurn];
-  const opponentColors = colorOrder.filter(c => c !== botColor && match.playerColors?.[c] != null);
 
   let bestMove = null;
   let maxScore = -Infinity;
@@ -3626,47 +3661,34 @@ function selectBestMove(match, legalMoves) {
     const targetCell = getPieceTargetCell(match, botColor, piece, move.dieValue);
     let score = 0;
 
-    // ۱. اولویت رسیدن به مقصد (Home)
+    // ۱. اولویت رسیدن به خانه (Home)
     if (piece.state === "path" && targetCell === null) {
-      score += 550000;
+      score += 500000;
     }
 
-    // ۲. اولویت خروج از حیاط (Yard Entry)
+    // ۲. اولویت شکار (Capture)
+    if (isCapture(match, game, botColor, piece, move.dieValue)) {
+      score += 150000;
+    }
+
+    // ۳. اولویت ورود مهره جدید (تاس ۶ و مهره در Yard)
     if (piece.state === "yard" && move.dieValue === 6) {
-      score += 1000000;
+      score += 100000;
     }
 
-    // ۳. اولویت تهاجمی: زدن مهره حریف (Kill)
-    const isKill = targetCell !== null && game.pieces.some(p =>
-      opponentColors.includes(p.color) &&
-      p.state === "path" &&
-      layout.mainPath[p.pathIndex] === targetCell
-    );
-    if (isKill) score += 900000;
-
-    // ۴. استراتژی حفظ موقعیت در نقطه شروع (Start Point)
-    if (piece.state === "start") {
-      score += 900000;
+    // ۴. اولویت فرار و امنیت (Safety) - جریمه اگر در معرض ضربه حریف قرار بگیرد
+    if (isVulnerable(match, game, botColor, piece, move.dieValue)) {
+      score -= 250000;
     }
 
-    // ۵. استراتژی تله‌گذاری: اولویت برای خانه‌های استراتژیک نزدیک S
-    if (piece.state === "path" && piece.pathIndex <= 5) {
-      score += 900000;
-    }
-
-    // ۶. مدیریت ریسک: جلوگیری از آسیب‌پذیری (Vulnerable)
-    const isVulnerable = targetCell !== null && game.pieces.some(p => {
-      if (!opponentColors.includes(p.color) || p.state !== "path") return false;
-      const targetIdx = layout.mainPath.indexOf(targetCell);
-      const oppIdx = p.pathIndex;
-      const dist = (targetIdx - oppIdx + 36) % 36;
-      return dist >= 1 && dist <= 6;
-    });
-    if (isVulnerable) score -= 600000;
-
-    // ۷. استراتژی پیشروی هوشمند
+    // ۵. مدیریت استراتژیک مسیر
     if (piece.state === "path") {
-      score += (piece.pathIndex * 10);
+      score += (piece.pathIndex * 5);
+    }
+
+    // ۶. اولویت استفاده از تاس‌های کوچک برای موقعیت‌گیری
+    if (move.dieValue < 6 && piece.state === "path") {
+      score += 500;
     }
 
     if (score > maxScore) {
@@ -3677,6 +3699,7 @@ function selectBestMove(match, legalMoves) {
 
   return bestMove || legalMoves[0];
 }
+
 
 
 async function executeBotMove(match, botColor, move) {
