@@ -3650,6 +3650,11 @@ function selectBestMove(match, legalMoves) {
 
   const game = match.game;
   const botColor = colorOrder[game.currentTurn];
+  const oppColor = colorOrder.find(c => c !== botColor && match.playerColors?.[c] != null);
+
+  // شاخص خانه شروع (S) برای ربات و حریف در مسیر ۳۶ تایی
+  const botEntryIdx = layout?.entryIndices?.[botColor] ?? (botColor === "red" ? 0 : 18);
+  const oppEntryIdx = oppColor ? (layout?.entryIndices?.[oppColor] ?? (oppColor === "red" ? 0 : 18)) : (botEntryIdx + 18) % 36;
 
   let bestMove = null;
   let maxScore = -Infinity;
@@ -3661,34 +3666,62 @@ function selectBestMove(match, legalMoves) {
     const targetCell = getPieceTargetCell(match, botColor, piece, move.dieValue);
     let score = 0;
 
-    // ۱. اولویت رسیدن به خانه (Home)
-    if (piece.state === "path" && targetCell === null) {
-      score += 500000;
+    const isEnteringFromYard = piece.state === "yard" && move.dieValue === 6;
+    const isBotPieceOnStart = game.pieces.some(p => p.color === botColor && p.state === "path" && p.pathIndex === botEntryIdx);
+
+    // ۱. اولویت خروج همه ۴ مهره از Yard با تاس ۶
+    if (isEnteringFromYard) {
+      score += 800000; // بالاترین تمایل برای وارد کردن مهره‌ها
+      // اگر روی خانه S خودی مهره داریم، اولویت بده که اول آن را تکان بدهد بعد مهره جدید بیاورد
+      if (isBotPieceOnStart) score -= 50000;
     }
 
-    // ۲. اولویت شکار (Capture)
+    // ۲. اولویت زدن حریف (Capture)
     if (isCapture(match, game, botColor, piece, move.dieValue)) {
-      score += 150000;
+      score += 1000000; // اولویت مرگبار برای شکار
+      
+      // امتیاز ویژه: اگر حریف بعد از S خودش یا قبل از S ما باشد (منطقه طلایی شکار)
+      if (piece.state === "path") {
+        const destIdx = (piece.pathIndex + move.dieValue) % 36;
+        const distFromOppEntry = (destIdx - oppEntryIdx + 36) % 36;
+        if (distFromOppEntry >= 1 && distFromOppEntry <= 12) {
+          score += 250000; // شکار حریف بعد از خروج از پایگاهش
+        }
+      }
     }
 
-    // ۳. اولویت ورود مهره جدید (تاس ۶ و مهره در Yard)
-    if (piece.state === "yard" && move.dieValue === 6) {
-      score += 100000;
-    }
-
-    // ۴. اولویت فرار و امنیت (Safety) - جریمه اگر در معرض ضربه حریف قرار بگیرد
-    if (isVulnerable(match, game, botColor, piece, move.dieValue)) {
-      score -= 250000;
-    }
-
-    // ۵. مدیریت استراتژیک مسیر
+    // ۳. استراتژی کمین پشت خانه S حریف (تله‌گذاری)
     if (piece.state === "path") {
-      score += (piece.pathIndex * 5);
+      const destIdx = (piece.pathIndex + move.dieValue) % 36;
+      const stepsToOppEntry = (oppEntryIdx - destIdx + 36) % 36;
+
+      // اگر در فاصله ۱ تا ۴ خانه پشت خانه S حریف مستقر شود
+      if (stepsToOppEntry >= 1 && stepsToOppEntry <= 4) {
+        score += 180000; // امتیاز بالا برای جمع شدن پشت S حریف و کمین کردن
+      }
     }
 
-    // ۶. اولویت استفاده از تاس‌های کوچک برای موقعیت‌گیری
-    if (move.dieValue < 6 && piece.state === "path") {
-      score += 500;
+    // ۴. نگه‌داشتن یک مهره روی خانه S خودی (سنگر دفاعی)
+    if (piece.state === "path" && piece.pathIndex === botEntryIdx) {
+      // اگر مهره روی S خودمان است و تاس ۶ نیامده، ترجیح بدهد بماند مگر اینکه حرکت اجباری باشد
+      if (move.dieValue !== 6 && !isCapture(match, game, botColor, piece, move.dieValue)) {
+        score -= 70000; // ترغیب به تکان ندادن نگهبان S
+      }
+    }
+
+    // ۵. رسیدن به خانه نهایی (Home)
+    if (piece.state === "path" && targetCell === null) {
+      score += 600000;
+    }
+
+    // ۶. ایمنی و فرار از تیررس حریف
+    if (isVulnerable(match, game, botColor, piece, move.dieValue)) {
+      score -= 400000; // جریمه سنگین برای رفتن زیر دست حریف
+    }
+
+    // ۷. پیشروی عادی مهره‌ها
+    if (piece.state === "path") {
+      score += (piece.pathIndex * 15);
     }
 
     if (score > maxScore) {
@@ -3699,7 +3732,6 @@ function selectBestMove(match, legalMoves) {
 
   return bestMove || legalMoves[0];
 }
-
 
 
 async function executeBotMove(match, botColor, move) {
