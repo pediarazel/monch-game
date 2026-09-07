@@ -3627,7 +3627,6 @@ function selectBestMove(match, legalMoves) {
   return bestMove;
 }
 
-
 async function executeBotMove(match, botColor, move) {
   if (!match?.game || match.game.winner || colorOrder[match.game.currentTurn] !== botColor) return false;
   const game = match.game;
