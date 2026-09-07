@@ -957,35 +957,22 @@ async function ensureLobbyBotUser() {
         data: { coins: LOBBY_BOT_INITIAL_COINS }
       });
     }
-    // ✅ هر بار که ربات پیدا شد، نام جدید رندوم بزنه (حتی اگر قبلاً وجود داشته باشه)
-    // این باعث می‌شه هر ورود ربات جدید نام متفاوتی داشته باشه
-    const newBot = await prisma.user.create({
-      data: {
-        username: getRandomBotName(), 
-        password: await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 12),
-        role: "LOBBY_BOT",
-        coins: LOBBY_BOT_INITIAL_COINS
-      }
-    });
-
-    console.log(`[LOBBY_BOT] Created lobby bot with random name: ${newBot.username}`);
-    return newBot;
+    return existingBot;
   }
 
-  // اگر ربات نبود، با یک نام رندوم و نقش LOBBY_BOT بساز
+  // اگر ربات نبود، با نام رندوم و نقش LOBBY_BOT بساز
   const newBot = await prisma.user.create({
     data: {
-      username: getRandomBotName(), 
+      username: `Bot_${Math.floor(Math.random() * 10000)}`,
       password: await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 12),
       role: "LOBBY_BOT",
       coins: LOBBY_BOT_INITIAL_COINS
     }
   });
 
-  console.log(`[LOBBY_BOT] Created lobby bot with random name: ${newBot.username}`);
+  console.log(`[LOBBY_BOT] Created new lobby bot: ${newBot.username}`);
   return newBot;
 }
-
 
 
 async function chargeTierFromPlayers(match) {
