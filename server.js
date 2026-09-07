@@ -3642,23 +3642,8 @@ function selectBestMove(match, legalMoves) {
   const game = match.game;
   const botColor = colorOrder[game.currentTurn];
 
-  // ۱. اولویت مطلق: ورود مهره از حیاط فقط با ۶
-  const entryMoves = legalMoves.filter(m => {
-    const p = game.pieces.find(piece => piece.id === m.pieceId);
-    return p && p.state === 'yard' && Number(m.dieValue) === 6;
-  });
-  if (entryMoves.length > 0) return entryMoves[0];
-
-  // ۲. شکار مهره حریف (تهاجم)
-  const captureMoves = legalMoves.filter(m => {
-    const p = game.pieces.find(piece => piece.id === m.pieceId);
-    return p && p.state === 'path' && typeof isCapture === 'function' && isCapture(match, game, botColor, p, m.dieValue);
-  });
-  if (captureMoves.length > 0) return captureMoves[0];
-
-  // ۳. پیشروی تهاجمی، فرار از خطر در صورت نزدیکی حریف، و حرکت زنجیره‌ای مهره‌ها
-  let bestMove = legalMoves[0];
-  let maxScore = -9999999;
+  let bestMove = null;
+  let maxScore = -Infinity;
 
   for (const move of legalMoves) {
     const p = game.pieces.find(piece => piece.id === move.pieceId);
@@ -3667,40 +3652,49 @@ function selectBestMove(match, legalMoves) {
     let score = 0;
     const currentPathIdx = Number(p.pathIndex || 0);
 
-    // بررسی آیا مهره در موقعیت فعلی در معرض خطر شکار است
-    const currentlyInDanger = typeof isVulnerable === 'function' && isVulnerable(match, game, botColor, p, 0);
-    // بررسی آیا با این حرکت به خانه ناامن می‌رود
-    const willBeInDanger = typeof isVulnerable === 'function' && isVulnerable(match, game, botColor, p, move.dieValue);
-
-    // الف) اگر حریف نزدیک و در کمین است، اولویت بالا برای فرار و دور کردن مهره
-    if (currentlyInDanger && !willBeInDanger) {
-      score += 5000;
-    } else if (currentlyInDanger && willBeInDanger) {
-      score += 1000; // حتی اگر باز هم ناامن باشد، تغییر موقعیت بهتر از ماندن ثابت است
+    // --- ۱. توسعه نیرو (Entry) ---
+    // اولویت اول: آوردن تمام مهره‌ها از حیاط به زمین
+    if (p.state === 'yard' && Number(move.dieValue) === 6) {
+      score += 10000;
     }
 
-    // ب) جریمه سنگین برای فرستادن مهره به خانه خطرناک
-    if (willBeInDanger) {
-      score -= 3000;
-    } else {
-      score += 200; // پاداش حرکت امن
+    // --- ۲. شکار (Capture) ---
+    // اولویت دوم: حذف مهره حریف
+    if (p.state === 'path' && typeof isCapture === 'function' && isCapture(match, game, botColor, p, move.dieValue)) {
+      score += 8000;
     }
 
-    // ج) حرکت پشت‌سرهم: ترجیح دادن حرکت دادن مهره‌های عقب‌تر برای رساندن آن‌ها به گروه
-    score += (56 - currentPathIdx) * 15;
-
-    // د) ورود به مسیر خانه اصلی (Home Path)
-    if (currentPathIdx + Number(move.dieValue) >= 51) {
-      score += 800;
+    // --- ۳. کمین و زنجیره (Ambush & Chain) ---
+    // اولویت سوم: قرار گرفتن در خانه‌های استراتژیک (پشت سر ورودی حریف) 
+    // و حرکت دادن مهره‌هایی که در نزدیکی ورودی حریف هستند برای ایجاد بلوک
+    if (p.state === 'path') {
+      const distanceToOpponentHome = 36 - currentPathIdx;
+      if (distanceToOpponentHome >= 0 && distanceToOpponentHome <= 6) {
+        score += 5000; // امتیاز بالا برای استقرار در منطقه کمین
+      }
+      
+      // اگر حریف در نزدیکی ماست، فرار (بسیار کم‌اولویت، فقط در صورت اجبار)
+      if (typeof isVulnerable === 'function' && isVulnerable(match, game, botColor, p, move.dieValue)) {
+        score -= 2000; // جریمه کمتر نسبت به نسخه قبل (اجازه تهاجم بیشتر)
+      } else {
+        score += 500;
+      }
     }
 
+    // --- ۴. پیشروی (Progression) ---
+    // اولویت چهارم: حرکت به سمت خانه هدف
+    if (p.state === 'path') {
+      score += (currentPathIdx * 10);
+    }
+
+    // انتخاب بهترین حرکت
     if (score > maxScore) {
       maxScore = score;
       bestMove = move;
     }
   }
 
-  return bestMove || legalMoves[0];
+  return bestMove;
 }
 
 
