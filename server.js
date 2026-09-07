@@ -620,7 +620,8 @@ function canPieceMove(game, piece, dieValue) {
   if (Date.now() > game.turnDeadlineAt) return false;
 
 if (piece.state === "yard") {
-  if (dieValue !== 6) return false;
+  if (Number(dieValue) !== 6) return false;
+
 
   // خانه شروع مخصوص رنگ این مهره
   const sCell = layout.startCells[piece.color]; // S_R / S_B / S_G / S_Y
