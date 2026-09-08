@@ -1434,6 +1434,7 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
       let selectedDieIndex = -1;
       let selectedDieValue = 0;
       let selectedPiece = null;
+      let bestPriority = -1;
 
       for (
         let dieIndex = 0;
@@ -1442,17 +1443,59 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
       ) {
         const dieValue = Number(match.game.pendingDice[dieIndex]);
 
-        const legalPiece = match.game.pieces.find(
-          (piece) =>
-            piece.color === currentColor &&
-            canPieceMove(match.game, piece, dieValue)
-        );
+        let chosenForThisDie = null;
+        let chosenPriorityForThisDie = -1;
 
-        if (legalPiece) {
+        for (const piece of match.game.pieces) {
+          if (piece.color !== currentColor) continue;
+          if (!canPieceMove(match.game, piece, dieValue)) continue;
+
+          let priority = 0;
+
+          // اولویت مطلق برای ورود مهره از yard با تاس 6
+          if (piece.state === "yard" && dieValue === 6) {
+            priority = 1000;
+          }
+          // بعد از آن، مهره‌ای که می‌تواند capture کند
+          else if (
+            typeof capture === "function" &&
+            piece.state === "path" &&
+            capture(match.game, piece, dieValue)
+          ) {
+            priority = 700;
+          }
+          // بعد مهره‌های نزدیک خانه
+          else if (
+            piece.state === "path" &&
+            typeof piece.pathIndex === "number" &&
+            piece.pathIndex >= 30 &&
+            piece.pathIndex < 36
+          ) {
+            priority = 500;
+          }
+          // بعد حرکت عادی
+          else if (piece.state === "path" || piece.state === "start") {
+            priority = 100;
+          }
+          // خانه
+          else if (piece.state === "home") {
+            priority = 50;
+          }
+
+          if (priority > chosenPriorityForThisDie) {
+            chosenPriorityForThisDie = priority;
+            chosenForThisDie = piece;
+          }
+        }
+
+        if (
+          chosenForThisDie &&
+          chosenPriorityForThisDie > bestPriority
+        ) {
+          bestPriority = chosenPriorityForThisDie;
           selectedDieIndex = dieIndex;
           selectedDieValue = dieValue;
-          selectedPiece = legalPiece;
-          break;
+          selectedPiece = chosenForThisDie;
         }
       }
 
@@ -1473,7 +1516,6 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
         return;
       }
 
-      // تأخیر قبل از انجام حرکت (شبیه‌سازی فکر کردن به حرکت)
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       if (!match.game || match.game.winner || match.turnId !== expectedTurnId) break;
@@ -1518,6 +1560,7 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
 
         if (match.pendingTurnTimer) {
           clearTimeout(match.pendingTurnTimer);
+
           match.pendingTurnTimer = null;
         }
 
