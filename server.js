@@ -2077,40 +2077,18 @@ function getLobbyPhaseFromCount(count) {
 
 async function onLobbyPlayerJoined(tier) {
   const lobby = tierLobbies.get(Number(tier));
-  if (!lobby || lobby.status !== "lobby") {
-    return;
-  }
+  if (!lobby || lobby.status !== "lobby") return;
 
   const playerCount = lobby.playerUidsInOrder.length;
+  const isBotTier = LOBBY_BOT_TIERS.has(Number(tier));
 
   if (playerCount === 1) {
-    if (LOBBY_BOT_TIERS.has(Number(tier))) {
+    if (isBotTier) {
+      // تنظیم تایمر و فراخوانی فوری برای تزریق ربات
       setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
-    emitLobbyStatus(lobby, {
-      phase: 2,
-      searchingFor: 3,
-      deadlineAt: lobby.lobbyDeadlineAt,
-      message: "در حال جستجوی نفر ۳... 🔍",
-      status: "SEARCHING_3",
-    });
-
-
-
-    // 2. ارسال وضعیت ماسک‌شده به لیست عمومی لابی (نشان دادن 1/4)
-    // این پیام به تمام کسانی که در منوی اصلی هستند می‌رسد
-    io.emit("lobby:list_update", {
-        lobbyId: lobby.id,
-        currentCount: 1, // برای بقیه همیشه 1 نمایش داده می‌شود
-        maxPlayers: 4
-    });
-
-
+      handleLobbyTimeout(lobby).catch(console.error);
     } else {
-      lobby.lobbyDeadlineAt = null;
-      if (lobby.lobbyTimer) {
-        clearTimeout(lobby.lobbyTimer);
-        lobby.lobbyTimer = null;
-      }
+      stopLobbyTimer(lobby);
       emitLobbyStatus(lobby, {
         phase: 1,
         searchingFor: 2,
@@ -2121,6 +2099,7 @@ async function onLobbyPlayerJoined(tier) {
     }
     return;
   }
+
 
   if (playerCount === 2) {
     let remainingSeconds = 30; // پیش‌فرض ۳۰ ثانیه
@@ -2649,16 +2628,21 @@ startAfterMs: 30000,
 
           if (remainingCount < 2) {
             lobby.lobbyPhase = 1;
-
-            emitLobbyStatus(lobby, {
-              phase: 1,
-              searchingFor: 3,
-              deadlineAt: null,
-              deadlineMs: null,
-              message: "یک بازیکن از صف خارج شد. منتظر نفر دوم...",
-              status: "WAIT_2",
-            });
+            if (LOBBY_BOT_TIERS.has(Number(tier))) {
+                setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
+                handleLobbyTimeout(lobby).catch(console.error);
+            } else {
+                emitLobbyStatus(lobby, {
+                    phase: 1,
+                    searchingFor: 3,
+                    deadlineAt: null,
+                    deadlineMs: null,
+                    message: "یک بازیکن از صف خارج شد. منتظر نفر دوم...",
+                    status: "WAIT_2",
+                });
+            }
           } else {
+
             await onLobbyPlayerJoined(tier);
           }
 
@@ -2814,29 +2798,11 @@ startAfterMs: 30000,
             stopLobbyTimer(lobby);
 
             if (lobby.playerUidsInOrder.length < 2) {
-              // اگر تعداد بازیکن کمتر از ۲ شد، وضعیت را به حالت انتظار قرار می‌دهیم
               lobby.lobbyPhase = 1;
-              
-              // چک کردن اینکه آیا این لابی اجازه ورود ربات دارد یا خیر
-              // تبدیل tier به عدد برای مقایسه (مثلاً "20,000" -> 20000)
-              const tierValue = parseInt(tier.replace(/,/g, ''));
-              const botAllowed = [20000, 50000].includes(tierValue);
-
-              if (botAllowed) {
-                // اگر لابی اجازه ربات داشت، دوباره فرآیند ورود ربات را استارت می‌زنیم
-                // با فراخوانی onLobbyPlayerJoined، سیستم دوباره بررسی می‌کند که آیا نیاز به ربات هست یا خیر
-                onLobbyPlayerJoined(tier).catch(() => {});
-                
-                emitLobbyStatus(lobby, {
-                  phase: 1,
-                  searchingFor: 3,
-                  deadlineAt: null,
-                  deadlineMs: null,
-                  message: "در حال جستجوی رقیب...",
-                  status: "WAIT_2",
-                });
+              if (LOBBY_BOT_TIERS.has(Number(tier))) {
+                setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
+                handleLobbyTimeout(lobby).catch(console.error);
               } else {
-                // اگر لابی اجازه ربات نداشت، فقط پیام انتظار معمولی را می‌فرستیم
                 emitLobbyStatus(lobby, {
                   phase: 1,
                   searchingFor: 3,
@@ -2846,11 +2812,9 @@ startAfterMs: 30000,
                   status: "WAIT_2",
                 });
               }
-            } else if (lobby.playerUidsInOrder.length === 2 || lobby.playerUidsInOrder.length === 3) {
-              // اگر تعداد بازیکن‌ها به ۲ یا ۳ نفر رسید (یعنی نفر جدید وارد شد)
-              onLobbyPlayerJoined(tier).catch(() => {});
+            } else {
+                onLobbyPlayerJoined(tier).catch(console.error);
             }
-
 
           }
         }
