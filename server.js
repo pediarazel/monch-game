@@ -3658,29 +3658,35 @@ function selectBestMove(match, legalMoves) {
     const moveDie = Number(move.dieValue);
     let score = 0;
     const currentPathIdx = Number(p.pathIndex || 0);
+    const playerColor = botColor; // For easier access in helper functions
+    const opponentColor = Object.keys(game.players).find(c => c !== playerColor);
 
-    // ۱. توسعه نیرو (Entry): اولویت مطلق برای ورود مهره‌های از Yard به زمین با تاس ۶
-    // استفاده از ELSE IF تضمین می‌کند اگر این شرط برقرار بود، بقیه امتیازها محاسبه نشوند
-    if (p.state === 'yard' && moveDie === 6) {
-      score = 100000; 
-    } 
-    // ۲. شکار مهره حریف (Capture)
-    else if (p.state === 'path' && typeof isCapture === 'function' && isCapture(match, game, botColor, p, moveDie)) {
-      score = 25000;
-    }
-    // ۳. حرکت به سمت خانه‌های ورودی حریف (ستون‌های حساس)
-    else if (p.state === 'path' && currentPathIdx >= 30 && currentPathIdx < 36) {
-      score = 15000;
-    }
-    // ۴. پیشروی عادی در مسیر
-    else if (p.state === 'path' || p.state === 'start') {
-      score = (currentPathIdx * 5);
-    }
-    // ۵. پیشروی در خانه امن (Home)
-    else if (p.state === 'home') {
-      score = 5000 + (Number(p.homeIndex || 0) * 100);
+    // Define potential states and conditions based on the move
+    const isExitingYard = (p.state === "yard" && moveDie === 6);
+    const potentialTargetPathIdx = (p.state === "path" || p.state === "start") ? (currentPathIdx + moveDie) : -1;
+    const isEnteringHome = (p.state === "path" && potentialTargetPathIdx >= p.path.length);
+    const isAmbushZone = (potentialTargetPathIdx >= 16 && potentialTargetPathIdx <= 18);
+    const isNearHome = (p.state === "path" && potentialTargetPathIdx >= p.path.length - 3);
+    const canCapture = typeof isCapture === 'function' && isCapture(match, game, playerColor, p, moveDie);
+    const isNowVulnerable = typeof isVulnerable === 'function' && isVulnerable(match, game, playerColor, p, moveDie);
+
+    // Apply scores based on your prioritized list
+    if (canCapture) {
+      score = 1000000; // Priority 1: Capture
+    } else if (isExitingYard) {
+      score = 500000; // Priority 2: Enter Game
+    } else if (isAmbushZone) {
+      score = 100000; // Priority 3: Ambush Zone (16, 17, 18)
+    } else if (isNowVulnerable && (isNearHome || isAmbushZone)) {
+      score = 50000; // Priority 4: Escape Danger (near Home or Ambush Zone)
+    } else if (isEnteringHome) {
+      score = 10000; // Priority 5: Enter Home
+    } else {
+      // Priority 6: Normal Advancement, with a slight bonus for being further
+      score = (currentPathIdx * 100) + (moveDie / 2); // Slight bonus for moving further
     }
 
+    // Update best move if current move has a higher score
     if (score > maxScore) {
       maxScore = score;
       bestMove = move;
@@ -3689,6 +3695,7 @@ function selectBestMove(match, legalMoves) {
 
   return bestMove;
 }
+
 
 
 async function executeBotMove(match, botColor, move) {
