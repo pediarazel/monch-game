@@ -2090,8 +2090,8 @@ async function onLobbyPlayerJoined(tier) {
         phase: 1,
         searchingFor: 2,
         deadlineAt: lobby.lobbyDeadlineAt,
-        message: "منتظر نفر دوم (یا حریف آزمایشی)...",
-        status: "SEARCHING_2",
+      message: "منتظر نفر سوم...",
+      status: "SEARCHING_3",
       });
     } else {
       lobby.lobbyDeadlineAt = null;
@@ -2111,16 +2111,30 @@ async function onLobbyPlayerJoined(tier) {
   }
 
   if (playerCount === 2) {
-    setLobbyDeadline(lobby, 30);
+    let remainingSeconds = 30; // پیش‌فرض ۳۰ ثانیه
+    if (lobby.lobbyDeadlineAt) {
+      const now = Date.now();
+      const timeDiff = lobby.lobbyDeadlineAt - now;
+      if (timeDiff > 0) {
+        remainingSeconds = Math.ceil(timeDiff / 1000); // محاسبه ثانیه باقی‌مانده
+      }
+    }
+
+    // اگر زمان باقی‌مانده خیلی کم بود یا تایمر قبلی نبود، از ۳۰ ثانیه استفاده کن
+    // اما اگر زمان باقی مانده بود، از همان استفاده کن
+    const secondsToSet = remainingSeconds > 0 ? remainingSeconds : 30;
+    
+    setLobbyDeadline(lobby, secondsToSet);
     emitLobbyStatus(lobby, {
       phase: 2,
       searchingFor: 3,
-      deadlineAt: lobby.lobbyDeadlineAt,
+      deadlineAt: lobby.lobbyDeadlineAt, // این باید بعد از setLobbyDeadline آپدیت شده باشد
       message: "منتظر نفر سوم...",
       status: "SEARCHING_3",
     });
     return;
   }
+
 
   if (playerCount === 3) {
     setLobbyDeadline(lobby, 30);
