@@ -2120,20 +2120,20 @@ async function onLobbyPlayerJoined(tier) {
       }
     }
 
-    // اگر زمان باقی‌مانده خیلی کم بود یا تایمر قبلی نبود، از ۳۰ ثانیه استفاده کن
-    // اما اگر زمان باقی مانده بود، از همان استفاده کن
     const secondsToSet = remainingSeconds > 0 ? remainingSeconds : 30;
     
     setLobbyDeadline(lobby, secondsToSet);
     emitLobbyStatus(lobby, {
       phase: 2,
       searchingFor: 3,
-      deadlineAt: lobby.lobbyDeadlineAt, // این باید بعد از setLobbyDeadline آپدیت شده باشد
+      deadlineAt: lobby.lobbyDeadlineAt,
       message: "منتظر نفر سوم...",
       status: "SEARCHING_3",
+      statusText: "در حال جستجوی نفر ۳... 🔍"
     });
     return;
   }
+
 
 
   if (playerCount === 3) {
