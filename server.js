@@ -2084,9 +2084,17 @@ async function onLobbyPlayerJoined(tier) {
 
   if (playerCount === 1) {
     if (isBotTier) {
-      // تنظیم تایمر و فراخوانی فوری برای تزریق ربات
+      // فقط تایمر را تنظیم می‌کنیم. 
+      // بعد از ۳۰ ثانیه، خودِ تایمر تابع handleLobbyTimeout را صدا خواهد زد.
       setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
-      handleLobbyTimeout(lobby).catch(console.error);
+      
+      emitLobbyStatus(lobby, {
+        phase: 1,
+        searchingFor: 2,
+        deadlineAt: lobby.lobbyDeadlineAt,
+        message: "در حال جستجوی رقیب... 🔍",
+        status: "WAIT_2",
+      });
     } else {
       stopLobbyTimer(lobby);
       emitLobbyStatus(lobby, {
@@ -2099,6 +2107,7 @@ async function onLobbyPlayerJoined(tier) {
     }
     return;
   }
+
 
 
   if (playerCount === 2) {
