@@ -2092,7 +2092,7 @@ async function onLobbyPlayerJoined(tier) {
         phase: 1,
         searchingFor: 2,
         deadlineAt: lobby.lobbyDeadlineAt,
-        message: "در حال جستجوی رقیب... 🔍",
+      message: "در حال جستجوی نفر ۳... 🔍",
         status: "WAIT_2",
       });
     } else {
@@ -2638,12 +2638,19 @@ startAfterMs: 30000,
           if (remainingCount < 2) {
             lobby.lobbyPhase = 1;
             if (LOBBY_BOT_TIERS.has(Number(tier))) {
+                // فقط تایمر را تنظیم می‌کنیم تا ۳۰ ثانیه بعد ربات وارد شود
                 setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
-                handleLobbyTimeout(lobby).catch(console.error);
+                emitLobbyStatus(lobby, {
+                    phase: 1,
+                    searchingFor: 2,
+                    deadlineAt: lobby.lobbyDeadlineAt,
+                    message: "یک بازیکن خارج شد. در حال جستجوی نفر دوم... 🔍",
+                    status: "WAIT_2",
+                });
             } else {
                 emitLobbyStatus(lobby, {
                     phase: 1,
-                    searchingFor: 3,
+                    searchingFor: 2,
                     deadlineAt: null,
                     deadlineMs: null,
                     message: "یک بازیکن از صف خارج شد. منتظر نفر دوم...",
@@ -2651,6 +2658,7 @@ startAfterMs: 30000,
                 });
             }
           } else {
+
 
             await onLobbyPlayerJoined(tier);
           }
@@ -2809,12 +2817,19 @@ startAfterMs: 30000,
             if (lobby.playerUidsInOrder.length < 2) {
               lobby.lobbyPhase = 1;
               if (LOBBY_BOT_TIERS.has(Number(tier))) {
+                // تنظیم تایمر ۳۰ ثانیه‌ای برای ورود ربات
                 setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
-                handleLobbyTimeout(lobby).catch(console.error);
+                emitLobbyStatus(lobby, {
+                  phase: 1,
+                  searchingFor: 2,
+                  deadlineAt: lobby.lobbyDeadlineAt,
+                  message: "در حال جستجوی نفر دوم... 🔍",
+                  status: "WAIT_2",
+                });
               } else {
                 emitLobbyStatus(lobby, {
                   phase: 1,
-                  searchingFor: 3,
+                  searchingFor: 2,
                   deadlineAt: null,
                   deadlineMs: null,
                   message: "منتظر نفر دوم...",
@@ -2822,6 +2837,7 @@ startAfterMs: 30000,
                 });
               }
             } else {
+
                 onLobbyPlayerJoined(tier).catch(console.error);
             }
 
