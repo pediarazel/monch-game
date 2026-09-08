@@ -2086,13 +2086,27 @@ async function onLobbyPlayerJoined(tier) {
   if (playerCount === 1) {
     if (LOBBY_BOT_TIERS.has(Number(tier))) {
       setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
-    emitLobbyStatus(lobby, {
-      phase: 2,
-      searchingFor: 3,
-      deadlineAt: lobby.lobbyDeadlineAt,
-      message: "در حال جستجوی نفر ۳... 🔍",
-      status: "SEARCHING_3",
+    // 1. ارسال وضعیت واقعی به بازیکن انسانی داخل لابی (نشان دادن 2/4)
+    lobby.players.forEach(player => {
+      if (!player.isRobot) {
+        io.to(player.socketId).emit("lobby:status", {
+          phase: 2,
+          searchingFor: 2, // بازیکن داخل اتاق می‌بیند که 2 نفر شده‌اند
+          deadlineAt: lobby.lobbyDeadlineAt,
+          message: "در حال جستجوی نفر ۳... 🔍",
+          status: "SEARCHING_3",
+        });
+      }
     });
+
+    // 2. ارسال وضعیت ماسک‌شده به لیست عمومی لابی (نشان دادن 1/4)
+    // این پیام به تمام کسانی که در منوی اصلی هستند می‌رسد
+    io.emit("lobby:list_update", {
+        lobbyId: lobby.id,
+        currentCount: 1, // برای بقیه همیشه 1 نمایش داده می‌شود
+        maxPlayers: 4
+    });
+
 
     } else {
       lobby.lobbyDeadlineAt = null;
