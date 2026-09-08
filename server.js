@@ -2086,24 +2086,14 @@ async function onLobbyPlayerJoined(tier) {
   if (playerCount === 1) {
     if (LOBBY_BOT_TIERS.has(Number(tier))) {
       setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
-    // 1. ارسال وضعیت واقعی به بازیکن انسانی داخل لابی (نشان دادن 2/4)
-    // چون lobby.players وجود ندارد، از playerUidsInOrder استفاده می‌کنیم تا خطا ندهد
-    if (lobby.playerUidsInOrder && Array.isArray(lobby.playerUidsInOrder)) {
-      lobby.playerUidsInOrder.forEach(uid => {
-        const player = lobby.players?.[uid]; // تلاش برای یافتن بازیکن از طریق UID در صورت وجود players
-        // اگر players وجود نداشت، از طریق socketId که احتمالاً در جای دیگر ذخیره شده یا از طریق ارسال عمومی مدیریت می‌شود
-        // اما برای جلوگیری از Runtime Error، چک کردن وجود players الزامی است:
-        if (lobby.players && lobby.players[uid] && !lobby.players[uid].isRobot) {
-          io.to(lobby.players[uid].socketId).emit("lobby:status", {
-            phase: 2,
-            searchingFor: 2, 
-            deadlineAt: lobby.lobbyDeadlineAt,
-            message: "در حال جستجوی نفر ۳... 🔍",
-            status: "SEARCHING_3",
-          });
-        }
-      });
-    }
+    emitLobbyStatus(lobby, {
+      phase: 2,
+      searchingFor: 3,
+      deadlineAt: lobby.lobbyDeadlineAt,
+      message: "در حال جستجوی نفر ۳... 🔍",
+      status: "SEARCHING_3",
+    });
+
 
 
     // 2. ارسال وضعیت ماسک‌شده به لیست عمومی لابی (نشان دادن 1/4)
