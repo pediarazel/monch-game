@@ -2622,19 +2622,29 @@ startAfterMs: 30000,
           if (!lobby || lobby.matchId !== matchId || lobby.status !== "lobby") continue;
 
           const index = lobby.playerUidsInOrder.indexOf(uid);
-          if (index !== -1) {
-            lobby.playerUidsInOrder.splice(index, 1);
-            emitLobbyStats();
-            stopLobbyTimer(lobby);
+if (index !== -1) {
+  const previousDeadlineAt = lobby.lobbyDeadlineAt;
 
-            const remainingCount = lobby.playerUidsInOrder.length;
+  lobby.playerUidsInOrder.splice(index, 1);
+  emitLobbyStats();
+  stopLobbyTimer(lobby);
+
+  const remainingCount = lobby.playerUidsInOrder.length;
+
             lobby.lobbyPhase = getLobbyPhaseFromCount(remainingCount);
 
             if (remainingCount < 2) {
               lobby.lobbyPhase = 1;
-              if (LOBBY_BOT_TIERS.has(Number(tier))) {
-                setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
-                emitLobbyStatus(lobby, {
+if (LOBBY_BOT_TIERS.has(Number(tier))) {
+  const remainingMs = Number(previousDeadlineAt) - Date.now();
+  const remainingSeconds =
+    remainingMs > 0
+      ? Math.ceil(remainingMs / 1000)
+      : LOBBY_BOT_WAIT_SECONDS;
+
+  setLobbyDeadline(lobby, remainingSeconds);
+  emitLobbyStatus(lobby, {
+
                   phase: 1,
                   searchingFor: 2,
                   deadlineAt: lobby.lobbyDeadlineAt,
@@ -2751,17 +2761,27 @@ startAfterMs: 30000,
           if (!lobby) continue;
 
           const idx = lobby.playerUidsInOrder.indexOf(uid);
-          if (idx !== -1 && lobby.status === "lobby") {
-            lobby.playerUidsInOrder.splice(idx, 1);
+if (idx !== -1 && lobby.status === "lobby") {
+  const previousDeadlineAt = lobby.lobbyDeadlineAt;
 
-            stopLobbyTimer(lobby);
+  lobby.playerUidsInOrder.splice(idx, 1);
 
-            if (lobby.playerUidsInOrder.length < 2) {
+  stopLobbyTimer(lobby);
+
+  if (lobby.playerUidsInOrder.length < 2) {
+
               lobby.lobbyPhase = 1;
-              if (LOBBY_BOT_TIERS.has(Number(tier))) {
-                // تنظیم تایمر ۳۰ ثانیه‌ای برای ورود ربات
-                setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
-                emitLobbyStatus(lobby, {
+if (LOBBY_BOT_TIERS.has(Number(tier))) {
+  // حفظ زمان باقی‌مانده تایمر قبلی برای ورود ربات
+  const remainingMs = Number(previousDeadlineAt) - Date.now();
+  const remainingSeconds =
+    remainingMs > 0
+      ? Math.ceil(remainingMs / 1000)
+      : LOBBY_BOT_WAIT_SECONDS;
+
+  setLobbyDeadline(lobby, remainingSeconds);
+  emitLobbyStatus(lobby, {
+
                   phase: 1,
                   searchingFor: 2,
                   deadlineAt: lobby.lobbyDeadlineAt,
