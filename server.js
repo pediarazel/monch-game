@@ -2603,166 +2603,105 @@ startAfterMs: 30000,
   });
       // خروج عمدی از صف یا بازی:
     // این رویداد با disconnect معمولی فرق دارد؛ بنابراین reconnect timer فعال نمی‌شود.
+
+ 
     socket.on("game:leave", async (payload, callback) => {
       try {
         const matchId = String(payload?.matchId ?? "");
 
         if (!matchId) {
-          return callback?.({
-            success: false,
-            message: "شناسه بازی ارسال نشده است.",
-          });
+          return callback?.({ success: false, message: "شناسه بازی ارسال نشده است." });
         }
 
-        // ----------------------------------------------------------
-        // ۱) خروج از لابی/صف، پیش از شروع مسابقه
-        // ----------------------------------------------------------
+        // ۱) مدیریت خروج از لابی/صف
         for (const [tier, lobby] of tierLobbies.entries()) {
-          if (!lobby || lobby.matchId !== matchId || lobby.status !== "lobby") {
-            continue;
-          }
+          if (!lobby || lobby.matchId !== matchId || lobby.status !== "lobby") continue;
 
           const index = lobby.playerUidsInOrder.indexOf(uid);
-          if (index === -1) {
-            continue;
-          }
+          if (index !== -1) {
+            lobby.playerUidsInOrder.splice(index, 1);
+            emitLobbyStats();
+            stopLobbyTimer(lobby);
 
-          lobby.playerUidsInOrder.splice(index, 1);
-          emitLobbyStats();
-          stopLobbyTimer(lobby);
+            const remainingCount = lobby.playerUidsInOrder.length;
+            lobby.lobbyPhase = getLobbyPhaseFromCount(remainingCount);
 
-
-          const remainingCount = lobby.playerUidsInOrder.length;
-          lobby.lobbyPhase = getLobbyPhaseFromCount(remainingCount);
-
-          if (remainingCount < 2) {
-            lobby.lobbyPhase = 1;
-            if (LOBBY_BOT_TIERS.has(Number(tier))) {
-                // فقط تایمر را تنظیم می‌کنیم تا ۳۰ ثانیه بعد ربات وارد شود
+            if (remainingCount < 2) {
+              lobby.lobbyPhase = 1;
+              if (LOBBY_BOT_TIERS.has(Number(tier))) {
                 setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
                 emitLobbyStatus(lobby, {
-                    phase: 1,
-                    searchingFor: 2,
-                    deadlineAt: lobby.lobbyDeadlineAt,
-                    message: "یک بازیکن خارج شد. در حال جستجوی نفر دوم... 🔍",
-                    status: "WAIT_2",
+                  phase: 1,
+                  searchingFor: 2,
+                  deadlineAt: lobby.lobbyDeadlineAt,
+                  message: "یک بازیکن خارج شد. در حال جستجوی نفر دوم... 🔍",
+                  status: "WAIT_2",
                 });
-            } else {
+              } else {
                 emitLobbyStatus(lobby, {
-                    phase: 1,
-                    searchingFor: 2,
-                    deadlineAt: null,
-                    deadlineMs: null,
-                    message: "یک بازیکن از صف خارج شد. منتظر نفر دوم...",
-                    status: "WAIT_2",
+                  phase: 1,
+                  searchingFor: 2,
+                  deadlineAt: null,
+                  deadlineMs: null,
+                  message: "یک بازیکن از صف خارج شد. منتظر نفر دوم...",
+                  status: "WAIT_2",
                 });
+              }
+            } else {
+              await onLobbyPlayerJoined(tier);
             }
-          } else {
-
-
-            await onLobbyPlayerJoined(tier);
           }
 
           await socket.leave(`match:${lobby.matchId}`);
-
-          // فقط disconnect بعدیِ همین خروج عمدی نادیده گرفته شود.
           socket.data.skipNextDisconnect = true;
-
-          console.log("[PLAYER_MANUAL_LEAVE_LOBBY]", {
-            userId: uid,
-            matchId: lobby.matchId,
-          });
-
-          return callback?.({
-            success: true,
-            type: "lobby_leave",
-            message: "از صف بازی خارج شدی.",
-          });
+          return callback?.({ success: true, type: "lobby_leave", message: "از صف خارج شدی." });
         }
 
-        // ----------------------------------------------------------
-        // ۲) خروج از بازی‌ای که شروع شده است
-        // ----------------------------------------------------------
+        // ۲) مدیریت خروج از مسابقه (Match)
         const match = matches.get(matchId);
-
-        if (!match || match.status !== "playing" || !match.playerColors) {
-          return callback?.({
-            success: false,
-            message: "بازی فعال پیدا نشد.",
-          });
+        if (!match) {
+          return callback?.({ success: false, message: "بازی پیدا نشد." });
         }
 
         const isPlayerInMatch = Object.values(match.playerColors).includes(uid);
-
         if (!isPlayerInMatch) {
-          return callback?.({
-            success: false,
-            message: "شما عضو این بازی نیستید.",
-          });
+          return callback?.({ success: false, message: "شما عضو این بازی نیستید." });
         }
 
-        // اگر بازی قبلاً تمام شده و برنده مشخص است،
-        // خروج نباید فورفیت یا تغییر در نتیجه بازی ایجاد کند.
-        if (match.game?.winner) {
-          await socket.leave(`match:${match.matchId}`);
-
-          console.log("[PLAYER_LEAVE_FINISHED_GAME]", {
-            userId: uid,
-            matchId: match.matchId,
-            winnerColor: match.game.winner,
-          });
-
-
-          return callback?.({
-            success: true,
-            type: "finished_game_leave",
-            message: "بازی تمام شده است. به لابی برگشتی.",
-          });
-        }
-
-        // اگر برای این کاربر وضعیت قطع اتصال قبلی باقی مانده باشد، حذف شود.
-        if (disconnectionTimers.has(uid)) {
-          disconnectionTimers.delete(uid);
-        }
-
-
-        // خروج دستی در بازیِ در حال اجرا = فورفیت فوری؛ بدون انتظار ۹۰ ثانیه.
-        console.log("[MANUAL_LEAVE_PROCESS_START]", { userId: uid, matchId: match.matchId });
-        
-        // ۱. ابتدا فورفیت را اجرا می‌کنیم تا بازی به وضعیت پایان برسد و برنده مشخص شود
-        await handleForfeit(match, uid, "manual_leave");
-
-        // ۲. خروج از اتاق مسابقه
-        await socket.leave(`match:${match.matchId}`);
-
-        // ۳. تنظیم فلگ برای جلوگیری از اجرای منطق دیسکانکتِ تکراری
+        if (disconnectionTimers.has(uid)) disconnectionTimers.delete(uid);
         socket.data.skipNextDisconnect = true;
 
-        console.log("[PLAYER_MANUAL_LEAVE_GAME_SUCCESS]", {
-          userId: uid,
-          matchId: match.matchId,
+        // حالت الف: اگر بازی تمام شده است
+        if (match.game?.winner) {
+          await socket.leave(`match:${match.matchId}`);
+          matches.delete(matchId); 
+          socket.emit("force_redirect_to_lobby", { reason: "game_finished" });
+          return callback?.({ 
+            success: true, 
+            type: "finished_game_leave", 
+            message: "بازی تمام شده است. در حال بازگشت به لابی..." 
+          });
+        }
 
-        });
+        // حالت ب: اگر بازی در جریان است (خروج دستی = فورفیت)
+        console.log("[MANUAL_LEAVE_IN_PROGRESS]", { userId: uid, matchId });
+        await handleForfeit(match, uid, "manual_leave");
+        await socket.leave(`match:${match.matchId}`);
+        matches.delete(matchId);
 
-        // ارسال سیگنال به کلاینت برای بازگشت به لابی
         socket.emit("force_redirect_to_lobby", { reason: "manual_leave" });
-
-        return callback?.({
-          success: true,
-          type: "game_forfeit",
-          message: "از بازی خارج شدی.",
+        return callback?.({ 
+          success: true, 
+          type: "game_forfeit", 
+          message: "از بازی خارج شدی." 
         });
-
 
       } catch (error) {
         console.error("[GAME_LEAVE_ERROR]", error);
-
-        return callback?.({
-          success: false,
-          message: "خطا در خروج از بازی.",
-        });
+        return callback?.({ success: false, message: "خطا در هنگام خروج." });
       }
     });
+
 
 
     socket.on("disconnect", () => {
