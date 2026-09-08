@@ -2727,20 +2727,21 @@ startAfterMs: 30000,
 
 
         // خروج دستی در بازیِ در حال اجرا = فورفیت فوری؛ بدون انتظار ۹۰ ثانیه.
+        console.log("[MANUAL_LEAVE_PROCESS_START]", { userId: uid, matchId: match.matchId });
+        
+        // ۱. ابتدا فورفیت را اجرا می‌کنیم تا بازی به وضعیت پایان برسد و برنده مشخص شود
         await handleForfeit(match, uid, "manual_leave");
 
-        emitLobbyStats();
-
+        // ۲. خروج از اتاق مسابقه
         await socket.leave(`match:${match.matchId}`);
 
-
-        // کلاینت پس از دریافت پاسخ، سوکت را قطع می‌کند.
-        // این فلگ نمی‌گذارد disconnect به‌عنوان قطع اینترنت پردازش شود.
+        // ۳. تنظیم فلگ برای جلوگیری از اجرای منطق دیسکانکتِ تکراری
         socket.data.skipNextDisconnect = true;
 
-        console.log("[PLAYER_MANUAL_LEAVE_GAME]", {
+        console.log("[PLAYER_MANUAL_LEAVE_GAME_SUCCESS]", {
           userId: uid,
           matchId: match.matchId,
+
         });
 
         // ارسال سیگنال به کلاینت برای بازگشت به لابی
