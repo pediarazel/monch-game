@@ -2139,7 +2139,7 @@ async function onLobbyPlayerJoined(tier) {
       phase: 2,
       searchingFor: 3,
       deadlineAt: lobby.lobbyDeadlineAt,
-      message: "منتظر نفر سوم...",
+      message: "در حال جستجوی نفر ۳... 🔍",
       status: "SEARCHING_3",
       statusText: "در حال جستجوی نفر ۳... 🔍"
     });
@@ -2154,11 +2154,13 @@ async function onLobbyPlayerJoined(tier) {
       phase: 3,
       searchingFor: 4,
       deadlineAt: lobby.lobbyDeadlineAt,
-      message: "منتظر نفر چهارم...",
+      message: "در حال جستجوی نفر ۴... 🔍",
       status: "SEARCHING_4",
+      statusText: "در حال جستجوی نفر ۴... 🔍"
     });
     return;
   }
+
 
   if (playerCount >= 4) {
     return startMatchFromLobby(lobby, 4);
@@ -2812,20 +2814,43 @@ startAfterMs: 30000,
             stopLobbyTimer(lobby);
 
             if (lobby.playerUidsInOrder.length < 2) {
+              // اگر تعداد بازیکن کمتر از ۲ شد، وضعیت را به حالت انتظار قرار می‌دهیم
               lobby.lobbyPhase = 1;
-              emitLobbyStatus(lobby, {
-                phase: 1,
-                searchingFor: 3,
-                deadlineAt: null,
-                deadlineMs: null,
-                message: "منتظر نفر دوم...",
-                status: "WAIT_2",
-              });
-            } else if (lobby.playerUidsInOrder.length === 2) {
-              onLobbyPlayerJoined(tier).catch(() => {});
-            } else if (lobby.playerUidsInOrder.length === 3) {
+              
+              // چک کردن اینکه آیا این لابی اجازه ورود ربات دارد یا خیر
+              // تبدیل tier به عدد برای مقایسه (مثلاً "20,000" -> 20000)
+              const tierValue = parseInt(tier.replace(/,/g, ''));
+              const botAllowed = [20000, 50000].includes(tierValue);
+
+              if (botAllowed) {
+                // اگر لابی اجازه ربات داشت، دوباره فرآیند ورود ربات را استارت می‌زنیم
+                // با فراخوانی onLobbyPlayerJoined، سیستم دوباره بررسی می‌کند که آیا نیاز به ربات هست یا خیر
+                onLobbyPlayerJoined(tier).catch(() => {});
+                
+                emitLobbyStatus(lobby, {
+                  phase: 1,
+                  searchingFor: 3,
+                  deadlineAt: null,
+                  deadlineMs: null,
+                  message: "در حال جستجوی رقیب...",
+                  status: "WAIT_2",
+                });
+              } else {
+                // اگر لابی اجازه ربات نداشت، فقط پیام انتظار معمولی را می‌فرستیم
+                emitLobbyStatus(lobby, {
+                  phase: 1,
+                  searchingFor: 3,
+                  deadlineAt: null,
+                  deadlineMs: null,
+                  message: "منتظر نفر دوم...",
+                  status: "WAIT_2",
+                });
+              }
+            } else if (lobby.playerUidsInOrder.length === 2 || lobby.playerUidsInOrder.length === 3) {
+              // اگر تعداد بازیکن‌ها به ۲ یا ۳ نفر رسید (یعنی نفر جدید وارد شد)
               onLobbyPlayerJoined(tier).catch(() => {});
             }
+
 
           }
         }
