@@ -622,8 +622,17 @@ function canPieceMove(game, piece, dieValue) {
 if (piece.state === "yard") {
   // برای ورود از حیاط، حتماً باید تاس 6 باشد
   if (Number(dieValue) !== 6) return false;
+  // دو مهره هم‌رنگ نباید در خانه ورود (start) با هم باشند
+  const startOccupiedBySameColor = game.pieces.some(
+    (p) =>
+      p.color === piece.color &&
+      p.id !== piece.id &&
+      p.state === "start"
+  );
+  if (startOccupiedBySameColor) return false;
   return true;
 }
+
 
 
   if (piece.state === "start") {
