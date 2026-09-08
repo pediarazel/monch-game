@@ -1486,6 +1486,11 @@ requestBoardDraw();
         }, 5000);
       });
 
+    socket.on("game:finished", ({ matchId, winnerColor }) => {
+      console.log("[CLIENT] Game finished:", { matchId, winnerColor });
+      alert(`بازی تمام شد! برنده: ${winnerColor}`);
+      window.location.href = "/anna/lobby.html"; 
+    });
 
       socket.connect();
       return socket;

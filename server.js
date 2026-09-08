@@ -1145,7 +1145,6 @@ async function handleForfeit(match, uid, reason = "disconnect_forfeit") {
         nextTurn(match);
       }
     }
-
     // اگر تعداد بازیکنان فعال کمتر از ۲ شد بازی باید خاتمه یابد
     if (activeCount < 2) {
       let winnerColor = null;
@@ -1161,7 +1160,7 @@ async function handleForfeit(match, uid, reason = "disconnect_forfeit") {
         match.game.winner = winnerColor;
         match.game.rolled = false;
         match.game.pendingDice = [];
-emitLobbyStats();
+        emitLobbyStats();
         broadcastState(match);
 
         const dbMatchId = String(match.matchId);
@@ -1182,7 +1181,12 @@ emitLobbyStats();
           },
         });
 
+        // تسویه مالی
         await settleCoinsForMatch(match);
+
+        // حذف از حافظه و ارسال سیگنال پایان
+        matches.delete(match.matchId);
+        io.to(`match:${match.matchId}`).emit("game:finished", { matchId: match.matchId, winnerColor });
       }
     } else {
       broadcastState(match);
@@ -2634,7 +2638,7 @@ startAfterMs: 30000,
                   phase: 1,
                   searchingFor: 2,
                   deadlineAt: lobby.lobbyDeadlineAt,
-                  message: "یک بازیکن خارج شد. در حال جستجوی نفر دوم... 🔍",
+      message: "در حال جستجوی نفر ۳... 🔍",
                   status: "WAIT_2",
                 });
               } else {
@@ -2643,7 +2647,7 @@ startAfterMs: 30000,
                   searchingFor: 2,
                   deadlineAt: null,
                   deadlineMs: null,
-                  message: "یک بازیکن از صف خارج شد. منتظر نفر دوم...",
+      message: "در حال جستجوی نفر ۳... 🔍",
                   status: "WAIT_2",
                 });
               }
@@ -2674,7 +2678,6 @@ startAfterMs: 30000,
         // حالت الف: اگر بازی تمام شده است
         if (match.game?.winner) {
           await socket.leave(`match:${match.matchId}`);
-          matches.delete(matchId); 
           socket.emit("force_redirect_to_lobby", { reason: "game_finished" });
           return callback?.({ 
             success: true, 
@@ -2687,7 +2690,6 @@ startAfterMs: 30000,
         console.log("[MANUAL_LEAVE_IN_PROGRESS]", { userId: uid, matchId });
         await handleForfeit(match, uid, "manual_leave");
         await socket.leave(`match:${match.matchId}`);
-        matches.delete(matchId);
 
         socket.emit("force_redirect_to_lobby", { reason: "manual_leave" });
         return callback?.({ 
@@ -3714,4 +3716,4 @@ function getAllLegalMoves(match, color, diceValues) {
 
 httpServer.listen(PORT, () => {
   console.log(`✅ Server listening on http://localhost:${PORT}`);
-});
+});          
