@@ -2901,8 +2901,20 @@ if (LOBBY_BOT_TIERS.has(Number(tier))) {
 
   // اندازه‌گیری پینگ رفت‌وبرگشت کلاینت
   socket.on("app:ping", (clientTime, callback) => {
+    const serverReceivedAt = Date.now();
+    const clientStartedAt = Number(clientTime || 0);
+
     if (typeof callback === "function") callback(clientTime);
+
+    const serverProcessedAt = Date.now();
+
+    console.log("[APP_PING]", {
+      clientStartedAt,
+      serverReceivedAt,
+      serverProcessingMs: serverProcessedAt - serverReceivedAt,
+    });
   });
+
 
   socket.on("game:roll", (payload, callback) => {
 
