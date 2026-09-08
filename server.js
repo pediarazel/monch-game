@@ -2086,13 +2086,14 @@ async function onLobbyPlayerJoined(tier) {
   if (playerCount === 1) {
     if (LOBBY_BOT_TIERS.has(Number(tier))) {
       setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
-      emitLobbyStatus(lobby, {
-        phase: 1,
-        searchingFor: 2,
-        deadlineAt: lobby.lobbyDeadlineAt,
-      message: "منتظر نفر سوم...",
+    emitLobbyStatus(lobby, {
+      phase: 2,
+      searchingFor: 3,
+      deadlineAt: lobby.lobbyDeadlineAt,
+      message: "در حال جستجوی نفر ۳... 🔍",
       status: "SEARCHING_3",
-      });
+    });
+
     } else {
       lobby.lobbyDeadlineAt = null;
       if (lobby.lobbyTimer) {

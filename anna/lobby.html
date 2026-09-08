@@ -530,11 +530,13 @@ window.location.replace(
           renderLobbyByDeadline(data);
           if (data?.phase === 4) {
             peopleNewsEl.textContent = "🎮 بازی شروع می‌شود!";
-          } else if (data?.searchingFor) {
-            peopleNewsEl.textContent = `⏳ در حال جستجوی نفر ${data.searchingFor}...`;
+          } else if (data?.message) {
+            // استفاده از پیام مستقیم سرور برای هر دو بخش UI
+            peopleNewsEl.textContent = data.message;
           } else {
             peopleNewsEl.textContent = "";
           }
+
         });
 
         socket.on("match:error", payload => {
