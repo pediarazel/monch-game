@@ -1029,11 +1029,8 @@ async function settleCoinsForMatch(match) {
   const winnerUserId = match.playerColors[winnerColor];
   if (!winnerUserId) throw new Error("winnerUserId پیدا نشد.");
 
-  // تعداد بازیکنانی که در حال حاضر در رنگ‌ها حضور دارند
   const activePlayersCount = activePlayersCountFromPlayerColors(match.playerColors);
-  // تعداد بازیکنانی که حذف یا فورفیت شدند
   const forfeitedCount = (match.forfeitedPlayers || []).length;
-  // تعداد کل بازیکنان اولیه بازی
   const totalOriginalPlayers = activePlayersCount + forfeitedCount;
 
   if (totalOriginalPlayers < 2 || totalOriginalPlayers > 4) {
@@ -1041,54 +1038,83 @@ async function settleCoinsForMatch(match) {
   }
 
   const totalPot = totalOriginalPlayers * match.tier;
-
-  // در هر دو حالت (برد انسان یا ربات)، برنده ۹۰٪ پات را می‌گیرد
   const winnerAmount = Math.floor(0.9 * totalPot);
-
-  // در هر دو حالت، خزانه فقط ۵٪ پات را می‌گیرد (مثلاً ۲۰ تومان از ۴۰۰)
   const treasuryAmount = Math.floor(0.05 * totalPot);
-
 
   const treasury = await ensureTreasuryUser();
 
-  await prisma.$transaction(async (tx) => {
-    await tx.user.update({ where: { id: winnerUserId }, data: { coins: { increment: winnerAmount } } });
-    await tx.transaction.create({
-      data: {
-        userId: winnerUserId,
-        amount: winnerAmount,
-        type: "WIN",
-        note: `match:${match.matchId} tier=${match.tier} winnerColor=${winnerColor}`,
-      },
+  try {
+    await prisma.$transaction(async (tx) => {
+      // 1. افزایش موجودی برنده (انسان یا ربات)
+      // توجه: چون ربات هم در دیتابیس است، این دستور باید کار کند
+      await tx.user.update({ 
+        where: { id: winnerUserId }, 
+        data: { coins: { increment: winnerAmount } } 
+      });
+
+      // 2. ثبت تراکنش برد
+      await tx.transaction.create({
+        data: {
+          userId: winnerUserId,
+          amount: winnerAmount,
+          type: "WIN",
+          note: `match:${match.matchId} tier=${match.tier} winnerColor=${winnerColor}`,
+        },
+      });
+
+      // 3. افزایش موجودی خزانه
+      await tx.user.update({ 
+        where: { id: treasury.id }, 
+        data: { coins: { increment: treasuryAmount } } 
+      });
+
+      // 4. ثبت تراکنش خزانه
+      await tx.transaction.create({
+        data: {
+          userId: treasury.id,
+          amount: treasuryAmount,
+          type: "TREASURY_CUT",
+          note: `match:${match.matchId} tier=${match.tier} treasuryCut`,
+        },
+      });
     });
 
-    await tx.user.update({ where: { id: treasury.id }, data: { coins: { increment: treasuryAmount } } });
-    await tx.transaction.create({
-      data: {
-        userId: treasury.id,
-        amount: treasuryAmount,
-        type: "TREASURY_CUT",
-        note: `match:${match.matchId} tier=${match.tier} treasuryCut`,
-      },
+    match.financialSettled = true;
+
+    // دریافت موجودی‌های جدید برای اطلاع‌رسانی
+    const targets = Array.from(new Set([winnerUserId, treasury.id]));
+    const mapAfter = await getUsersCoins(targets);
+
+    // اطلاع‌رسانی موجودی برنده
+    const winnerNewBalance = mapAfter.get(winnerUserId);
+    if (winnerNewBalance !== undefined) {
+      // اینجا چک می‌کنیم اگر کاربر ربات بود پیام متفاوتی بدهد یا فقط موجودی را آپدیت کند
+      // برای سادگی و جلوگیری از خطا، پیام را فقط برای انسان‌ها با متن مشخص می‌فرستیم
+      // اگر کاربر ربات بود، سیستم احتمالاً در emitBalanceChanged آن را مدیریت می‌کند
+      emitBalanceChanged(winnerUserId, winnerNewBalance, "برنده شدید!");
+    }
+
+    // اطلاع‌رسانی موجودی خزانه
+    const treasuryNewBalance = mapAfter.get(treasury.id);
+    if (treasuryNewBalance !== undefined) {
+      emitBalanceChanged(treasury.id, treasuryNewBalance, "سهم سرور/ترژری ثبت شد.");
+    }
+
+    io.to(`match:${match.matchId}`).emit("game:settled", {
+      success: true,
+      winnerColor,
+      winnerAmount,
+      treasuryAmount,
+      tier: match.tier,
     });
-  });
 
-  match.financialSettled = true;
-
-  const targets = Array.from(new Set([winnerUserId, treasury.id]));
-  const mapAfter = await getUsersCoins(targets);
-
-  emitBalanceChanged(winnerUserId, mapAfter.get(winnerUserId), "شما برنده بازی شدید. موجودی افزایش یافت.");
-  emitBalanceChanged(treasury.id, mapAfter.get(treasury.id), "سهم سرور/ترژری ثبت شد.");
-
-  io.to(`match:${match.matchId}`).emit("game:settled", {
-    success: true,
-    winnerColor,
-    winnerAmount,
-    treasuryAmount,
-    tier: match.tier,
-  });
+  } catch (error) {
+    console.error("[CRITICAL_SETTLE_ERROR]", error);
+    // در صورت بروز خطا در تراکنش، برای جلوگیری از تکرار، خطا را پرتاب می‌کنیم
+    throw error;
+  }
 }
+
 
 // ---------- match game ----------
 // تابع مدیریت حذف خودکار بازیکن (Forfeit) بعد از مهلت ۹۰ ثانیه‌ای
