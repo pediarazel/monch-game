@@ -3688,34 +3688,48 @@ function calculateSingleMoveScore(game, piece, dieValue, botColor) {
   const moveDie = Number(dieValue);
   const currentPathIdx = Number(piece.pathIndex || 0);
   const playerColor = botColor;
-  
+
   const isExitingYard = (piece.state === "yard" && moveDie === 6);
   const potentialTargetPathIdx = (piece.state === "path" || piece.state === "start") ? (currentPathIdx + moveDie) : -1;
-  const isEnteringHome = (piece.state === "path" && potentialTargetPathIdx >= 36); 
-  const isAmbushZone = (potentialTargetPathIdx >= 16 && potentialTargetPathIdx <= 18);
-  
+  const isEnteringHome = (piece.state === "path" && potentialTargetPathIdx >= 36);
+
   const canCapture = typeof isCapture === 'function' && isCapture(null, game, playerColor, piece, moveDie);
   const isNowVulnerable = typeof isVulnerable === 'function' && isVulnerable(null, game, playerColor, piece, moveDie);
 
-  // --- سیستم امتیازدهی اصلاح شده و امن ---
-  
-  // ۱. اولویت ضربه (بسیار بالا)
-  if (canCapture) return 1000000;
+  const botPiecesCount = game.pieces.filter(p => p.color === botColor && p.state !== 'finished').length;
+  const opponentPiecesCount = game.pieces.filter(p => p.color !== botColor && p.state !== 'finished').length;
+  const pieceDifference = botPiecesCount - opponentPiecesCount;
 
-  // ۲. اولویت خروج از خانه
-  if (isExitingYard) return 500000;
+  // 1. اولویت اول: شکار (همان امتیاز بالا)
+  if (canCapture) {
+    return 5000000 + (pieceDifference * 1000000);
+  }
 
-  // ۳. اولویت ورود به خانه
-  if (isEnteringHome) return 200000;
+  // 2. اولویت دوم: امنیت (جریمه سنگین)
+  if (isNowVulnerable) {
+    return -10000000;
+  }
 
-  // ۴. امنیت (اگر حرکت خطرناک است، امتیاز را کم کن اما نه آنقدر که از تمام حرکت‌های قانونی کمتر شود)
-  // استفاده از عدد منفی معقول برای اینکه ربات همچنان "مجبور" به حرکت کند اما با احتیاط
-  if (isNowVulnerable) return -50000; 
-  if (isAmbushZone) return -20000;
+  // 3. اولویت سوم: ورود به بازی / خروج از خانه (Deployment)
+  if (isExitingYard) {
+    return 800000;
+  }
 
-  // ۵. امتیاز پیشروی (پایه)
-  return (currentPathIdx * 100) + (moveDie * 10);
+  // 4. اولویت چهارم: ورود به خانه (کمترین اولویت)
+  if (isEnteringHome) {
+    return 200000;
+  }
+
+  // 5. پیشروی معمولی
+  let progressionScore = (currentPathIdx * 100) + (moveDie * 10);
+  if (pieceDifference > 1) {
+    progressionScore *= 1.5;
+  }
+
+  return progressionScore;
 }
+
+
 
 function getSequenceScore(match, game, pieceId, dieValue, nextDice, botColor) {
   // ایجاد کپی امن
