@@ -2098,6 +2098,23 @@ async function onLobbyPlayerJoined(tier) {
   const playerCount = lobby.playerUidsInOrder.length;
   const isBotTier = LOBBY_BOT_TIERS.has(Number(tier));
 
+  // --- بخش جدید برای جلوگیری از فعال شدن لابی بدون پول ربات ---
+  if (isBotTier) {
+    try {
+      const botUser = await prisma.user.findUnique({
+        where: { username: "tajdas_bot" }
+      });
+      const minRequired = Number(tier);
+      if (!botUser || Number(botUser.coins) < minRequired) {
+        console.error(`[LOBBY_BLOCK] Bot lacks funds (${botUser?.coins || 0}/${minRequired}). Preventing lobby start.`);
+        return; // خروج از تابع: لابی استارت نمی‌خورد و تایمر فعال نمی‌شود
+      }
+    } catch (err) {
+      console.error("Error checking bot funds in onLobbyPlayerJoined:", err);
+      return;
+    }
+  }
+
   if (playerCount === 1) {
     if (isBotTier) {
       // فقط تایمر را تنظیم می‌کنیم. 
