@@ -3632,16 +3632,50 @@ function getBotOpponentByColor(match, botColor) {
 
 function getPieceTargetCell(match, color, piece, dieValue) {
   try {
-    if (piece.state === "yard") return layout.startCells[color];
+    const steps = Number(dieValue);
+
+    if (!piece || !Number.isInteger(steps) || steps < 1) {
+      return null;
+    }
+
+    // حرکت از yard فقط مهره را به start می‌آورد و شکار ندارد
+    if (piece.state === "yard") {
+      return null;
+    }
+
+    // حرکت از start به مسیر اصلی
     if (piece.state === "start") {
       const entryIdx = layout.entryPathIndexes[color];
-      return layout.mainPath[(entryIdx + dieValue - 1) % 36];
+      const targetIdx = (entryIdx + steps - 1) % 36;
+      return layout.mainPath[targetIdx] || null;
     }
-    if (piece.state === "path") {
-      return layout.mainPath[(piece.pathIndex + dieValue) % 36];
+
+    // مهره‌ای که در خانه است، دیگر روی مسیر اصلی نیست
+    if (piece.state === "home") {
+      return null;
     }
-    if (piece.state === "home") return null;
-    return null;
+
+    if (piece.state !== "path") {
+      return null;
+    }
+
+    const entryIdx = layout.entryPathIndexes[color];
+    const currentIdx = Number(piece.pathIndex);
+
+    if (!Number.isInteger(currentIdx) || currentIdx < 0) {
+      return null;
+    }
+
+    const walkedSteps = (currentIdx - entryIdx + 36) % 36;
+    const remainingStepsToHomeEntry = 35 - walkedSteps;
+
+    // اگر حرکت وارد ستون خانه شود، مقصد روی mainPath نیست
+    if (steps > remainingStepsToHomeEntry) {
+      return null;
+    }
+
+    const targetIdx = (currentIdx + steps) % 36;
+    return layout.mainPath[targetIdx] || null;
   } catch (e) {
     return null;
   }
@@ -3649,12 +3683,27 @@ function getPieceTargetCell(match, color, piece, dieValue) {
 
 function isCapture(match, game, botColor, piece, dieValue) {
   try {
-    const targetCell = getPieceTargetCell(match, botColor, piece, dieValue);
-    if (!targetCell) return false;
+    const targetCell = getPieceTargetCell(
+      match,
+      botColor,
+      piece,
+      dieValue
+    );
+
+    if (!targetCell || !game || !Array.isArray(game.pieces)) {
+      return false;
+    }
+
     return game.pieces.some(p => {
-      if (p.color === botColor || p.state !== "path") return false;
-      const oppCell = layout.mainPath[p.pathIndex];
-      return oppCell && oppCell.x === targetCell.x && oppCell.y === targetCell.y;
+      if (!p || p.color === botColor || p.state !== "path") {
+        return false;
+      }
+
+      const opponentCell = layout.mainPath[p.pathIndex];
+
+      return opponentCell &&
+        opponentCell.x === targetCell.x &&
+        opponentCell.y === targetCell.y;
     });
   } catch (e) {
     return false;
@@ -3663,19 +3712,45 @@ function isCapture(match, game, botColor, piece, dieValue) {
 
 function isVulnerable(match, game, botColor, piece, dieValue) {
   try {
-    const targetCell = getPieceTargetCell(match, botColor, piece, dieValue);
-    if (!targetCell) return false;
-    // بررسی اینکه آیا مهره حریف در فاصله ۱ تا ۶ خانه پشت این خانه قرار دارد یا نه
+    const targetCell = getPieceTargetCell(
+      match,
+      botColor,
+      piece,
+      dieValue
+    );
+
+    if (!targetCell || !game || !Array.isArray(game.pieces)) {
+      return false;
+    }
+
+    // بررسی حمله‌ی حریف از فاصله‌ی ۱ تا ۶ خانه
     return game.pieces.some(p => {
-      if (p.color === botColor || p.state !== "path") return false;
-      const oppCell = layout.mainPath[p.pathIndex];
-      if (!oppCell) return false;
+      if (!p || p.color === botColor || p.state !== "path") {
+        return false;
+      }
+
+      const opponentPathIndex = Number(p.pathIndex);
+
+      if (
+        !Number.isInteger(opponentPathIndex) ||
+        opponentPathIndex < 0
+      ) {
+        return false;
+      }
+
       for (let step = 1; step <= 6; step++) {
-        const checkCell = layout.mainPath[(p.pathIndex + step) % 36];
-        if (checkCell && checkCell.x === targetCell.x && checkCell.y === targetCell.y) {
+        const checkCell =
+          layout.mainPath[(opponentPathIndex + step) % 36];
+
+        if (
+          checkCell &&
+          checkCell.x === targetCell.x &&
+          checkCell.y === targetCell.y
+        ) {
           return true;
         }
       }
+
       return false;
     });
   } catch (e) {
@@ -3684,44 +3759,85 @@ function isVulnerable(match, game, botColor, piece, dieValue) {
 }
 
 // --- HELPER FUNCTIONS FOR BOT AI SIMULATION ---
-function calculateSingleMoveScore(game, piece, dieValue, botColor) {
+function calculateSingleMoveScore(
+  match,
+  game,
+  piece,
+  dieValue,
+  botColor
+) {
   const moveDie = Number(dieValue);
-  const currentPathIdx = Number(piece.pathIndex || 0);
-  const playerColor = botColor;
 
-  const isExitingYard = (piece.state === "yard" && moveDie === 6);
-  const potentialTargetPathIdx = (piece.state === "path" || piece.state === "start") ? (currentPathIdx + moveDie) : -1;
-  const isEnteringHome = (piece.state === "path" && potentialTargetPathIdx >= 36);
+  if (
+    !game ||
+    !piece ||
+    !Number.isInteger(moveDie) ||
+    moveDie < 1
+  ) {
+    return -999999;
+  }
 
-  const canCapture = typeof isCapture === 'function' && isCapture(null, game, playerColor, piece, moveDie);
-  const isNowVulnerable = typeof isVulnerable === 'function' && isVulnerable(null, game, playerColor, piece, moveDie);
+  const currentPathIdx =
+    piece.state === "path" && Number.isInteger(Number(piece.pathIndex))
+      ? Number(piece.pathIndex)
+      : 0;
 
-  const botPiecesCount = game.pieces.filter(p => p.color === botColor && p.state !== 'finished').length;
-  const opponentPiecesCount = game.pieces.filter(p => p.color !== botColor && p.state !== 'finished').length;
-  const pieceDifference = botPiecesCount - opponentPiecesCount;
+  const isExitingYard =
+    piece.state === "yard" && moveDie === 6;
 
-  // 1. اولویت اول: شکار (همان امتیاز بالا)
+  let isEnteringHome = false;
+
+  if (piece.state === "path") {
+    const entryIdx = layout.entryPathIndexes[botColor];
+    const walkedSteps =
+      (currentPathIdx - entryIdx + 36) % 36;
+    const remainingStepsToHomeEntry = 35 - walkedSteps;
+
+    isEnteringHome = moveDie > remainingStepsToHomeEntry;
+  }
+
+  // ارسال match واقعی، نه null
+  const canCapture =
+    isCapture(match, game, botColor, piece, moveDie);
+
+  const isNowVulnerable =
+    isVulnerable(match, game, botColor, piece, moveDie);
+
+  const botPiecesCount = game.pieces.filter(
+    p => p.color === botColor && p.state !== "finished"
+  ).length;
+
+  const opponentPiecesCount = game.pieces.filter(
+    p => p.color !== botColor && p.state !== "finished"
+  ).length;
+
+  const pieceDifference =
+    botPiecesCount - opponentPiecesCount;
+
+  // شکار همیشه بالاترین اولویت را دارد
   if (canCapture) {
     return 5000000 + (pieceDifference * 1000000);
   }
 
-  // 2. اولویت دوم: امنیت (جریمه سنگین)
-  if (isNowVulnerable) {
-    return -10000000;
+  // ورود به خانه امن است؛ نباید با جریمه‌ی آسیب‌پذیری رد شود
+  if (isEnteringHome) {
+    return 800000 + (moveDie * 1000);
   }
 
-  // 3. اولویت سوم: ورود به بازی / خروج از خانه (Deployment)
+  // خروج مهره از yard برای افزایش قدرت مانور
   if (isExitingYard) {
     return 800000;
   }
 
-  // 4. اولویت چهارم: ورود به خانه (کمترین اولویت)
-  if (isEnteringHome) {
-    return 200000;
+  // جلوگیری از قرار دادن مهره در معرض شکار
+  if (isNowVulnerable) {
+    return -10000000;
   }
 
-  // 5. پیشروی معمولی
-  let progressionScore = (currentPathIdx * 100) + (moveDie * 10);
+  // پیشروی معمولی
+  let progressionScore =
+    (currentPathIdx * 100) + (moveDie * 10);
+
   if (pieceDifference > 1) {
     progressionScore *= 1.5;
   }
@@ -3730,41 +3846,83 @@ function calculateSingleMoveScore(game, piece, dieValue, botColor) {
 }
 
 
+function getSequenceScore(
+  match,
+  game,
+  pieceId,
+  dieValue,
+  nextDice,
+  botColor
+) {
+  const originalPiece = game.pieces.find(
+    p => p.id === pieceId
+  );
 
-function getSequenceScore(match, game, pieceId, dieValue, nextDice, botColor) {
-  // ایجاد کپی امن
+  if (!originalPiece) {
+    return -999999;
+  }
+
+  // امتیاز حرکت اول قبل از تغییر وضعیت مهره محاسبه می‌شود
+  let totalScore = calculateSingleMoveScore(
+    match,
+    game,
+    originalPiece,
+    Number(dieValue),
+    botColor
+  );
+
+  // ایجاد کپی امن برای شبیه‌سازی حرکت
   const tempGame = JSON.parse(JSON.stringify(game));
-  const piece = tempGame.pieces.find(p => p.id === pieceId);
-  
-  if (!piece) return -999999;
+  const piece = tempGame.pieces.find(
+    p => p.id === pieceId
+  );
 
-  // اجرای حرکت اول روی کپی
-  // نکته: اگر movePiece در پروژه تو خروجی غیر از boolean دارد، این شرط را اصلاح کن
-  const moveSuccess = movePiece(tempGame, piece, Number(dieValue));
-  if (!moveSuccess) return -999999;
+  if (!piece) {
+    return -999999;
+  }
 
-  let totalScore = calculateSingleMoveScore(tempGame, piece, dieValue, botColor);
+  const moveSuccess = movePiece(
+    tempGame,
+    piece,
+    Number(dieValue)
+  );
 
-  // اگر تاس دومی وجود دارد، فقط امتیاز "امنیت" و "پیشروی" را به حرکت اول اضافه می‌کنیم
-  // این کار باعث می‌شود ربات بفهمد حرکت اول، راه را برای حرکت دوم باز می‌کند یا نه
+  if (!moveSuccess) {
+    return -999999;
+  }
+
+  // بررسی حرکت دوم، در صورت وجود تاس دوم
   if (nextDice && nextDice.length > 0) {
     const nextDie = Number(nextDice[0]);
     let secondMoveFound = false;
 
     for (const p of tempGame.pieces) {
-      if (p.color === botColor && typeof canPieceMove === 'function' && canPieceMove(tempGame, p, nextDie)) {
-        // اضافه کردن امتیاز حرکت احتمالی دوم
-        totalScore += calculateSingleMoveScore(tempGame, p, nextDie, botColor);
+      if (
+        p.color === botColor &&
+        typeof canPieceMove === "function" &&
+        canPieceMove(tempGame, p, nextDie)
+      ) {
+        totalScore += calculateSingleMoveScore(
+          match,
+          tempGame,
+          p,
+          nextDie,
+          botColor
+        );
+
         secondMoveFound = true;
-        break; 
+        break;
       }
     }
-    // اگر حرکت دوم پیدا نشد، یعنی این ترکیب حرکت‌ها در آینده مسدود است
-    if (!secondMoveFound) totalScore -= 5000;
+
+    if (!secondMoveFound) {
+      totalScore -= 5000;
+    }
   }
 
   return totalScore;
 }
+
 
 function selectBestMove(match, legalMoves) {
   if (!legalMoves || legalMoves.length === 0) return null;
