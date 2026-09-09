@@ -70,6 +70,14 @@
 <body>
   <div class="card">
     <h1>پنل مدیریت موجودی</h1>
+        <div class="result" id="statsBox" style="margin-bottom: 20px; background: #1e293b;">
+      <div class="res-row">
+        <span class="res-label">🟢 کاربران آنلاین واقعی:</span>
+        <span id="realOnlineVal" class="res-val" style="color: #22c55e;">-</span>
+      </div>
+      <button id="refreshStatsBtn" style="margin-top: 10px; background: #3b82f6; padding: 6px; width: 100%;">بروزرسانی آمار</button>
+    </div>
+
     <p>افزایش/کاهش و مشاهده موجودی کاربر (با username)</p>
 
     <label for="username">نام کاربری</label>
@@ -348,6 +356,31 @@
         deductResultBox.innerHTML = '<span style="color:#ef4444;">خطا در ارتباط با سرور</span>';
       }
     });
+        // منطق دریافت آمار واقعی برای ادمین
+    const refreshStatsBtn = document.getElementById("refreshStatsBtn");
+    const realOnlineVal = document.getElementById("realOnlineVal");
+
+    refreshStatsBtn.addEventListener("click", async () => {
+      const adminSecret = adminSecretInput.value.trim();
+      if (!adminSecret) {
+        alert("لطفاً ابتدا رمز ادمین را وارد کنید.");
+        return;
+      }
+
+      realOnlineVal.innerText = "در حال دریافت...";
+      try {
+        const res = await fetch(`/admin/server-stats?adminSecret=${encodeURIComponent(adminSecret)}`);
+        const data = await res.json();
+        if (res.ok && data.success) {
+          realOnlineVal.innerText = data.realOnline + " نفر";
+        } else {
+          realOnlineVal.innerText = "خطا";
+        }
+      } catch (err) {
+        realOnlineVal.innerText = "خطا در اتصال";
+      }
+    });
+
   </script>
 </body>
 </html>

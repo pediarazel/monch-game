@@ -41,6 +41,8 @@ const TURN_MS = 30000;
 // --------- تایمرهای match
 const matchTimers = new Map(); // matchId -> { timeout }
 const connectedUsers = new Map(); // userId -> socketId
+let fakeOnlineCount = 20; // عدد پایه برای نمایش آنلاین فیک
+
 
 // userId -> { matchId, disconnectedAt, isBotPlaying }
 
@@ -462,6 +464,12 @@ app.get("/admin/treasury-report", authenticateAdminSecret, async (req, res) => {
     return safeJsonError(res, 500, e.message || "خطای داخلی");
   }
 });
+app.get("/admin/server-stats", authenticateAdminSecret, async (req, res) => {
+  return res.json({
+    success: true,
+    realOnline: connectedUsers ? connectedUsers.size : 0
+  });
+});
 
 app.post("/admin/treasury-deduct", authenticateAdminSecret, async (req, res) => {
   try {
@@ -870,8 +878,12 @@ function computeLobbyStats() {
 
 function emitLobbyStats() {
   if (!io) return;
-  io.to('lobby').emit("lobby:stats", computeLobbyStats()); // فقط برای کسانی که در اتاق 'lobby' هستند
+  const stats = computeLobbyStats();
+  // جایگزینی عدد واقعی با عدد فیک برای بازیکنان
+  stats.online = fakeOnlineCount; 
+  io.to('lobby').emit("lobby:stats", stats);
 }
+
 
 function getTierLobby(tier) {
   if (!tierLobbies.has(tier)) tierLobbies.set(tier, createLobby(tier));
@@ -3806,3 +3818,17 @@ function getAllLegalMoves(match, color, diceValues) {
 httpServer.listen(PORT, () => {
   console.log(`✅ Server listening on http://localhost:${PORT}`);
 });          
+// موتور نوسان‌ساز عدد آنلاین فیک (هر ۴ دقیقه یکبار تغییر رندوم بین ۱۰ تا ۳۰)
+setInterval(() => {
+  // تولید عدد رندوم بین 10 تا 30
+  fakeOnlineCount = Math.floor(Math.random() * (30 - 10 + 1)) + 10;
+  
+  // به‌روزرسانی فوری تمام بازیکنان در لابی با عدد جدید
+  if (io) {
+    const stats = computeLobbyStats();
+    stats.online = fakeOnlineCount;
+    io.to('lobby').emit("lobby:stats", stats);
+  }
+  
+  console.log(`[SYSTEM] Fake online count rotated to: ${fakeOnlineCount}`);
+}, 4 * 60 * 1000); // ۴ دقیقه
