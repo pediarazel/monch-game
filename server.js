@@ -1021,97 +1021,66 @@ async function chargeTierFromPlayers(match) {
 
 async function settleCoinsForMatch(match) {
   if (match.financialSettled) return;
-  if (!match.game?.winner) return;
-  if (!match.tier) throw new Error("tier نامعتبر است.");
-  assertValidTier(match.tier);
 
-  const winnerColor = match.game.winner;
-  const winnerUserId = match.playerColors[winnerColor];
-  if (!winnerUserId) throw new Error("winnerUserId پیدا نشد.");
+  const winnerColor = match.game?.winner;
+  if (!winnerColor) {
+    console.error(`[SETTLE_ERROR] No winner color found for match ${match.matchId}`);
+    return;
+  }
 
+  // تلاش برای پیدا کردن ID برنده از object اصلی
+  let winnerUserId = match.playerColors ? match.playerColors[winnerColor] : null;
+
+  // اگر مقدار null است، شاید در forfeit پاک شده باشد. 
+  // در این صورت ما فقط لاگ می‌دهیم تا دیتابیس خراب نشود
+  if (!winnerUserId) {
+    console.error(`[SETTLE_CRITICAL] WinnerUserId is NULL for ${winnerColor}. MatchData:`, JSON.stringify(match.playerColors));
+    return; 
+  }
+
+  const tier = Number(match.tier);
   const activePlayersCount = activePlayersCountFromPlayerColors(match.playerColors);
   const forfeitedCount = (match.forfeitedPlayers || []).length;
   const totalOriginalPlayers = activePlayersCount + forfeitedCount;
-
-  if (totalOriginalPlayers < 2 || totalOriginalPlayers > 4) {
-    throw new Error("تعداد بازیکنان برای تسویه مالی باید بین ۲ تا ۴ باشد.");
-  }
-
-  const totalPot = totalOriginalPlayers * match.tier;
+  const totalPot = totalOriginalPlayers * tier;
+  
   const winnerAmount = Math.floor(0.9 * totalPot);
   const treasuryAmount = Math.floor(0.05 * totalPot);
 
   const treasury = await ensureTreasuryUser();
 
   try {
+    console.log(`[SETTLE_PROCESS] Winner: ${winnerUserId}, Amount: ${winnerAmount}, Pot: ${totalPot}`);
+    
     await prisma.$transaction(async (tx) => {
-      // 1. افزایش موجودی برنده (انسان یا ربات)
-      // توجه: چون ربات هم در دیتابیس است، این دستور باید کار کند
+      // ۱. واریز به برنده
       await tx.user.update({ 
         where: { id: winnerUserId }, 
         data: { coins: { increment: winnerAmount } } 
       });
 
-      // 2. ثبت تراکنش برد
+      // ۲. ثبت تراکنش برد
       await tx.transaction.create({
         data: {
           userId: winnerUserId,
           amount: winnerAmount,
           type: "WIN",
-          note: `match:${match.matchId} tier=${match.tier} winnerColor=${winnerColor}`,
+          note: `match:${match.matchId} tier=${tier} winner=${winnerUserId}`,
         },
       });
 
-      // 3. افزایش موجودی خزانه
+      // ۳. واریز به خزانه
       await tx.user.update({ 
         where: { id: treasury.id }, 
         data: { coins: { increment: treasuryAmount } } 
       });
-
-      // 4. ثبت تراکنش خزانه
-      await tx.transaction.create({
-        data: {
-          userId: treasury.id,
-          amount: treasuryAmount,
-          type: "TREASURY_CUT",
-          note: `match:${match.matchId} tier=${match.tier} treasuryCut`,
-        },
-      });
     });
 
     match.financialSettled = true;
-
-    // دریافت موجودی‌های جدید برای اطلاع‌رسانی
-    const targets = Array.from(new Set([winnerUserId, treasury.id]));
-    const mapAfter = await getUsersCoins(targets);
-
-    // اطلاع‌رسانی موجودی برنده
-    const winnerNewBalance = mapAfter.get(winnerUserId);
-    if (winnerNewBalance !== undefined) {
-      // اینجا چک می‌کنیم اگر کاربر ربات بود پیام متفاوتی بدهد یا فقط موجودی را آپدیت کند
-      // برای سادگی و جلوگیری از خطا، پیام را فقط برای انسان‌ها با متن مشخص می‌فرستیم
-      // اگر کاربر ربات بود، سیستم احتمالاً در emitBalanceChanged آن را مدیریت می‌کند
-      emitBalanceChanged(winnerUserId, winnerNewBalance, "برنده شدید!");
-    }
-
-    // اطلاع‌رسانی موجودی خزانه
-    const treasuryNewBalance = mapAfter.get(treasury.id);
-    if (treasuryNewBalance !== undefined) {
-      emitBalanceChanged(treasury.id, treasuryNewBalance, "سهم سرور/ترژری ثبت شد.");
-    }
-
-    io.to(`match:${match.matchId}`).emit("game:settled", {
-      success: true,
-      winnerColor,
-      winnerAmount,
-      treasuryAmount,
-      tier: match.tier,
-    });
-
+    console.log(`[SETTLE_SUCCESS] Transaction committed for ${winnerUserId}`);
+    
   } catch (error) {
-    console.error("[CRITICAL_SETTLE_ERROR]", error);
-    // در صورت بروز خطا در تراکنش، برای جلوگیری از تکرار، خطا را پرتاب می‌کنیم
-    throw error;
+    console.error("[SETTLE_TRANSACTION_FAILED]", error);
   }
 }
 
@@ -2049,47 +2018,43 @@ async function handleLobbyTimeout(lobby) {
     count === 1 &&
     LOBBY_BOT_TIERS.has(Number(lobby.tier))
   ) {
+
     try {
-      // جلوگیری از Query تکراری به دیتابیس (رفع لگ) و تزریق نام کاربری (رفع مشکل نمایش)
-      if (!lobby.botInjected) {
-        const botUser = await ensureLobbyBotUser();
+      const botUser = await ensureLobbyBotUser();
 
-        // اگر پول ربات کمتر از مبلغ میز بود، ربات وارد نشود
-        if (Number(botUser.coins) < Number(lobby.tier)) {
-          console.log(`[LOBBY_BOT] Bot ${botUser.username} blocked: balance ${botUser.coins} < ${lobby.tier}`);
-          return;
-        }
+      // بررسی سخت‌گیرانه موجودی ربات قبل از ورود
+      const minRequired = Number(lobby.tier);
+      const botCoins = Number(botUser.coins);
 
-        if (!lobby.playerUidsInOrder.includes(botUser.id)) {
-          lobby.playerUidsInOrder.push(botUser.id);
-
-          lobby.botUserId = botUser.id;
-          lobby.botInjected = true;
-          
-          // ثبت نام کاربری در هر دو کش لابی برای نمایش درست در لابی و Canvas بازی
-          lobby.playerNames = lobby.playerNames || {};
-          lobby.playerNames[botUser.id] = botUser.username;
-
-          lobby.playerNamesByUserId = lobby.playerNamesByUserId || {};
-          lobby.playerNamesByUserId[String(botUser.id)] = botUser.username;
-
-          console.log(`[LOBBY_BOT] Injected bot ${botUser.username} (${botUser.id}) for tier ${lobby.tier}`);
-
-        }
+      if (botCoins < minRequired) {
+        console.error(`[LOBBY_BOT_CRITICAL_STOP] Bot ${botUser.username} has ${botCoins}, need ${minRequired}. BLOCKED.`);
+        return;
       }
 
+      if (!lobby.playerUidsInOrder.includes(botUser.id)) {
+        lobby.playerUidsInOrder.push(botUser.id);
+
+        lobby.botUserId = botUser.id;
+        lobby.botInjected = true;
+
+        lobby.playerNames = lobby.playerNames || {};
+        lobby.playerNames[botUser.id] = botUser.username;
+
+        lobby.playerNamesByUserId = lobby.playerNamesByUserId || {};
+        lobby.playerNamesByUserId[String(botUser.id)] = botUser.username;
+
+        console.log(`[LOBBY_BOT] Injected bot ${botUser.username} (${botUser.id}) for tier ${lobby.tier}`);
+      }
 
       emitLobbyStatus(lobby);
-
       return startMatchFromLobby(lobby, 2);
     } catch (error) {
       console.error("[LOBBY_BOT] Injection failed:", error);
-
-      lobby.deadline = null;
       lobby.status = "lobby";
       emitLobbyStatus(lobby);
       return;
     }
+
   }
 
   if (count === 2) {
