@@ -3691,50 +3691,66 @@ function calculateSingleMoveScore(game, piece, dieValue, botColor) {
   
   const isExitingYard = (piece.state === "yard" && moveDie === 6);
   const potentialTargetPathIdx = (piece.state === "path" || piece.state === "start") ? (currentPathIdx + moveDie) : -1;
-  // توجه: مقدار 36 را بر اساس طول مسیر خودت چک کن (در کد تو 36 بود)
   const isEnteringHome = (piece.state === "path" && potentialTargetPathIdx >= 36); 
   const isAmbushZone = (potentialTargetPathIdx >= 16 && potentialTargetPathIdx <= 18);
-  const isNearHome = (piece.state === "path" && potentialTargetPathIdx >= 33);
   
-  // استفاده از توابع خودت برای دقت ۱۰۰٪
   const canCapture = typeof isCapture === 'function' && isCapture(null, game, playerColor, piece, moveDie);
   const isNowVulnerable = typeof isVulnerable === 'function' && isVulnerable(null, game, playerColor, piece, moveDie);
 
+  // --- سیستم امتیازدهی اصلاح شده و امن ---
+  
+  // ۱. اولویت ضربه (بسیار بالا)
   if (canCapture) return 1000000;
+
+  // ۲. اولویت خروج از خانه
   if (isExitingYard) return 500000;
-  if (isAmbushZone) return 100000;
-  if (isNowVulnerable && (isNearHome || isAmbushZone)) return 50000;
-  if (isEnteringHome) return 10000;
-  return (currentPathIdx * 100) + (moveDie / 2);
+
+  // ۳. اولویت ورود به خانه
+  if (isEnteringHome) return 200000;
+
+  // ۴. امنیت (اگر حرکت خطرناک است، امتیاز را کم کن اما نه آنقدر که از تمام حرکت‌های قانونی کمتر شود)
+  // استفاده از عدد منفی معقول برای اینکه ربات همچنان "مجبور" به حرکت کند اما با احتیاط
+  if (isNowVulnerable) return -50000; 
+  if (isAmbushZone) return -20000;
+
+  // ۵. امتیاز پیشروی (پایه)
+  return (currentPathIdx * 100) + (moveDie * 10);
 }
 
 function getSequenceScore(match, game, pieceId, dieValue, nextDice, botColor) {
-  // ایجاد یک کپی عمیق از بازی برای شبیه‌سازی بدون آسیب به بازی اصلی
+  // ایجاد کپی امن
   const tempGame = JSON.parse(JSON.stringify(game));
   const piece = tempGame.pieces.find(p => p.id === pieceId);
   
-  if (!piece || !movePiece(tempGame, piece, Number(dieValue))) return 0;
+  if (!piece) return -999999;
+
+  // اجرای حرکت اول روی کپی
+  // نکته: اگر movePiece در پروژه تو خروجی غیر از boolean دارد، این شرط را اصلاح کن
+  const moveSuccess = movePiece(tempGame, piece, Number(dieValue));
+  if (!moveSuccess) return -999999;
 
   let totalScore = calculateSingleMoveScore(tempGame, piece, dieValue, botColor);
 
-  // اگر تاس دومی وجود داشته باشد، حرکت دوم را هم روی کپی شبیه‌سازی کن
+  // اگر تاس دومی وجود دارد، فقط امتیاز "امنیت" و "پیشروی" را به حرکت اول اضافه می‌کنیم
+  // این کار باعث می‌شود ربات بفهمد حرکت اول، راه را برای حرکت دوم باز می‌کند یا نه
   if (nextDice && nextDice.length > 0) {
-    for (const nextDie of nextDice) {
-      let foundSecondMove = false;
-      for (const p of tempGame.pieces) {
-        if (p.color === botColor && canPieceMove(tempGame, p, nextDie)) {
-          totalScore += calculateSingleMoveScore(tempGame, p, nextDie, botColor);
-          foundSecondMove = true;
-          break; 
-        }
+    const nextDie = Number(nextDice[0]);
+    let secondMoveFound = false;
+
+    for (const p of tempGame.pieces) {
+      if (p.color === botColor && typeof canPieceMove === 'function' && canPieceMove(tempGame, p, nextDie)) {
+        // اضافه کردن امتیاز حرکت احتمالی دوم
+        totalScore += calculateSingleMoveScore(tempGame, p, nextDie, botColor);
+        secondMoveFound = true;
+        break; 
       }
-      if (!foundSecondMove) break;
     }
+    // اگر حرکت دوم پیدا نشد، یعنی این ترکیب حرکت‌ها در آینده مسدود است
+    if (!secondMoveFound) totalScore -= 5000;
   }
+
   return totalScore;
 }
-// --- END OF HELPERS ---
-
 
 function selectBestMove(match, legalMoves) {
   if (!legalMoves || legalMoves.length === 0) return null;
@@ -3745,19 +3761,19 @@ function selectBestMove(match, legalMoves) {
   let maxScore = -Infinity;
 
   for (const move of legalMoves) {
-    // به جای محاسبه امتیاز ساده، امتیاز کل مسیر (تاس اول + تاس دوم) را می‌گیریم
+    // محاسبه امتیاز
     const score = getSequenceScore(match, game, move.pieceId, move.dieValue, game.pendingDice, botColor);
 
+    // انتخاب بهترین حرکت
     if (score > maxScore) {
       maxScore = score;
       bestMove = move;
     }
   }
 
-  return bestMove;
+  // اطمینان از اینکه اگر هیچ حرکتی امتیاز مثبت نداشت، باز هم یکی را انتخاب کند
+  return bestMove || legalMoves[0];
 }
-
-
 
 
 async function executeBotMove(match, botColor, move) {
