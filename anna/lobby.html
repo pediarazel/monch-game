@@ -116,6 +116,111 @@ input, select{
         <span style="font-size: 20px; filter: drop-shadow(0 0 5px rgba(212,175,55,0.4));">🎲👑</span>
     </div>
 </div>
+  <!-- باکس پشتیبانی کوچک و شکیل برای تاج تاس -->
+<div class="support-mini-container">
+  <span class="support-label">واریز و برداشت:</span>
+  <div class="id-mini-wrapper">
+    <a href="https://t.me/TajTasAdmin" target="_blank" id="telegram-link-mini">@TajTasAdmin</a>
+    <button onclick="copyTelegramIdMini()" class="copy-btn-mini">
+      <i class="fas fa-copy"></i>
+    </button>
+  </div>
+</div>
+
+<script>
+function copyTelegramIdMini() {
+  const telegramId = "@TajTasAdmin"; 
+  navigator.clipboard.writeText(telegramId).then(() => {
+    showToast("آیدی کپی شد!");
+  }).catch(err => {
+    console.error('خطا در کپی: ', err);
+  });
+}
+
+function showToast(message) {
+  const toast = document.createElement("div");
+  toast.className = "mini-toast";
+  toast.innerText = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2000);
+}
+</script>
+
+<style>
+.support-mini-container {
+  background-color: #a0a0a0; /* همرنگ پس‌زمینه لابی */
+  padding: 6px 12px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 10px auto 5px auto; 
+  width: fit-content;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.support-label {
+  font-size: 0.75rem;
+  color: #333;
+  font-weight: bold;
+}
+
+.id-mini-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.5);
+  padding: 2px 8px;
+  border-radius: 15px;
+}
+
+#telegram-link-mini {
+  font-size: 0.8rem;
+  color: #0088cc;
+  text-decoration: none;
+  font-weight: bold;
+}
+
+.copy-btn-mini {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #555;
+  font-size: 0.8rem;
+  padding: 0;
+  display: flex;
+  align-items: center;
+}
+
+.copy-btn-mini:hover {
+  color: #0088cc;
+}
+
+/* استایل پیام کپی شدن (Toast) */
+.mini-toast {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  z-index: 9999;
+  animation: fadeInOut 2s ease-in-out;
+}
+
+@keyframes fadeInOut {
+  0% { opacity: 0; transform: translate(-50%, 10px); }
+  20% { opacity: 1; transform: translate(-50%, 0); }
+  80% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -10px); }
+}
+</style>
+
   <!-- باکس نمایش آیدی و دکمه کپی -->
 <div id="userInfoBar" style="display:flex; justify-content:space-between; align-items:center; background:#0a0a0a; border:1px solid #252525; padding:8px 12px; border-radius:8px; margin:0 auto 12px auto; max-width:430px;">
 
