@@ -943,21 +943,21 @@ async function ensureTreasuryUser() {
   });
 }
 async function ensureLobbyBotUser() {
-  // ربات لابی را بر اساس نقش (نه نام) پیدا کن
-  const existingBot = await prisma.user.findFirst({
-    where: { role: "LOBBY_BOT" }
+  const existingBot = await prisma.user.findUnique({
+    where: { username: LOBBY_BOT_USERNAME }
   });
 
   if (existingBot) {
-    // شارژ خودکار حذف شد؛ موجودی فقط دستی (توسط ادمین) تغییر می‌کند
+    if (existingBot.role !== "LOBBY_BOT") {
+      throw new Error(`کاربر ${LOBBY_BOT_USERNAME} وجود دارد ولی نقش LOBBY_BOT ندارد.`);
+    }
+
     return existingBot;
   }
 
-
-  // اگر ربات نبود، با نام رندوم و نقش LOBBY_BOT بساز
   const newBot = await prisma.user.create({
     data: {
-      username: `Bot_${Math.floor(Math.random() * 10000)}`,
+      username: LOBBY_BOT_USERNAME,
       password: await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 12),
       role: "LOBBY_BOT",
       coins: LOBBY_BOT_INITIAL_COINS
@@ -2037,13 +2037,18 @@ async function handleLobbyTimeout(lobby) {
         lobby.botUserId = botUser.id;
         lobby.botInjected = true;
 
+
+        const botDisplayName = getRandomBotName();
+
         lobby.playerNames = lobby.playerNames || {};
-        lobby.playerNames[botUser.id] = botUser.username;
+        lobby.playerNames[botUser.id] = botDisplayName;
 
         lobby.playerNamesByUserId = lobby.playerNamesByUserId || {};
-        lobby.playerNamesByUserId[String(botUser.id)] = botUser.username;
+        lobby.playerNamesByUserId[String(botUser.id)] = botDisplayName;
 
-        console.log(`[LOBBY_BOT] Injected bot ${botUser.username} (${botUser.id}) for tier ${lobby.tier}`);
+
+console.log(`[LOBBY_BOT] Injected bot ${botDisplayName} (real=${botUser.username}, id=${botUser.id}) for tier ${lobby.tier}`);
+
       }
 
       emitLobbyStatus(lobby);
