@@ -949,14 +949,10 @@ async function ensureLobbyBotUser() {
   });
 
   if (existingBot) {
-    if (Number(existingBot.coins || 0) < LOBBY_BOT_INITIAL_COINS) {
-      await prisma.user.update({
-        where: { id: existingBot.id },
-        data: { coins: LOBBY_BOT_INITIAL_COINS }
-      });
-    }
+    // شارژ خودکار حذف شد؛ موجودی فقط دستی (توسط ادمین) تغییر می‌کند
     return existingBot;
   }
+
 
   // اگر ربات نبود، با نام رندوم و نقش LOBBY_BOT بساز
   const newBot = await prisma.user.create({
@@ -2025,8 +2021,16 @@ async function handleLobbyTimeout(lobby) {
       // جلوگیری از Query تکراری به دیتابیس (رفع لگ) و تزریق نام کاربری (رفع مشکل نمایش)
       if (!lobby.botInjected) {
         const botUser = await ensureLobbyBotUser();
+
+        // اگر پول ربات کمتر از مبلغ میز بود، ربات وارد نشود
+        if (Number(botUser.coins) < Number(lobby.tier)) {
+          console.log(`[LOBBY_BOT] Bot ${botUser.username} blocked: balance ${botUser.coins} < ${lobby.tier}`);
+          return;
+        }
+
         if (!lobby.playerUidsInOrder.includes(botUser.id)) {
           lobby.playerUidsInOrder.push(botUser.id);
+
           lobby.botUserId = botUser.id;
           lobby.botInjected = true;
           
