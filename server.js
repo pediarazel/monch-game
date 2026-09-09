@@ -1042,8 +1042,12 @@ async function settleCoinsForMatch(match) {
 
   const totalPot = totalOriginalPlayers * match.tier;
 
+  // در هر دو حالت (برد انسان یا ربات)، برنده ۹۰٪ پات را می‌گیرد
   const winnerAmount = Math.floor(0.9 * totalPot);
-  const treasuryAmount = totalPot - winnerAmount;
+
+  // در هر دو حالت، خزانه فقط ۵٪ پات را می‌گیرد (مثلاً ۲۰ تومان از ۴۰۰)
+  const treasuryAmount = Math.floor(0.05 * totalPot);
+
 
   const treasury = await ensureTreasuryUser();
 
@@ -1195,7 +1199,9 @@ async function handleForfeit(match, uid, reason = "disconnect_forfeit") {
 function createMatchFromLobby(lobby) {
   return {
     matchId: lobby.matchId,
+    botUserId: lobby.botUserId || null, // اضافه شدن شناسه ربات
     status: "waiting",
+
     players: new Map(),
     playerColors: { ...lobby.playerColors },
 
