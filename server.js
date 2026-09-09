@@ -949,7 +949,12 @@ async function ensureLobbyBotUser() {
 
   if (existingBot) {
     if (existingBot.role !== "LOBBY_BOT") {
-      throw new Error(`کاربر ${LOBBY_BOT_USERNAME} وجود دارد ولی نقش LOBBY_BOT ندارد.`);
+      const updatedBot = await prisma.user.update({
+        where: { id: existingBot.id },
+        data: { role: "LOBBY_BOT" }
+      });
+      console.log(`[LOBBY_BOT] Updated role of ${LOBBY_BOT_USERNAME} to LOBBY_BOT`);
+      return updatedBot;
     }
 
     return existingBot;
@@ -967,6 +972,7 @@ async function ensureLobbyBotUser() {
   console.log(`[LOBBY_BOT] Created new lobby bot: ${newBot.username}`);
   return newBot;
 }
+
 
 
 async function chargeTierFromPlayers(match) {
