@@ -3814,35 +3814,39 @@ function calculateSingleMoveScore(
   const pieceDifference =
     botPiecesCount - opponentPiecesCount;
 
-  // شکار همیشه بالاترین اولویت را دارد
+  // ۱. شکار مهره حریف: بالاترین اولویت (۵ میلیون)
   if (canCapture) {
-    return 5000000 + (pieceDifference * 1000000);
+    return 5000000 + (pieceDifference * 100000);
   }
 
-  // ورود به خانه امن است؛ نباید با جریمه‌ی آسیب‌پذیری رد شود
+  // ۲. وارد شدن به خط خانه امن (۹۰۰ هزار)
   if (isEnteringHome) {
-    return 800000 + (moveDie * 1000);
+    return 900000 + (moveDie * 1000);
   }
 
-  // خروج مهره از yard برای افزایش قدرت مانور
+  // ۳. بیرون آوردن مهره از حیاط با تاس ۶ (۸۰۰ هزار)
   if (isExitingYard) {
     return 800000;
   }
 
-  // جلوگیری از قرار دادن مهره در معرض شکار
+  // ۴. امتیاز پایه برای پیشروی مهره در نقشه
+  let score = 5000 + (moveDie * 100);
+
+  // ۵. اگر حرکت باعث شود مهره در تیررس حریف قرار گیرد، جریمه منطقی بده (نه فلج‌کننده)
   if (isNowVulnerable) {
-    return -10000000;
+    score -= 3000;
+  } else {
+    // پاداش برای مقصدی که حریف نمی‌تواند با یک تاس آن را بزند
+    score += 1500;
   }
 
-  // پیشروی معمولی
-  let progressionScore =
-    (currentPathIdx * 100) + (moveDie * 10);
-
-  if (pieceDifference > 1) {
-    progressionScore *= 1.5;
+  // اولویت بیشتر برای مهره‌هایی که جلوتر هستند تا سریع‌تر وارد خانه شوند
+  if (piece.state === "path") {
+    score += (currentPathIdx * 20);
   }
 
-  return progressionScore;
+  return score;
+
 }
 
 
