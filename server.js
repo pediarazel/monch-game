@@ -1518,7 +1518,8 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
 
         if (
           chosenForThisDie &&
-          chosenPriorityForThisDie > bestPriority
+          chosenPriorityForThisDie >= bestPriority
+
         ) {
           bestPriority = chosenPriorityForThisDie;
           selectedDieIndex = dieIndex;
