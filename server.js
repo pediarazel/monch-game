@@ -3682,6 +3682,7 @@ function getPieceTargetCell(match, color, piece, dieValue) {
 }
 
 function isCapture(match, game, botColor, piece, dieValue) {
+  console.log(`[CAPTURE_DEBUG] Checking capture for piece ${piece.id} at pathIndex ${piece.pathIndex} with die ${dieValue}`);
   try {
     const targetCell = getPieceTargetCell(
       match,
@@ -3695,6 +3696,7 @@ function isCapture(match, game, botColor, piece, dieValue) {
     }
 
     return game.pieces.some(p => {
+      // DEBUG: console.log(`[CAPTURE_DEBUG] Checking opponent piece ${p.id} at index ${p.pathIndex}`);
       if (!p || p.color === botColor || p.state !== "path") {
         return false;
       }
@@ -3725,6 +3727,7 @@ function isVulnerable(match, game, botColor, piece, dieValue) {
 
     // بررسی حمله‌ی حریف از فاصله‌ی ۱ تا ۶ خانه
     return game.pieces.some(p => {
+      // DEBUG: console.log(`[CAPTURE_DEBUG] Checking opponent piece ${p.id} at index ${p.pathIndex}`);
       if (!p || p.color === botColor || p.state !== "path") {
         return false;
       }
