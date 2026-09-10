@@ -3895,10 +3895,11 @@ function getSequenceScore(
     return -999999;
   }
 
-  // بررسی حرکت دوم، در صورت وجود تاس دوم
+  // بررسی حرکت دوم: جستجوی بهترین حرکت ممکن (شکار یا پیشروی)
   if (nextDice && nextDice.length > 0) {
     const nextDie = Number(nextDice[0]);
-    let secondMoveFound = false;
+    let maxSecondMoveScore = -999999;
+    let foundAnySecondMove = false;
 
     for (const p of tempGame.pieces) {
       if (
@@ -3906,23 +3907,28 @@ function getSequenceScore(
         typeof canPieceMove === "function" &&
         canPieceMove(tempGame, p, nextDie)
       ) {
-        totalScore += calculateSingleMoveScore(
+        const score = calculateSingleMoveScore(
           match,
           tempGame,
           p,
           nextDie,
           botColor
         );
-
-        secondMoveFound = true;
-        break;
+        
+        if (score > maxSecondMoveScore) {
+          maxSecondMoveScore = score;
+        }
+        foundAnySecondMove = true;
       }
     }
 
-    if (!secondMoveFound) {
-      totalScore -= 5000;
+    if (foundAnySecondMove) {
+      totalScore += maxSecondMoveScore;
+    } else {
+      totalScore -= 5000; // جریمه برای عدم توانایی در حرکت با تاس دوم
     }
   }
+
 
   return totalScore;
 }
