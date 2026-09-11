@@ -1486,12 +1486,12 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
           }
           // بعد از آن، مهره‌ای که می‌تواند capture کند
           else if (
-            typeof capture === "function" &&
-            (piece.state === "path" || piece.state === "start") &&
-            capture(match.game, piece, dieValue)
+            typeof isCapture === "function" &&
+            isCapture(match, match.game, botColor, piece, dieValue)
           ) {
             priority = 700;
           }
+
 // این بخش جدید را اضافه کن تا بفهمیم چرا نشد:
           else if (typeof capture === "function" && capture(match.game, piece, dieValue)) {
              console.log(`[DEBUG_AI] Capture possible but state mismatch! Piece: ${piece.id}, State: ${piece.state}`);
