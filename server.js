@@ -3770,12 +3770,15 @@ function getPiecePathIndex(game, piece) {
   if (piece.state === "home") return 999;
   if (piece.state === "start") return 0;
   if (piece.state === "path") {
-    const fullPath = mainPath[piece.color] || [];
-    const idx = fullPath.findIndex(c => c.x === piece.x && c.y === piece.y);
-    return idx >= 0 ? idx : 0;
+    if (typeof piece.pathIndex === "number" && piece.pathIndex >= 0 && piece.pathIndex < 36) {
+      const entry = layout.entryPathIndexes[piece.color];
+      return (piece.pathIndex - entry + 36) % 36;
+    }
+    return 0;
   }
   return 0;
 }
+
 
 function evaluateSingleAction(gameBefore, originalPiece, dieValue, botColor) {
   const result = {
