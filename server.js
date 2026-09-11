@@ -3709,6 +3709,7 @@ function isCapture(match, game, botColor, piece, dieValue) {
       }
 
       const opponentCell = p.state === "start" ? layout.startCells[p.color] : layout.mainPath[p.pathIndex];
+console.log(`[DEBUG_CAPTURE] OpponentCell:`, opponentCell, "Target:", targetCell);
 
 
       return opponentCell &&
