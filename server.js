@@ -1487,11 +1487,12 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
           // بعد از آن، مهره‌ای که می‌تواند capture کند
           else if (
             typeof capture === "function" &&
-            piece.state === "path" &&
+            (piece.state === "path" || piece.state === "start") &&
             capture(match.game, piece, dieValue)
           ) {
             priority = 700;
           }
+
           // بعد مهره‌های نزدیک خانه
           else if (
             piece.state === "path" &&
@@ -3699,11 +3700,12 @@ function isCapture(match, game, botColor, piece, dieValue) {
 
     return game.pieces.some(p => {
       // DEBUG: console.log(`[CAPTURE_DEBUG] Checking opponent piece ${p.id} at index ${p.pathIndex}`);
-      if (!p || p.color === botColor || p.state !== "path") {
+      if (!p || p.color === botColor || (p.state !== "path" && p.state !== "start")) {
         return false;
       }
 
-      const opponentCell = layout.mainPath[p.pathIndex];
+      const opponentCell = p.state === "start" ? layout.startCells[p.color] : layout.mainPath[p.pathIndex];
+
 
       return opponentCell &&
         opponentCell.x === targetCell.x &&
