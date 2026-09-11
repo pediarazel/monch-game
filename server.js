@@ -3879,8 +3879,10 @@ function evaluateFullSequence(match, game, move, botColor) {
 
   const summary = {
     move: move,
+    isImmediateCapture: firstStep.result.isCapture,
     hasCapture: firstStep.result.isCapture,
     captureVictimProgress: firstStep.result.captureVictimProgress,
+
     hasChase: false,
     chaseVictimProgress: 0,
     hasEntry: firstStep.result.isEntry,
@@ -3974,12 +3976,18 @@ function selectBestMove(match, legalMoves) {
       return a.tier - b.tier;
     }
 
-    // ۲. حل تساوی درون اصل ۱ (شکار): حریف جلوتر اولویت دارد
+    // ۲. حل تساوی درون اصل ۱ (شکار)
     if (a.tier === 1) {
+      // اولویت اول: شکار فوری (تاس اول) بر شکار تاخیری (تاس دوم)
+      if (a.isImmediateCapture !== b.isImmediateCapture) {
+        return a.isImmediateCapture ? -1 : 1;
+      }
+      // اولویت دوم: حریف جلوتر
       if (b.captureVictimProgress !== a.captureVictimProgress) {
         return b.captureVictimProgress - a.captureVictimProgress;
       }
     }
+
 
     // ۳. حل تساوی درون اصل تعقیب: حریف جلوتر اولویت دارد
     if (a.tier === 2) {
