@@ -3778,6 +3778,74 @@ function getPiecePathIndex(game, piece) {
   }
   return 0;
 }
+function isOpponentThreatening(game, opponent, target) {
+  if (!game || !opponent || !target) return false;
+
+  const targetIsExposed =
+    target.state === "start" || target.state === "path";
+
+  const opponentCanAttack =
+    opponent.state === "start" || opponent.state === "path";
+
+  if (!targetIsExposed || !opponentCanAttack) return false;
+
+  // بررسی می‌کند آیا حریف با یکی از اعداد ۱ تا ۶ می‌تواند این مهره را شکار کند.
+  for (let dieValue = 1; dieValue <= 6; dieValue++) {
+    const simulatedGame = JSON.parse(JSON.stringify(game));
+    const simulatedOpponent = simulatedGame.pieces.find(
+      p => p.id === opponent.id
+    );
+    const simulatedTarget = simulatedGame.pieces.find(
+      p => p.id === target.id
+    );
+
+    if (!simulatedOpponent || !simulatedTarget) continue;
+
+    if (
+      typeof canPieceMove === "function" &&
+      !canPieceMove(simulatedGame, simulatedOpponent, dieValue)
+    ) {
+      continue;
+    }
+
+    const targetStateBefore = simulatedTarget.state;
+    const moved = movePiece(
+      simulatedGame,
+      simulatedOpponent,
+      dieValue
+    );
+
+    if (
+      moved &&
+      targetStateBefore !== "yard" &&
+      simulatedTarget.state === "yard"
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function countThreateningOpponents(game, target, botColor) {
+  if (!game || !target) return 0;
+
+  if (target.state !== "start" && target.state !== "path") {
+    return 0;
+  }
+
+  let count = 0;
+
+  for (const opponent of game.pieces) {
+    if (opponent.color === botColor) continue;
+
+    if (isOpponentThreatening(game, opponent, target)) {
+      count++;
+    }
+  }
+
+  return count;
+}
 
 
 function evaluateSingleAction(gameBefore, originalPiece, dieValue, botColor) {
@@ -3785,14 +3853,21 @@ function evaluateSingleAction(gameBefore, originalPiece, dieValue, botColor) {
     isCapture: false,
     isEntry: false,
     isHomeOrGoal: false,
+    isWinningMove: false,
     isSafeDestination: false,
     captureVictimProgress: 0,
+    startDangerOpponentCount: 0,
     endDangerOpponentCount: 0,
-    pieceProgress: 0
+    escapedDangerCount: 0,
+    pieceProgress: 0,
+    homeProgress: -1
   };
+
 
   const startState = originalPiece.state;
   const startIdx = getPiecePathIndex(gameBefore, originalPiece);
+  result.startDangerOpponentCount =
+    countThreateningOpponents(gameBefore, originalPiece, botColor);
 
   // شبیه‌سازی حرکت
   const tempGame = JSON.parse(JSON.stringify(gameBefore));
@@ -3810,10 +3885,23 @@ function evaluateSingleAction(gameBefore, originalPiece, dieValue, botColor) {
     result.isEntry = true;
   }
 
-  // ۲. بررسی ورود به خانه یا اتمام مهره
-  if (tempPiece.state === "home" || (startState === "path" && tempPiece.state === "path" && getPiecePathIndex(tempGame, tempPiece) > 51)) {
+  // ۲. ورود به مسیر امن خانه یا پیشروی در آن
+  if (
+    tempPiece.state === "home" &&
+    (
+      startState !== "home" ||
+      tempPiece.homeIndex > originalPiece.homeIndex
+    )
+  ) {
     result.isHomeOrGoal = true;
   }
+
+  if (tempPiece.state === "home") {
+    result.homeProgress = tempPiece.homeIndex;
+  }
+
+  result.isWinningMove = checkWinner(tempGame) === botColor;
+
 
   // ۳. بررسی شکار مستقیم
   const opponentsAfter = tempGame.pieces.filter(p => p.color !== botColor && (p.state === "path" || p.state === "start"));
@@ -3825,19 +3913,22 @@ function evaluateSingleAction(gameBefore, originalPiece, dieValue, botColor) {
     }
   }
 
-  // ۴. بررسی امنیت مقصد و خطر حریفان
-  const opponents = tempGame.pieces.filter(p => p.color !== botColor && (p.state === "path" || p.state === "start"));
-  let threatCount = 0;
-  for (const opp of opponents) {
-    if (typeof isOpponentThreatening === "function") {
-      if (isOpponentThreatening(tempGame, opp, tempPiece)) {
-        threatCount++;
-      }
-    }
-  }
-  result.endDangerOpponentCount = threatCount;
-  result.isSafeDestination = (threatCount === 0);
-  result.pieceProgress = getPiecePathIndex(tempGame, tempPiece);
+  // ۴. مقایسه خطر قبل و بعد از حرکت
+  result.endDangerOpponentCount =
+    countThreateningOpponents(tempGame, tempPiece, botColor);
+
+  result.escapedDangerCount = Math.max(
+    0,
+    result.startDangerOpponentCount -
+      result.endDangerOpponentCount
+  );
+
+  result.isSafeDestination =
+    result.endDangerOpponentCount === 0;
+
+  result.pieceProgress =
+    getPiecePathIndex(tempGame, tempPiece);
+
 
   return { result, tempGame, tempPiece, startIdx };
 }
@@ -3887,10 +3978,18 @@ function evaluateFullSequence(match, game, move, botColor) {
     chaseVictimProgress: 0,
     hasEntry: firstStep.result.isEntry,
     hasHome: firstStep.result.isHomeOrGoal,
+    isWinningMove: firstStep.result.isWinningMove,
     isSafe: firstStep.result.isSafeDestination,
-    threatCount: firstStep.result.endDangerOpponentCount,
+    startThreatCount:
+      firstStep.result.startDangerOpponentCount,
+    threatCount:
+      firstStep.result.endDangerOpponentCount,
+    escapedDangerCount:
+      firstStep.result.escapedDangerCount,
     progress: firstStep.result.pieceProgress,
+    homeProgress: firstStep.result.homeProgress,
     canUseSecondDie: true
+
   };
 
   // بررسی تعقیب بعد از حرکت اول
@@ -3935,18 +4034,25 @@ function evaluateFullSequence(match, game, move, botColor) {
     }
   }
 
-  // تعیین سطح هرم قوانین (Rule Tier)
-  if (summary.hasCapture) {
-    summary.tier = 1; // اصل ۱-الف: شکار
-  } else if (summary.hasChase) {
-    summary.tier = 2; // اصل ۱-ب: تعقیب هدفمند
-  } else if (summary.hasEntry) {
-    summary.tier = 3; // اصل ۲: ورود به بازی
+  // تعیین سطح هرم قوانین
+  if (summary.isWinningMove) {
+    summary.tier = 0; // برد قطعی
+  } else if (summary.isImmediateCapture) {
+    summary.tier = 1; // شکار فوری با همین تاس
+  } else if (summary.escapedDangerCount > 0) {
+    summary.tier = 2; // نجات مهره در خطر
   } else if (summary.hasHome) {
-    summary.tier = 4; // اصل ۳: ورود به خانه / گل
+    summary.tier = 3; // ورود یا پیشروی در خانه امن
+  } else if (summary.hasCapture) {
+    summary.tier = 4; // ایجاد شکار با تاس دوم
+  } else if (summary.hasEntry && summary.isSafe) {
+    summary.tier = 5; // ورود امن مهره جدید
+  } else if (summary.hasChase && summary.isSafe) {
+    summary.tier = 6; // تعقیب امن
   } else {
-    summary.tier = 5; // اصل ۴: حرکت عادی
+    summary.tier = 7; // حرکت عادی یا ناامن
   }
+
 
   return summary;
 }
@@ -3971,44 +4077,71 @@ function selectBestMove(match, legalMoves) {
 
   // مرتب‌سازی اکید طبق هرم قوانین (بدون جمع امتیازی مخدوش‌کننده)
   evaluatedMoves.sort((a, b) => {
-    // ۱. تقدم اصل قانون (Tier کمتر یعنی اولویت بالاتر)
+    // ۱. ابتدا اصل مهم‌تر هرم
     if (a.tier !== b.tier) {
       return a.tier - b.tier;
     }
 
-    // ۲. حل تساوی درون اصل ۱ (شکار)
-    if (a.tier === 1) {
-      // اولویت اول: شکار فوری (تاس اول) بر شکار تاخیری (تاس دوم)
-      if (a.isImmediateCapture !== b.isImmediateCapture) {
-        return a.isImmediateCapture ? -1 : 1;
-      }
-      // اولویت دوم: حریف جلوتر
-      if (b.captureVictimProgress !== a.captureVictimProgress) {
-        return b.captureVictimProgress - a.captureVictimProgress;
+    // ۲. در شکار، حریف جلوتر ارزش بیشتری دارد
+    if (a.tier === 1 || a.tier === 4) {
+      if (
+        b.captureVictimProgress !==
+        a.captureVictimProgress
+      ) {
+        return (
+          b.captureVictimProgress -
+          a.captureVictimProgress
+        );
       }
     }
 
-
-    // ۳. حل تساوی درون اصل تعقیب: حریف جلوتر اولویت دارد
+    // ۳. در فرار، حرکتی که خطر بیشتری کم کند بهتر است
     if (a.tier === 2) {
-      if (b.chaseVictimProgress !== a.chaseVictimProgress) {
-        return b.chaseVictimProgress - a.chaseVictimProgress;
+      if (
+        b.escapedDangerCount !==
+        a.escapedDangerCount
+      ) {
+        return (
+          b.escapedDangerCount -
+          a.escapedDangerCount
+        );
       }
     }
 
-    // ۴. حفظ توانایی بازی با تاس دوم
-    if (a.canUseSecondDie !== b.canUseSecondDie) {
-      return a.canUseSecondDie ? -1 : 1;
+    // ۴. در خانه، پیشروی بیشتر بهتر است
+    if (a.tier === 3) {
+      if (b.homeProgress !== a.homeProgress) {
+        return b.homeProgress - a.homeProgress;
+      }
     }
 
-    // ۵. ایمنی مقصد و تعداد تهدیدها
+    // ۵. در تعقیب، هدف جلوتر ارزش بیشتری دارد
+    if (a.tier === 6) {
+      if (
+        b.chaseVictimProgress !==
+        a.chaseVictimProgress
+      ) {
+        return (
+          b.chaseVictimProgress -
+          a.chaseVictimProgress
+        );
+      }
+    }
+
+    // ۶. مقصدی با حریف تهدیدکننده کمتر بهتر است
     if (a.threatCount !== b.threatCount) {
       return a.threatCount - b.threatCount;
     }
 
-    // ۶. پیشروی بیشتر در مسیر
+    // ۷. حفظ امکان استفاده از تاس دوم
+    if (a.canUseSecondDie !== b.canUseSecondDie) {
+      return a.canUseSecondDie ? -1 : 1;
+    }
+
+    // ۸. در حالت برابر، مهره جلوتر حرکت کند
     return b.progress - a.progress;
   });
+
 
   return evaluatedMoves[0].move;
 }
