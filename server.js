@@ -1492,7 +1492,11 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
           ) {
             priority = 700;
           }
-
+// این بخش جدید را اضافه کن تا بفهمیم چرا نشد:
+          else if (typeof capture === "function" && capture(match.game, piece, dieValue)) {
+             console.log(`[DEBUG_AI] Capture possible but state mismatch! Piece: ${piece.id}, State: ${piece.state}`);
+             priority = 100;
+          }
           // بعد مهره‌های نزدیک خانه
           else if (
             piece.state === "path" &&
