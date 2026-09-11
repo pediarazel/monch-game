@@ -716,11 +716,17 @@ function capture(game, cellName, myColor) {
 function movePiece(game, piece, dieValue) {
   if (piece.state === "yard") {
     if (dieValue !== 6) return false;
+
     piece.state = "start";
     piece.pathIndex = -1;
     piece.homeIndex = -1;
+
+    // شکار مهره‌ی حریف در خانه‌ی شروع این رنگ
+    capture(game, layout.startCells[piece.color], piece.color);
+
     return true;
   }
+
   if (piece.state === "start") {
     const entryIndex = layout.entryPathIndexes[piece.color];
     const destPathIndex = (entryIndex + dieValue - 1) % 36;
@@ -1493,11 +1499,6 @@ async function runDisconnectedPlayerBot(match, expectedTurnId, expectedUserId) {
           }
 
 
-// این بخش جدید را اضافه کن تا بفهمیم چرا نشد:
-          else if (typeof capture === "function" && capture(match.game, piece, dieValue)) {
-             console.log(`[DEBUG_AI] Capture possible but state mismatch! Piece: ${piece.id}, State: ${piece.state}`);
-             priority = 100;
-          }
           // بعد مهره‌های نزدیک خانه
           else if (
             piece.state === "path" &&
@@ -3646,10 +3647,15 @@ function getPieceTargetCell(match, color, piece, dieValue) {
       return null;
     }
 
-    // حرکت از yard فقط مهره را به start می‌آورد و شکار ندارد
+    // حرکت از yard با تاس ۶، مهره را به خانه‌ی start می‌آورد
     if (piece.state === "yard") {
-      return null;
+      if (steps !== 6) {
+        return null;
+      }
+
+      return layout.startCells[color] || null;
     }
+
 
     // حرکت از start به مسیر اصلی
     if (piece.state === "start") {
@@ -3710,12 +3716,11 @@ function isCapture(match, game, botColor, piece, dieValue) {
       }
 
       const opponentCell = p.state === "start" ? layout.startCells[p.color] : layout.mainPath[p.pathIndex];
-console.log(`[DEBUG_CAPTURE] OpponentCell:`, opponentCell, "Target:", targetCell);
 
 
-      return opponentCell &&
-        opponentCell.x === targetCell.x &&
-        opponentCell.y === targetCell.y;
+
+      return opponentCell === targetCell;
+
     });
   } catch (e) {
     return false;
