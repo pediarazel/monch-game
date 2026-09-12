@@ -2588,13 +2588,6 @@ if (
       // ورود به لابی Tier انتخاب‌شده
       let lobby = getTierLobby(tier);
 
-      // ✅ اگر به هر دلیلی لابیِ پیدا شده در وضعیت لابی نبود، آن را حذف و یکی نو بساز
-      if (lobby.status !== "lobby") {
-          tierLobbies.delete(tier);
-          lobby = getTierLobby(tier);
-      }
-
-
       if (!lobby.playerUidsInOrder.includes(uid)) {
         if (lobby.status !== "lobby") {
           return callback?.({
