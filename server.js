@@ -916,22 +916,20 @@ function emitLobbyStats() {
   const stats = computeLobbyStats();
   const actualOnlineCount = connectedUsers ? connectedUsers.size : 0;
   
-// موقتاً شرط را بردار تا ببینی عدد فیک نمایش داده می‌شود یا نه
-const finalOnlineCount = fakeOnlineCount;
+  // منطق اصلی: اگر ربات فعال بود عدد فیک، وگرنه عدد واقعی
+  const finalOnlineCount = isBotActive ? fakeOnlineCount : actualOnlineCount;
 
-
-  // ایجاد پلتفرم داده‌ای که کلاینت انتظار دارد
   const payload = {
     ...stats,
     online: finalOnlineCount,
     onlineCount: finalOnlineCount
   };
 
-  // *** این لاگ بسیار مهم است: بعد از ذخیره، خروجی ترمینال را چک کن ***
   console.log(`[DEBUG] Bot Active: ${isBotActive} | Fake: ${fakeOnlineCount} | Real: ${actualOnlineCount} | Sending: ${finalOnlineCount}`);
 
   io.to('lobby').emit("lobby:stats", payload);
 }
+
 
 
 function getTierLobby(tier) {
