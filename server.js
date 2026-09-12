@@ -916,8 +916,9 @@ function emitLobbyStats() {
   const stats = computeLobbyStats();
   const actualOnlineCount = connectedUsers ? connectedUsers.size : 0;
   
-  // محاسبه مقدار نهایی
-  const finalOnlineCount = isBotActive ? fakeOnlineCount : actualOnlineCount;
+// موقتاً شرط را بردار تا ببینی عدد فیک نمایش داده می‌شود یا نه
+const finalOnlineCount = fakeOnlineCount;
+
 
   // ایجاد پلتفرم داده‌ای که کلاینت انتظار دارد
   const payload = {
