@@ -49,12 +49,18 @@ async function checkBotActiveStatus() {
     const botUser = await prisma.user.findUnique({
       where: { username: LOBBY_BOT_USERNAME }
     });
-    // حداقل موجودی برای ورود به ارزان‌ترین تیر ربات (20,000)
+
+    // تبدیل امن موجودی به عدد (حذف هرگونه کاراکتر غیر عددی مثل کاما)
+    const currentCoins = botUser 
+      ? parseInt(String(botUser.coins).replace(/[^0-9]/g, ""), 10) 
+      : 0;
+
     const minRequiredCoins = 20000;
-    const active = !!(botUser && Number(botUser.coins) >= minRequiredCoins);
+    const active = currentCoins >= minRequiredCoins;
+
     if (isBotActive !== active) {
       isBotActive = active;
-      console.log(`[LOBBY_BOT] Status updated: isBotActive = ${isBotActive} (coins: ${botUser?.coins ?? 0})`);
+      console.log(`[LOBBY_BOT] Status updated: isBotActive = ${isBotActive} (coins: ${currentCoins})`);
       emitLobbyStats();
     }
     return isBotActive;
@@ -63,6 +69,7 @@ async function checkBotActiveStatus() {
     return isBotActive;
   }
 }
+
 
 // userId -> { matchId, disconnectedAt, isBotPlaying }
 
