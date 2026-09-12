@@ -906,24 +906,24 @@ function computeLobbyStats() {
 function emitLobbyStats() {
   if (!io) return;
   
-  // دریافت اطلاعات پایه از تابع اصلی
   const stats = computeLobbyStats();
-  
-  // محاسبه تعداد آنلاین بر اساس وضعیت ربات
   const actualOnlineCount = connectedUsers ? connectedUsers.size : 0;
+  
+  // محاسبه مقدار نهایی
   const finalOnlineCount = isBotActive ? fakeOnlineCount : actualOnlineCount;
 
-  // ایجاد شیء نهایی برای ارسال به کلاینت
-  // ما هم online و هم onlineCount را می‌فرستیم تا خیالت راحت باشد هر دو حالت در فرانت‌اند کار کند
+  // ایجاد پلتفرم داده‌ای که کلاینت انتظار دارد
   const payload = {
     ...stats,
     online: finalOnlineCount,
     onlineCount: finalOnlineCount
   };
 
+  // *** این لاگ بسیار مهم است: بعد از ذخیره، خروجی ترمینال را چک کن ***
+  console.log(`[DEBUG] Bot Active: ${isBotActive} | Fake: ${fakeOnlineCount} | Real: ${actualOnlineCount} | Sending: ${finalOnlineCount}`);
+
   io.to('lobby').emit("lobby:stats", payload);
 }
-
 
 
 function getTierLobby(tier) {
