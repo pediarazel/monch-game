@@ -55,7 +55,7 @@ async function checkBotActiveStatus() {
       ? parseInt(String(botUser.coins).replace(/[^0-9]/g, ""), 10) 
       : 0;
 
-    const minRequiredCoins = 20000;
+    const minRequiredCoins = 20;
     const active = currentCoins >= minRequiredCoins;
 
     if (isBotActive !== active) {
