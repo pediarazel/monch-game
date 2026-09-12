@@ -4261,23 +4261,20 @@ function getAllLegalMoves(match, color, diceValues) {
 httpServer.listen(PORT, () => {
   console.log(`✅ Server listening on http://localhost:${PORT}`);
 });          
-// موتور نوسان‌ساز عددsetلاین فیک و بررسی سلامت ربات (هر ۱۰ ثانیه)
-setInterval(async () => {
-  // بررسی موجودی و فعال بودن ربات
-  await checkBotActiveStatus();
-
-  // نوسان عدد فقط وقتی ربات فعال است
-  if (isBotActive) {
-    fakeOnlineCount = Math.floor(Math.random() * (30 - 10 + 1)) + 10;
-  }
-
-  // به‌روزرسانی آمار لابی
+// تغییر عدد آنلاین فیک هر ۴ دقیقه
+setInterval(() => {
+  fakeOnlineCount = Math.floor(Math.random() * (30 - 10 + 1)) + 10;
   emitLobbyStats();
-  
-  console.log(`[SYSTEM] Fake online count rotated to: ${fakeOnlineCount} (isBotActive: ${isBotActive})`);
-}, 10 * 1000); // ۱۰ ثانیه
 
-// بررسی اولیه وضعیت ربات هنگام شروع سرور
+  console.log(`[SYSTEM] Fake online count rotated to: ${fakeOnlineCount}`);
+}, 4 * 60 * 1000);
+
+// بررسی موجودی ربات هر ۱۰ ثانیه
+setInterval(async () => {
+  await checkBotActiveStatus();
+}, 10 * 1000);
+
+// بررسی اولیه وضعیت ربات، ۵ ثانیه بعد از اجرای سرور
 setTimeout(() => {
   checkBotActiveStatus();
 }, 5000);
