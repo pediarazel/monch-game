@@ -1134,12 +1134,22 @@ async function settleCoinsForMatch(match) {
         },
       });
 
-      // ۳. واریز به خزانه
-      await tx.user.update({ 
-        where: { id: treasury.id }, 
-        data: { coins: { increment: treasuryAmount } } 
+      // ۳. واریز به خزانه و ثبت تراکنش کارمزد
+      await tx.user.update({
+        where: { id: treasury.id },
+        data: { coins: { increment: treasuryAmount } }
+      });
+
+      await tx.transaction.create({
+        data: {
+          userId: treasury.id,
+          amount: treasuryAmount,
+          type: "TREASURY_CUT",
+          note: `match:${match.matchId} treasury cut tier=${tier}`,
+        },
       });
     });
+
 
     match.financialSettled = true;
     console.log(`[SETTLE_SUCCESS] Transaction committed for ${winnerUserId}`);
@@ -3914,7 +3924,8 @@ function evaluateSingleAction(gameBefore, originalPiece, dieValue, botColor) {
     endDangerOpponentCount: 0,
     escapedDangerCount: 0,
     pieceProgress: 0,
-    homeProgress: -1
+    homeProgress: -1,
+    totalBotVulnerability: 0
   };
 
 
@@ -3931,6 +3942,13 @@ function evaluateSingleAction(gameBefore, originalPiece, dieValue, botColor) {
     const opponentsBefore = tempGame.pieces.filter(p => p.color !== botColor && (p.state === "path" || p.state === "start"));
 
     const ok = movePiece(tempGame, tempPiece, dieValue);
+
+    
+    // محاسبه خطر کل روی تمام مهره‌های ربات (محافظت)
+    result.totalBotVulnerability = tempGame.pieces
+        .filter(p => p.color === botColor && (p.state === "path" || p.state === "start"))
+        .reduce((sum, p) => sum + countThreateningOpponents(tempGame, p, botColor), 0);
+
     if (!ok) return null;
 
     // ۱. بررسی ورود به بازی
@@ -3984,34 +4002,42 @@ function evaluateSingleAction(gameBefore, originalPiece, dieValue, botColor) {
     return { result, tempGame, tempPiece, startIdx };
   }
 
-  function evaluateChasing(gameAfterFirstMove, botPiece, botColor) {
-    if (!botPiece || botPiece.state !== "path" || typeof botPiece.pathIndex !== "number") return null;
+function evaluateChasing(gameAfterFirstMove, botPiece, botColor) {
+  if (!botPiece || botPiece.state !== "path" || typeof botPiece.pathIndex !== "number") return null;
 
-    const botActualIdx = botPiece.pathIndex;
-    const opponents = gameAfterFirstMove.pieces.filter(
-      p => p.color !== botColor && p.state === "path" && typeof p.pathIndex === "number"
-    );
+  const botActualIdx = botPiece.pathIndex;
+  // اصلاح: شامل مهره‌های path و مهره‌های start
+  const opponents = gameAfterFirstMove.pieces.filter(
+    p => p.color !== botColor && (p.state === "path" || p.state === "start")
+  );
 
-    let bestChase = null;
+  let bestChase = null;
 
-    for (const opp of opponents) {
-      // محاسبه فاصله دایره‌ای روی مسیر اصلی ۳۶ تایی
-      const dist = (opp.pathIndex - botActualIdx + 36) % 36;
+  for (const opp of opponents) {
+    // محاسبه موقعیت واقعی حریف (اگر در استارت باشد، از ایندکس ورود به مسیر استفاده می‌کنیم)
+    const oppActualIdx = (opp.state === "start") 
+      ? layout.entryPathIndexes[opp.color] 
+      : opp.pathIndex;
 
-      // اگر حریف ۱ تا ۶ خانه جلوتر باشد، یعنی در نوبت بعدی قابل شکار است
-      if (dist >= 1 && dist <= 6) {
-        const oppProgress = getPiecePathIndex(gameAfterFirstMove, opp);
-        if (!bestChase || oppProgress > bestChase.victimProgress) {
-          bestChase = {
-            distance: dist,
-            victimProgress: oppProgress
-          };
-        }
+    // محاسبه فاصله دایره‌ای (از ۱ تا ۳۵)
+    const dist = (oppActualIdx - botActualIdx + 36) % 36;
+
+    // اگر حریف ۱ تا ۶ خانه جلوتر باشد، یعنی در نوبت بعدی قابل شکار است
+    if (dist >= 1 && dist <= 6) {
+      // برای اولویت‌بندی، اینکه حریف چقدر در مسیر جلوتر است را می‌سنجیم
+      const oppProgress = (opp.state === "start") ? 0 : opp.pathIndex;
+
+      if (!bestChase || oppProgress > bestChase.victimProgress) {
+        bestChase = {
+          distance: dist,
+          victimProgress: oppProgress
+        };
       }
     }
-
-    return bestChase;
   }
+
+  return bestChase;
+}
 
 
 function evaluateFullSequence(match, game, move, botColor) {
