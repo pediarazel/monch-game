@@ -43,7 +43,7 @@ const matchTimers = new Map(); // matchId -> { timeout }
 const connectedUsers = new Map(); // userId -> socketId
 let fakeOnlineCount = 20; // عدد پایه برای نمایش آنلاین فیک
 let isBotActive = true; // وضعیت فعال بودن ربات بر اساس موجودی
-
+const LOBBY_BOT_USERNAME = "tajdas_bot"; // نام پیش‌فرض برای سیستم‌های داخلی
 async function checkBotActiveStatus() {
   try {
     const botUser = await prisma.user.findUnique({
@@ -829,7 +829,7 @@ const LOBBY_TIERS = [20, 50, 100, 200];
 const LOBBY_BOT_TIERS = new Set([20, 50]);
 const LOBBY_BOT_WAIT_SECONDS = 30;
 
-const LOBBY_BOT_USERNAME = "tajdas_bot"; // نام پیش‌فرض برای سیستم‌های داخلی
+
 
 const BOT_NAMES_FA = [
   "امیر_شاه", "رضا_تاس", "علی-پادشاه", "حمید_برنده", "مهدی_غول",
