@@ -42,11 +42,32 @@ const TURN_MS = 30000;
 const matchTimers = new Map(); // matchId -> { timeout }
 const connectedUsers = new Map(); // userId -> socketId
 let fakeOnlineCount = 20; // عدد پایه برای نمایش آنلاین فیک
+let isBotActive = true; // وضعیت فعال بودن ربات بر اساس موجودی
 
+async function checkBotActiveStatus() {
+  try {
+    const botUser = await prisma.user.findUnique({
+      where: { username: LOBBY_BOT_USERNAME }
+    });
+    // حداقل موجودی برای ورود به ارزان‌ترین تیر ربات (20,000)
+    const minRequiredCoins = 20000;
+    const active = !!(botUser && Number(botUser.coins) >= minRequiredCoins);
+    if (isBotActive !== active) {
+      isBotActive = active;
+      console.log(`[LOBBY_BOT] Status updated: isBotActive = ${isBotActive} (coins: ${botUser?.coins ?? 0})`);
+      emitLobbyStats();
+    }
+    return isBotActive;
+  } catch (err) {
+    console.error("[LOBBY_BOT] Error checking bot status:", err);
+    return isBotActive;
+  }
+}
 
 // userId -> { matchId, disconnectedAt, isBotPlaying }
 
 const disconnectionTimers = new Map();
+
 
 
 /*
@@ -885,10 +906,11 @@ function computeLobbyStats() {
 function emitLobbyStats() {
   if (!io) return;
   const stats = computeLobbyStats();
-  // جایگزینی عدد واقعی با عدد فیک برای بازیکنان
-  stats.online = fakeOnlineCount; 
+  // اگر ربات فعال باشد عدد فیک و در غیر این صورت تعداد واقعی آنلاین‌ها ارسال می‌شود
+  stats.online = isBotActive ? fakeOnlineCount : (connectedUsers ? connectedUsers.size : 0);
   io.to('lobby').emit("lobby:stats", stats);
 }
+
 
 
 function getTierLobby(tier) {
@@ -3882,96 +3904,96 @@ function evaluateSingleAction(gameBefore, originalPiece, dieValue, botColor) {
   result.startDangerOpponentCount =
     countThreateningOpponents(gameBefore, originalPiece, botColor);
 
-  // شبیه‌سازی حرکت
-  const tempGame = JSON.parse(JSON.stringify(gameBefore));
-  const tempPiece = tempGame.pieces.find(p => p.id === originalPiece.id);
-  if (!tempPiece) return null;
+    // شبیه‌سازی حرکت
+    const tempGame = JSON.parse(JSON.stringify(gameBefore));
+    const tempPiece = tempGame.pieces.find(p => p.id === originalPiece.id);
+    if (!tempPiece) return null;
 
-  const opponentsBefore = tempGame.pieces.filter(p => p.color !== botColor && (p.state === "path" || p.state === "start"));
-  const victimsBefore = opponentsBefore.filter(op => op.x === tempPiece.x && op.y === tempPiece.y);
+    const opponentsBefore = tempGame.pieces.filter(p => p.color !== botColor && (p.state === "path" || p.state === "start"));
 
-  const ok = movePiece(tempGame, tempPiece, dieValue);
-  if (!ok) return null;
+    const ok = movePiece(tempGame, tempPiece, dieValue);
+    if (!ok) return null;
 
-  // ۱. بررسی ورود به بازی
-  if (startState === "yard" && (tempPiece.state === "start" || tempPiece.state === "path")) {
-    result.isEntry = true;
-  }
-
-  // ۲. ورود به مسیر امن خانه یا پیشروی در آن
-  if (
-    tempPiece.state === "home" &&
-    (
-      startState !== "home" ||
-      tempPiece.homeIndex > originalPiece.homeIndex
-    )
-  ) {
-    result.isHomeOrGoal = true;
-  }
-
-  if (tempPiece.state === "home") {
-    result.homeProgress = tempPiece.homeIndex;
-  }
-
-  result.isWinningMove = checkWinner(tempGame) === botColor;
-
-
-  // ۳. بررسی شکار مستقیم
-  const opponentsAfter = tempGame.pieces.filter(p => p.color !== botColor && (p.state === "path" || p.state === "start"));
-  if (opponentsAfter.length < opponentsBefore.length) {
-    result.isCapture = true;
-    let victim = opponentsBefore.find(ob => !opponentsAfter.some(oa => oa.id === ob.id));
-    if (victim) {
-      result.captureVictimProgress = getPiecePathIndex(gameBefore, victim);
+    // ۱. بررسی ورود به بازی
+    if (startState === "yard" && (tempPiece.state === "start" || tempPiece.state === "path")) {
+      result.isEntry = true;
     }
+
+    // ۲. ورود به مسیر امن خانه یا پیشروی در آن
+    if (
+      tempPiece.state === "home" &&
+      (
+        startState !== "home" ||
+        tempPiece.homeIndex > originalPiece.homeIndex
+      )
+    ) {
+      result.isHomeOrGoal = true;
+    }
+
+    if (tempPiece.state === "home") {
+      result.homeProgress = tempPiece.homeIndex;
+    }
+
+    result.isWinningMove = checkWinner(tempGame) === botColor;
+
+    // ۳. بررسی شکار مستقیم
+    const opponentsAfter = tempGame.pieces.filter(p => p.color !== botColor && (p.state === "path" || p.state === "start"));
+    if (opponentsAfter.length < opponentsBefore.length) {
+      result.isCapture = true;
+      const victim = opponentsBefore.find(ob => !opponentsAfter.some(oa => oa.id === ob.id));
+      if (victim) {
+        result.captureVictimProgress = getPiecePathIndex(gameBefore, victim);
+      }
+    }
+
+    // ۴. مقایسه خطر قبل و بعد از حرکت
+    result.endDangerOpponentCount =
+      countThreateningOpponents(tempGame, tempPiece, botColor);
+
+    result.escapedDangerCount = Math.max(
+      0,
+      result.startDangerOpponentCount -
+        result.endDangerOpponentCount
+    );
+
+    result.isSafeDestination =
+      result.endDangerOpponentCount === 0;
+
+    result.pieceProgress =
+      getPiecePathIndex(tempGame, tempPiece);
+
+    return { result, tempGame, tempPiece, startIdx };
   }
 
-  // ۴. مقایسه خطر قبل و بعد از حرکت
-  result.endDangerOpponentCount =
-    countThreateningOpponents(tempGame, tempPiece, botColor);
+  function evaluateChasing(gameAfterFirstMove, botPiece, botColor) {
+    if (!botPiece || botPiece.state !== "path" || typeof botPiece.pathIndex !== "number") return null;
 
-  result.escapedDangerCount = Math.max(
-    0,
-    result.startDangerOpponentCount -
-      result.endDangerOpponentCount
-  );
+    const botActualIdx = botPiece.pathIndex;
+    const opponents = gameAfterFirstMove.pieces.filter(
+      p => p.color !== botColor && p.state === "path" && typeof p.pathIndex === "number"
+    );
 
-  result.isSafeDestination =
-    result.endDangerOpponentCount === 0;
+    let bestChase = null;
 
-  result.pieceProgress =
-    getPiecePathIndex(tempGame, tempPiece);
+    for (const opp of opponents) {
+      // محاسبه فاصله دایره‌ای روی مسیر اصلی ۳۶ تایی
+      const dist = (opp.pathIndex - botActualIdx + 36) % 36;
 
-
-  return { result, tempGame, tempPiece, startIdx };
-}
-
-function evaluateChasing(gameAfterFirstMove, botPiece, botColor) {
-  if (!botPiece || botPiece.state === "yard" || botPiece.state === "home") return null;
-  const botIdx = getPiecePathIndex(gameAfterFirstMove, botPiece);
-  const opponents = gameAfterFirstMove.pieces.filter(p => p.color !== botColor && (p.state === "path" || p.state === "start"));
-
-  let bestChase = null;
-
-  for (const opp of opponents) {
-    const oppIdx = getPiecePathIndex(gameAfterFirstMove, opp);
-    // حریف جلوتر باشد و هنوز وارد خانه نشده باشد
-    if (oppIdx > botIdx && oppIdx <= 51) {
-      const dist = oppIdx - botIdx;
-      // تعریف دقیق تعقیب: فاصله ۱ تا ۶ خانه (قابل شکار در نوبت بعد)
+      // اگر حریف ۱ تا ۶ خانه جلوتر باشد، یعنی در نوبت بعدی قابل شکار است
       if (dist >= 1 && dist <= 6) {
-        if (!bestChase || oppIdx > bestChase.victimProgress) {
+        const oppProgress = getPiecePathIndex(gameAfterFirstMove, opp);
+        if (!bestChase || oppProgress > bestChase.victimProgress) {
           bestChase = {
             distance: dist,
-            victimProgress: oppIdx
+            victimProgress: oppProgress
           };
         }
       }
     }
+
+    return bestChase;
   }
 
-  return bestChase;
-}
 
 function evaluateFullSequence(match, game, move, botColor) {
   const die1 = Number(move.dieValue);
@@ -4219,17 +4241,21 @@ function getAllLegalMoves(match, color, diceValues) {
 httpServer.listen(PORT, () => {
   console.log(`✅ Server listening on http://localhost:${PORT}`);
 });          
-// موتور نوسان‌ساز عدد آنلاین فیک (هر ۴ دقیقه یکبار تغییر رندوم بین ۱۰ تا ۳۰)
-setInterval(() => {
+// موتور نوسان‌ساز عدد آنلاین فیک و بررسی سلامت ربات (هر ۴ دقیقه یکبار)
+setInterval(async () => {
   // تولید عدد رندوم بین 10 تا 30
   fakeOnlineCount = Math.floor(Math.random() * (30 - 10 + 1)) + 10;
   
-  // به‌روزرسانی فوری تمام بازیکنان در لابی با عدد جدید
-  if (io) {
-    const stats = computeLobbyStats();
-    stats.online = fakeOnlineCount;
-    io.to('lobby').emit("lobby:stats", stats);
-  }
+  // بررسی موجودی و فعال بودن ربات
+  await checkBotActiveStatus();
+
+  // به‌روزرسانی آمار لابی
+  emitLobbyStats();
   
-  console.log(`[SYSTEM] Fake online count rotated to: ${fakeOnlineCount}`);
+  console.log(`[SYSTEM] Fake online count rotated to: ${fakeOnlineCount} (isBotActive: ${isBotActive})`);
 }, 4 * 60 * 1000); // ۴ دقیقه
+
+// بررسی اولیه وضعیت ربات هنگام شروع سرور
+setTimeout(() => {
+  checkBotActiveStatus();
+}, 5000);
