@@ -1061,12 +1061,16 @@ async function chargeTierFromPlayers(match) {
 
   const amount = match.tier;
 
+  // --- اصلاح شده: استفاده از Interactive Transaction برای تضمین Atomicity ---
   await prisma.$transaction(async (tx) => {
+    // ۱. کسر سکه از همه بازیکنان
     await tx.user.updateMany({
       where: { id: { in: userIds } },
       data: { coins: { decrement: amount } },
     });
 
+    // ۲. ثبت رسید (Transaction Record) برای هر بازیکن بلافاصله پس از کسر سکه
+    // استفاده از createMany داخل تراکنش اینترکتیو برای سرعت و امنیت بالا
     await tx.transaction.createMany({
       data: userIds.map((uid) => ({
         userId: uid,
@@ -1077,6 +1081,7 @@ async function chargeTierFromPlayers(match) {
     });
   });
 
+  // ۳. دریافت موجودی جدید و اطلاع‌رسانی به کلاینت‌ها
   const mapAfter = await getUsersCoins(userIds);
   for (const uid of userIds) {
     emitBalanceChanged(uid, mapAfter.get(uid), "موجودی شما بابت ورود به بازی کم شد.");
@@ -1084,6 +1089,7 @@ async function chargeTierFromPlayers(match) {
 
   match.chargedEntry = true;
 }
+
 
 async function settleCoinsForMatch(match) {
   if (match.financialSettled) return;
