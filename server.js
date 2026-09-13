@@ -2734,35 +2734,38 @@ if (index !== -1) {
 
             if (remainingCount < 2) {
               lobby.lobbyPhase = 1;
-if (LOBBY_BOT_TIERS.has(Number(tier))) {
-  const remainingMs = Number(previousDeadlineAt) - Date.now();
-  const remainingSeconds =
-    remainingMs > 0
-      ? Math.ceil(remainingMs / 1000)
-      : LOBBY_BOT_WAIT_SECONDS;
+              // اگر ربات فعال باشد، برای پیدا کردن نفر سوم تایمر می‌گذاریم
+              if (isBotActive && LOBBY_BOT_TIERS.has(Number(tier))) {
+                const remainingMs = Number(previousDeadlineAt) - Date.now();
+                const remainingSeconds =
+                  remainingMs > 0
+                    ? Math.ceil(remainingMs / 1000)
+                    : LOBBY_BOT_WAIT_SECONDS;
 
-  setLobbyDeadline(lobby, remainingSeconds);
-  emitLobbyStatus(lobby, {
-
+                setLobbyDeadline(lobby, remainingSeconds);
+                emitLobbyStatus(lobby, {
                   phase: 1,
                   searchingFor: 2,
                   deadlineAt: lobby.lobbyDeadlineAt,
-      message: "در حال جستجوی نفر ۳... 🔍",
+                  message: "در حال جستجوی نفر ۳... 🔍",
                   status: "WAIT_2",
                 });
               } else {
+                // اگر ربات خاموش باشد، تایمر نگذار و به بازیکن بگو منتظر بماند (بدون تایمر)
                 emitLobbyStatus(lobby, {
                   phase: 1,
                   searchingFor: 2,
                   deadlineAt: null,
                   deadlineMs: null,
-      message: "در حال جستجوی نفر ۳... 🔍",
+                  message: "در انتظار بازیکن دیگر... ⏳",
                   status: "WAIT_2",
                 });
               }
             } else {
+              // اگر تعداد ۲ یا بیشتر بود، روند عادی ادامه یابد
               await onLobbyPlayerJoined(tier);
             }
+
           }
 
           await socket.leave(`match:${lobby.matchId}`);
