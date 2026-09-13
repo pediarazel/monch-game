@@ -83,6 +83,8 @@ const disconnectionTimers = new Map();
 |--------------------------------------------------------------------------
 */
 const app = express();
+app.use(express.static(path.join(__dirname)));
+
 const httpServer = http.createServer(app);
 app.disable("x-powered-by");
 
