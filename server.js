@@ -958,7 +958,8 @@ function emitLobbyStatus(lobby, data) {
     matchId: lobby.matchId,
     tier: lobby.tier,
     phase: data?.phase ?? lobby.lobbyPhase,
-    filledColors: activePlayersCountFromPlayerColors(lobby.playerColors),
+filledColors: Array.isArray(lobby.playerUidsInOrder) ? lobby.playerUidsInOrder.length : 0,
+
     deadlineAt: data?.deadlineAt ?? lobby.lobbyDeadlineAt ?? null,
     deadlineMs: data?.deadlineMs ?? null,
     message: data?.message ?? null,
