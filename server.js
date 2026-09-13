@@ -4042,6 +4042,22 @@ function evaluateChasing(gameAfterFirstMove, botPiece, botColor) {
 
 
 function evaluateFullSequence(match, game, move, botColor) {
+    // --- استراتژی جدید: تعقیب بلافاصله پس از عبور از استارت ---
+  try {
+    const botStartIdx = layout.startCells[botColor];
+    const playerPieces = game.pieces.filter(p => p.color !== botColor && p.state === "path");
+    const playerHasPassedBotStart = playerPieces.some(p => p.pathIndex >= botStartIdx);
+
+    if (playerHasPassedBotStart) {
+      summary.isEmergency = true;
+      if (summary.hasChase) summary.tier = 0;
+      else if (summary.hasCapture) summary.tier = 1;
+    }
+  } catch (e) {
+    console.error("Aggressive Hunter Error:", e);
+  }
+  // -------------------------------------------------------
+
   const die1 = Number(move.dieValue);
   const originalPiece = game.pieces.find(p => p.id === move.pieceId);
   if (!originalPiece) return null;
@@ -4116,6 +4132,8 @@ function evaluateFullSequence(match, game, move, botColor) {
   }
 
   // تعیین سطح هرم قوانین
+
+
   if (summary.isWinningMove) {
     summary.tier = 0; // برد قطعی
   } else if (summary.isImmediateCapture) {
