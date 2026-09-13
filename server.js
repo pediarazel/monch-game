@@ -2094,9 +2094,11 @@ async function handleLobbyTimeout(lobby) {
   const count = lobby.playerUidsInOrder.length;
 
   if (
+    isBotActive &&
     count === 1 &&
     LOBBY_BOT_TIERS.has(Number(lobby.tier))
   ) {
+
 
     try {
       const botUser = await ensureLobbyBotUser();
