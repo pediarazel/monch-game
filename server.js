@@ -2190,7 +2190,8 @@ async function onLobbyPlayerJoined(tier) {
   }
 
   if (playerCount === 1) {
-    if (isBotTier) {
+if (isBotActive && isBotTier) {
+
       // فقط تایمر را تنظیم می‌کنیم. 
       // بعد از ۳۰ ثانیه، خودِ تایمر تابع handleLobbyTimeout را صدا خواهد زد.
       setLobbyDeadline(lobby, LOBBY_BOT_WAIT_SECONDS);
