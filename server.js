@@ -2172,7 +2172,8 @@ async function onLobbyPlayerJoined(tier) {
   const isBotTier = LOBBY_BOT_TIERS.has(Number(tier));
 
   // --- بخش جدید برای جلوگیری از فعال شدن لابی بدون پول ربات ---
-  if (isBotTier) {
+  if (isBotActive && isBotTier) {
+
     try {
       const botUser = await prisma.user.findUnique({
         where: { username: "tajdas_bot" }
