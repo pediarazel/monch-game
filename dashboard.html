@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>انتخاب بازی - تاج تاس</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            background-color: #061108;
+            color: #ffffff;
+            font-family: Tahoma, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+        .logo {
+            font-size: 28px;
+            font-weight: bold;
+            color: #d4af37;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        .game-card {
+            position: relative;
+            width: 100%;
+            max-width: 280px;
+            height: 110px;
+            margin: 12px 0;
+            border: 2px solid #d4af37;
+            border-radius: 12px;
+            text-decoration: none;
+            color: #ffffff;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .card-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            filter: brightness(0.45);
+            z-index: 1;
+        }
+        .game-card h2 {
+            position: relative;
+            z-index: 2;
+            margin: 0;
+            font-size: 22px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.9);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="logo">👑🎲
+تاج تاس🎲👑</div>
+
+    <!-- لینک منچ -->
+    <a href="anna/lobby.html" class="game-card">
+        <img src="images/mench-bg.jpg" class="card-bg" alt="منچ">
+        <h2>منچ آنلاین</h2>
+    </a>
+
+    <!-- لینک بازی ۲۱ -->
+    <a href="anna/lobby21.html" class="game-card">
+        <img src="images/21-bg.jpg" class="card-bg" alt="۲۱">
+        <h2>بازی ۲۱</h2>
+    </a>
+
+</body>
+</html>
