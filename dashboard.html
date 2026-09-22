@@ -75,6 +75,26 @@
         <img src="images/21-bg.jpg" class="card-bg" alt="۲۱">
         <h2>بازی ۲۱</h2>
     </a>
+<script>
+    // ۱. این تابع برای چک کردن اعتبار توکن است
+    function isJwtExpired(token) {
+        if (!token) return true;
+        try {
+            const parts = token.split(".");
+            if (parts.length !== 3) return true;
+            const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+            const currentTime = Math.floor(Date.now() / 1000);
+            return !payload.exp || payload.exp <= currentTime;
+        } catch (e) { return true; }
+    }
+
+    // ۲. این همان «نگهبان» است که چک می‌کند کاربر لاگین است یا نه
+    const token = localStorage.getItem("token");
+    if (!token || isJwtExpired(token)) {
+        // اگر لاگین نبود، می‌فرستیمش به صفحه لاگین (که در پوشه anna است)
+        window.location.href = "/anna/index.html"; 
+    }
+</script>
 
 </body>
 </html>
