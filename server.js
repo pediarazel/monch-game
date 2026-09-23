@@ -132,6 +132,7 @@ app.use(
 */
 const staticFilesDirectory = path.join(__dirname, "anna");
 app.use(express.static(staticFilesDirectory));
+app.use("/images", express.static(path.join(__dirname, "images")));
 
 /*
 |--------------------------------------------------------------------------
