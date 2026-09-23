@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>میز ۲۱ رقابتی | تاج تاس</title>
+    <!-- لود کتابخانه Socket.IO کلاینت -->
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background: #061108;
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            overflow: hidden;
+        }
+
+        /* نوار بالای صفحه */
+        .top-bar {
+            width: 100%;
+            max-width: 440px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(10, 20, 12, 0.92);
+            padding: 9px 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(212, 175, 55, 0.35);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            font-size: 13px;
+        }
+
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 700;
+            color: #e0e0e0;
+        }
+
+        .header-title .sep {
+            color: rgba(212, 175, 55, 0.5);
+            font-size: 11px;
+        }
+
+        .gold-text { color: #d4af37; font-weight: 700; }
+
+        /* بدنه میز بیضی */
+        .casino-table {
+            position: relative;
+            width: 100%;
+            max-width: 420px;
+            height: 520px;
+            background: radial-gradient(ellipse at 50% 32%, #1b5e20 0%, #0d3813 65%, #051a09 100%);
+            border: 11px solid #2e1c14;
+            border-radius: 190px 190px 175px 175px;
+            box-shadow: 
+                inset 0 0 45px rgba(0,0,0,0.85),
+                inset 0 0 10px rgba(0,255,100,0.08),
+                0 12px 30px rgba(0,0,0,0.85);
+            margin: auto 0;
+            overflow: hidden;
+        }
+
+        /* واتر‌مارک تاج همراه با متن TAJ TAS روی نمد */
+        .table-logo-watermark {
+            position: absolute;
+            top: 24%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            pointer-events: none;
+            z-index: 2;
+            opacity: 0.30;
+        }
+
+        .crown-svg {
+            width: 34px;
+            height: 34px;
+            fill: #d4af37;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.8));
+        }
+
+        .table-logo-watermark .brand-title {
+            font-size: 13px;
+            font-weight: 900;
+            color: #d4af37;
+            letter-spacing: 2px;
+            margin-top: 4px;
+            text-transform: uppercase;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+        }
+
+        /* خط راهنمای نیم‌دایره نمدی */
+        .felt-line {
+            position: absolute;
+            top: 55px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 320px;
+            height: 290px;
+            border: 1.5px dashed rgba(212, 175, 55, 0.2);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        /* بخش دیلر / کارت‌پخش‌کن */
+        .dealer-zone {
+            position: absolute;
+            top: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 5;
+        }
+
+        .dealer-badge {
+            background: linear-gradient(180deg, #2b2b2b 0%, #111 100%);
+            border: 1px solid rgba(212, 175, 55, 0.6);
+            color: #d4af37;
+            padding: 2px 14px;
+            border-radius: 20px;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+        }
+
+        /* پات دقیقاً در مرکز هندسی میز */
+        .pot-container {
+            position: absolute;
+            top: 48%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(8, 14, 10, 0.92);
+            border: 1px solid rgba(212, 175, 55, 0.45);
+            padding: 6px 18px;
+            border-radius: 24px;
+            text-align: center;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.75), inset 0 0 10px rgba(0,0,0,0.85);
+            z-index: 4;
+            min-width: 130px;
+        }
+
+        .pot-title {
+            font-size: 9px;
+            color: #aaa;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+
+        .pot-amount {
+            font-size: 14px;
+            color: #d4af37;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            margin-top: 1px;
+        }
+
+        /* صندلی‌های ۵ گانه بازیکنان */
+        .player-seat {
+            position: absolute;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 86px;
+            z-index: 6;
+            transition: transform 0.2s, opacity 0.3s;
+        }
+
+        .seat-p1 { bottom: 12px; left: 50%; transform: translateX(-50%); width: 100px; }
+        .seat-p2 { bottom: 82px; right: 14px; }
+        .seat-p3 { bottom: 82px; left: 14px; }
+        .seat-p4 { top: 116px; right: 14px; }
+        .seat-p5 { top: 116px; left: 14px; }
+
+        /* چیدمان نیمه‌پوشان کارت‌ها بدون بیرون‌زدگی */
+        .cards-row {
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            align-items: center;
+            height: 48px;
+            margin-bottom: 4px;
+            max-width: 100%;
+        }
+
+        .poker-card {
+            width: 32px;
+            height: 46px;
+            background: #ffffff;
+            border-radius: 4px;
+            box-shadow: 2px 2px 6px rgba(0,0,0,0.7);
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            padding: 2px 3px;
+            font-weight: 900;
+            font-size: 11px;
+            flex-shrink: 0;
+            margin-right: -16px;
+            border: 1px solid #cfcfcf;
+            position: relative;
+        }
+
+        .poker-card:first-child { 
+            margin-right: 0; 
+        }
+
+        .poker-card.red { color: #d32f2f; }
+        .poker-card.black { color: #1a1a1a; }
+
+        .poker-card .rank { 
+            line-height: 1; 
+            text-align: right; 
+            font-size: 11px; 
+            font-weight: 900;
+        }
+
+        .poker-card .suit { 
+            font-size: 11px; 
+            line-height: 1; 
+            text-align: right; 
+            margin-top: 1px;
+        }
+
+        /* کادر مشخصات بازیکن */
+        .player-info-card {
+            background: rgba(10, 16, 12, 0.94);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 8px;
+            padding: 4px 6px;
+            text-align: center;
+            width: 100%;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.7);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .player-seat.empty {
+            opacity: 0.35;
+        }
+
+        .player-seat.empty .player-info-card {
+            border: 1px dashed rgba(255, 255, 255, 0.2);
+            background: rgba(5, 10, 6, 0.5);
+        }
+
+        .player-name {
+            font-size: 10px;
+            color: #d1d1d1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-weight: 600;
+        }
+
+        .player-score {
+            font-size: 11px;
+            color: #d4af37;
+            font-weight: 800;
+            margin-top: 1px;
+        }
+
+        .status-tag {
+            font-size: 9px;
+            padding: 1px 4px;
+            border-radius: 4px;
+            font-weight: 700;
+            margin-top: 2px;
+            display: inline-block;
+        }
+        .status-stand { background: #0288d1; color: #fff; }
+        .status-bust { background: #d32f2f; color: #fff; }
+        .status-bj { background: #d4af37; color: #000; }
+
+        /* نوار زمان کوچک داخل کادر هر بازیکن */
+        .seat-timer-bar {
+            display: none;
+            width: 100%;
+            height: 3px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 2px;
+            margin-top: 3px;
+            overflow: hidden;
+        }
+
+        .seat-timer-fill {
+            width: 100%;
+            height: 100%;
+            background: #00e676;
+            transition: width 1s linear, background-color 0.3s;
+        }
+
+        .player-seat.active .player-info-card {
+            border: 1.5px solid #00e676;
+            box-shadow: 0 0 12px rgba(0, 230, 118, 0.6);
+            animation: pulseGlow 1.2s infinite alternate;
+        }
+
+        .player-seat.active .seat-timer-bar {
+            display: block;
+        }
+
+        @keyframes pulseGlow {
+            0% { box-shadow: 0 0 4px rgba(0, 230, 118, 0.4); }
+            100% { box-shadow: 0 0 14px rgba(0, 230, 118, 0.85); }
+        }
+
+        /* پنل وضعیت و تایمر */
+        .turn-timer-panel {
+            width: 100%;
+            max-width: 440px;
+            background: rgba(10, 20, 12, 0.95);
+            border: 1px solid rgba(212, 175, 55, 0.35);
+            border-radius: 10px;
+            padding: 6px 12px;
+            margin-bottom: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .turn-timer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .turn-name {
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .turn-name .dot {
+            width: 8px;
+            height: 8px;
+            background: #00e676;
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 8px #00e676;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            50% { opacity: 0.3; }
+        }
+
+        .turn-countdown {
+            color: #d4af37;
+            font-size: 13px;
+            font-weight: 900;
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+
+        .turn-progress-track {
+            width: 100%;
+            height: 5px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .turn-progress-fill {
+            width: 100%;
+            height: 100%;
+            background: #00e676;
+            border-radius: 4px;
+            transition: width 1s linear, background-color 0.4s;
+        }
+
+        /* دکمه‌های کنترل */
+        .controls-panel {
+            width: 100%;
+            max-width: 440px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            padding: 4px 0;
+        }
+
+        .game-btn {
+            padding: 13px 0;
+            border-radius: 10px;
+            border: none;
+            font-size: 14px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            color: #fff;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            transition: transform 0.1s, opacity 0.2s;
+        }
+
+        .game-btn:active { transform: scale(0.97); }
+
+        .btn-hit {
+            background: linear-gradient(180deg, #0288d1 0%, #01579b 100%);
+            border-bottom: 3px solid #013d6d;
+        }
+
+        .btn-stand {
+            background: linear-gradient(180deg, #d32f2f 0%, #8b0000 100%);
+            border-bottom: 3px solid #5a0000;
+        }
+
+        .game-btn:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* مودال اعلام نتایج */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
+        }
+        .modal-content {
+            background: #0a140c;
+            border: 2px solid #d4af37;
+            border-radius: 16px;
+            padding: 20px;
+            width: 100%;
+            max-width: 360px;
+            text-align: center;
+            box-shadow: 0 0 30px rgba(212, 175, 55, 0.3);
+        }
+        .modal-title {
+            font-size: 18px;
+            font-weight: 900;
+            color: #d4af37;
+            margin-bottom: 12px;
+        }
+        .modal-body {
+            font-size: 14px;
+            color: #eee;
+            margin-bottom: 18px;
+            line-height: 1.6;
+        }
+        .modal-btn {
+            background: #d4af37;
+            color: #000;
+            font-weight: 800;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- نوار بالا -->
+    <div class="top-bar">
+        <div class="header-title">
+            <span>میز ۲۱ رقابتی</span>
+            <span class="sep">|</span>
+            <span style="color: #bbb; font-weight: normal; font-size: 12px;">۵ نفره</span>
+        </div>
+        <div>ورودی: <span class="gold-text" id="tierDisplay">...</span></div>
+    </div>
+
+    <!-- بدنه میز بیضی -->
+    <div class="casino-table">
+        <div class="felt-line"></div>
+
+        <!-- نشان طلاکوب تاج به همراه متن TAJ TAS روی نمد -->
+        <div class="table-logo-watermark">
+            <svg class="crown-svg" viewBox="0 0 24 24">
+                <path d="M5 16L3 5L8.5 10L12 4L15.5 10L21 5L19 16H5M19 19C19 19.6 18.6 20 18 20H6C5.4 20 5 19.6 5 19V17H19V19Z"/>
+            </svg>
+            <span class="brand-title">TAJ TAS</span>
+        </div>
+
+        <!-- دیلر (فقط نشان کارت‌پخش‌کن در مدل رقابتی PvP) -->
+        <div class="dealer-zone">
+            <div class="dealer-badge">کارت‌پخش‌کن</div>
+        </div>
+
+        <!-- مجموع جایزه در مرکز میز -->
+        <div class="pot-container">
+            <div class="pot-title">مجموع پات میز</div>
+            <div class="pot-amount" id="potDisplay">۰ تومان</div>
+        </div>
+
+        <!-- صندلی ۱: جایگاه پایین (همیشه خود کاربر جاری) -->
+        <div class="player-seat seat-p1 empty" id="seat-ui-0">
+            <div class="cards-row" id="cards-ui-0"></div>
+            <div class="player-info-card">
+                <div class="player-name" id="name-ui-0">در انتظار...</div>
+                <div class="player-score" id="score-ui-0">-</div>
+                <div class="seat-timer-bar"><div class="seat-timer-fill" id="timer-ui-0"></div></div>
+            </div>
+        </div>
+
+        <!-- صندلی ۲: راست پایین -->
+        <div class="player-seat seat-p2 empty" id="seat-ui-1">
+            <div class="cards-row" id="cards-ui-1"></div>
+            <div class="player-info-card">
+                <div class="player-name" id="name-ui-1">خالی</div>
+                <div class="player-score" id="score-ui-1">-</div>
+                <div class="seat-timer-bar"><div class="seat-timer-fill" id="timer-ui-1"></div></div>
+            </div>
+        </div>
+
+        <!-- صندلی ۳: چپ پایین -->
+        <div class="player-seat seat-p3 empty" id="seat-ui-2">
+            <div class="cards-row" id="cards-ui-2"></div>
+            <div class="player-info-card">
+                <div class="player-name" id="name-ui-2">خالی</div>
+                <div class="player-score" id="score-ui-2">-</div>
+                <div class="seat-timer-bar"><div class="seat-timer-fill" id="timer-ui-2"></div></div>
+            </div>
+        </div>
+
+        <!-- صندلی ۴: راست بالا -->
+        <div class="player-seat seat-p4 empty" id="seat-ui-3">
+            <div class="cards-row" id="cards-ui-3"></div>
+            <div class="player-info-card">
+                <div class="player-name" id="name-ui-3">خالی</div>
+                <div class="player-score" id="score-ui-3">-</div>
+                <div class="seat-timer-bar"><div class="seat-timer-fill" id="timer-ui-3"></div></div>
+            </div>
+        </div>
+
+        <!-- صندلی ۵: چپ بالا -->
+        <div class="player-seat seat-p5 empty" id="seat-ui-4">
+            <div class="cards-row" id="cards-ui-4"></div>
+            <div class="player-info-card">
+                <div class="player-name" id="name-ui-4">خالی</div>
+                <div class="player-score" id="score-ui-4">-</div>
+                <div class="seat-timer-bar"><div class="seat-timer-fill" id="timer-ui-4"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- نوار ثانیه‌شمار و راهنمای نوبت -->
+    <div class="turn-timer-panel">
+        <div class="turn-timer-header">
+            <div class="turn-name">
+                <span class="dot" id="statusDot"></span>
+                <span id="activePlayerLabel">در حال اتصال به میز...</span>
+            </div>
+            <div class="turn-countdown">
+                <span>⏱️</span>
+                <span id="turnSeconds">--</span>
+                <span>ثانیه</span>
+            </div>
+        </div>
+        <div class="turn-progress-track">
+            <div class="turn-progress-fill" id="globalProgressBar" style="width: 0%;"></div>
+        </div>
+    </div>
+
+    <!-- پنل کنترل نوبت -->
+    <div class="controls-panel">
+        <button class="game-btn btn-hit" id="btnHit" onclick="emitHit()" disabled>➕ دریافت کارت (HIT)</button>
+        <button class="game-btn btn-stand" id="btnStand" onclick="emitStand()" disabled>✋ کافیه (STAND)</button>
+    </div>
+
+    <!-- مودال پایان بازی -->
+    <div class="modal-overlay" id="resultModal">
+        <div class="modal-content">
+            <div class="modal-title" id="modalTitle">نتیجه دست</div>
+            <div class="modal-body" id="modalBody"></div>
+            <button class="modal-btn" onclick="leaveToLobby()">بازگشت به لابی</button>
+        </div>
+    </div>
+
+    <!-- اسکریپت هماهنگ‌کننده با سرور server21.js -->
+    <script>
+        const SEAT_KEYS = ["seat_1", "seat_2", "seat_3", "seat_4", "seat_5"];
+        const token = localStorage.getItem("token") || "";
+        let mySeatKey = null;
+        let socket = null;
+
+        // دریافت tier از پارامترهای URL یا پیش‌فرض ۲۰
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentTier = parseInt(urlParams.get("tier"), 10) || 20;
+
+        document.getElementById("tierDisplay").innerText = (currentTier * 1000).toLocaleString("fa-IR") + " تومان";
+
+        // بررسی ورود
+        if (!token) {
+            alert("لطفاً ابتدا وارد حساب کاربری خود شوید.");
+            window.location.href = "/lobby21.html";
+        }
+
+        // راه‌اندازی سوکت
+        socket = io({
+            query: { token }
+        });
+
+        socket.on("connect", () => {
+            console.log("Connected to 21 Server");
+            document.getElementById("activePlayerLabel").innerText = "در حال رزرو صندلی...";
+            socket.emit("match:join", { tier: currentTier });
+        });
+
+        socket.on("match:joined", (data) => {
+            mySeatKey = data.seatKey;
+            console.log("Joined as:", mySeatKey);
+        });
+
+        socket.on("match:error", (err) => {
+            alert(err.message || "خطا در ورود به میز");
+            window.location.href = "/lobby21.html";
+        });
+
+        socket.on("match:state", (state) => {
+            renderGameState(state);
+        });
+
+        socket.on("match:disbanded", () => {
+            alert("میز بسته شد. در حال بازگشت به لابی...");
+            window.location.href = "/lobby21.html";
+        });
+
+        socket.on("disconnect", () => {
+            document.getElementById("activePlayerLabel").innerText = "اتصال به سرور قطع شد...";
+        });
+
+        // رندر کامل وضعیت بازی
+        function renderGameState(state) {
+            // ۱. بروزرسانی پات
+            const potTomans = (state.totalPot || 0) * 1000;
+            document.getElementById("potDisplay").innerText = potTomans.toLocaleString("fa-IR") + " تومان";
+
+            // ۲. نگاشت صندلی‌ها طوری که کاربر جاری همیشه روی صندلی پایین (seat-ui-0) باشد
+            const orderedSeats = getRelativeSeatOrder(mySeatKey);
+
+            orderedSeats.forEach((seatKey, uiIndex) => {
+                const playerData = state.players[seatKey];
+                const seatElement = document.getElementById(`seat-ui-${uiIndex}`);
+                const nameEl = document.getElementById(`name-ui-${uiIndex}`);
+                const scoreEl = document.getElementById(`score-ui-${uiIndex}`);
+                const cardsBox = document.getElementById(`cards-ui-${uiIndex}`);
+
+                if (playerData) {
+                    seatElement.classList.remove("empty");
+                    const isMe = (seatKey === mySeatKey);
+                    nameEl.innerText = (isMe ? "شما (" + playerData.username + ")" : playerData.username);
+                    nameEl.style.color = isMe ? "#00e676" : "#d1d1d1";
+
+                    // امتیاز و برچسب وضعیت
+                    let statusHtml = `امتیاز: ${playerData.score}`;
+                    if (playerData.isBlackjack) statusHtml += ` <span class="status-tag status-bj">بلک‌جک</span>`;
+                    else if (playerData.isBusted) statusHtml += ` <span class="status-tag status-bust">سوخت</span>`;
+                    else if (playerData.isStand) statusHtml += ` <span class="status-tag status-stand">کافی</span>`;
+
+                    scoreEl.innerHTML = statusHtml;
+
+                    // رندر کارت‌ها
+                    renderCards(cardsBox, playerData.cards);
+
+                    // هایلایت صندلی دارای نوبت
+                    if (state.status === "PLAYING" && state.currentTurnSeat === seatKey) {
+                        seatElement.classList.add("active");
+                    } else {
+                        seatElement.classList.remove("active");
+                    }
+                } else {
+                    seatElement.classList.add("empty");
+                    seatElement.classList.remove("active");
+                    nameEl.innerText = "خالی";
+                    nameEl.style.color = "#888";
+                    scoreEl.innerText = "-";
+                    cardsBox.innerHTML = "";
+                }
+            });
+
+            // ۳. مدیریت وضعیت و تایمر سراسری
+            const labelName = document.getElementById("activePlayerLabel");
+            const textSec = document.getElementById("turnSeconds");
+            const mainBar = document.getElementById("globalProgressBar");
+            const btnHit = document.getElementById("btnHit");
+            const btnStand = document.getElementById("btnStand");
+
+            if (state.status === "WAITING") {
+                labelName.innerText = "در انتظار بازیکنان دیگر...";
+                textSec.innerText = "--";
+                mainBar.style.width = "0%";
+                btnHit.disabled = true;
+                btnStand.disabled = true;
+            } else if (state.status === "COUNTDOWN") {
+                labelName.innerText = "شروع بازی در صورت عدم ورود نفر بعدی...";
+                textSec.innerText = state.countdownSeconds;
+                const percent = (state.countdownSeconds / 30) * 100;
+                mainBar.style.width = percent + "%";
+                mainBar.style.backgroundColor = "#ffd600";
+                btnHit.disabled = true;
+                btnStand.disabled = true;
+            } else if (state.status === "PLAYING") {
+                const isMyTurn = (state.currentTurnSeat === mySeatKey);
+                const activePlayer = state.players[state.currentTurnSeat];
+                const activeName = activePlayer ? (isMyTurn ? "شما" : activePlayer.username) : "";
+
+                labelName.innerText = `نوبت: ${activeName}`;
+                textSec.innerText = state.turnTimeLeft;
+
+                const percent = (state.turnTimeLeft / 15) * 100;
+                let barColor = "#00e676";
+                if (state.turnTimeLeft <= 4) barColor = "#ff3d00";
+                else if (state.turnTimeLeft <= 8) barColor = "#ffd600";
+
+                mainBar.style.width = percent + "%";
+                mainBar.style.backgroundColor = barColor;
+
+                // فعال یا غیرفعال کردن دکمه‌ها
+                btnHit.disabled = !isMyTurn;
+                btnStand.disabled = !isMyTurn;
+            } else if (state.status === "FINISHED") {
+                labelName.innerText = "دست به پایان رسید";
+                textSec.innerText = "۰";
+                mainBar.style.width = "0%";
+                btnHit.disabled = true;
+                btnStand.disabled = true;
+
+                if (state.results) {
+                    showGameResults(state.results);
+                }
+            }
+        }
+
+        // رندر کارت‌های یک دست
+        function renderCards(container, cards) {
+            if (!cards) {
+                container.innerHTML = "";
+                return;
+            }
+            container.innerHTML = "";
+            cards.forEach(c => {
+                const isRed = (c.suit === "♥" || c.suit === "♦");
+                const cardDiv = document.createElement("div");
+                cardDiv.className = `poker-card ${isRed ? "red" : "black"}`;
+                cardDiv.innerHTML = `
+                    <span class="rank">${c.value}</span>
+                    <span class="suit">${c.suit}</span>
+                `;
+                container.appendChild(cardDiv);
+            });
+        }
+
+        // ترتیب‌دهی صندلی‌ها بر اساس جایگاه کاربر جاری
+        function getRelativeSeatOrder(mySeat) {
+            if (!mySeat) return SEAT_KEYS;
+            const myIndex = SEAT_KEYS.indexOf(mySeat);
+            if (myIndex === -1) return SEAT_KEYS;
+            const order = [];
+            for (let i = 0; i < 5; i++) {
+                order.push(SEAT_KEYS[(myIndex + i) % 5]);
+            }
+            return order;
+        }
+
+        // ارسال درخواست کارت و توقف
+        function emitHit() {
+            socket.emit("game:hit");
+        }
+
+        function emitStand() {
+            socket.emit("game:stand");
+        }
+
+        // نمایش پاپ‌آپ پایان بازی
+        function showGameResults(results) {
+            const modal = document.getElementById("resultModal");
+            const modalBody = document.getElementById("modalBody");
+            
+            if (results.isAllBusted) {
+                modalBody.innerHTML = `متاسفانه تمامی بازیکنان سوختند (Bust)!<br>پات بازی به خزانه واریز شد.`;
+            } else {
+                const winnerNames = results.winners.map(w => `<b>${w.username}</b> با امتیاز ${w.score}`).join(" و ");
+                modalBody.innerHTML = `🏆 برنده دست: ${winnerNames}<br>مجموع پات: <b>${(results.totalPot * 1000).toLocaleString("fa-IR")} تومان</b>`;
+            }
+            modal.style.display = "flex";
+        }
+
+        function leaveToLobby() {
+            window.location.href = "/lobby21.html";
+        }
+    </script>
+</body>
+</html>
