@@ -9,6 +9,7 @@
     "ajv": "^8.20.0",
     "aws-ssl-profiles": "^1.1.2",
     "base64id": "^2.0.0",
+    "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "better-result": "^2.9.2",
     "body-parser": "^2.3.0",

@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>میز ۲۱ رقابتی | تاج تاس</title>
     <!-- لود کتابخانه Socket.IO کلاینت -->
-    <script src="/socket.io/socket.io.js"></script>
     <style>
         * {
             box-sizing: border-box;
@@ -63,7 +62,10 @@
             position: relative;
             width: 100%;
             max-width: 420px;
-            height: 520px;
+            height: 75vh;
+    max-height: 520px;
+    width: 95%;
+    max-width: 420px;
             background: radial-gradient(ellipse at 50% 32%, #1b5e20 0%, #0d3813 65%, #051a09 100%);
             border: 11px solid #2e1c14;
             border-radius: 190px 190px 175px 175px;
@@ -394,13 +396,18 @@
 
         /* دکمه‌های کنترل */
         .controls-panel {
-            width: 100%;
-            max-width: 440px;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            padding: 4px 0;
-        }
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: rgba(0, 0, 0, 0.85);
+  padding: 12px;
+  box-sizing: border-box;
+  z-index: 1000;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
 
         .game-btn {
             padding: 13px 0;
@@ -481,6 +488,12 @@
             font-size: 13px;
         }
     </style>
+<script src="/21/socket.io/socket.io.js"></script>
+
+<style>
+body { padding-bottom: 120px !important; }
+.controls-panel { padding-bottom: 20px !important; }
+</style>
 </head>
 <body>
 
@@ -514,6 +527,7 @@
         <!-- مجموع جایزه در مرکز میز -->
         <div class="pot-container">
             <div class="pot-title">مجموع پات میز</div>
+            
             <div class="pot-amount" id="potDisplay">۰ تومان</div>
         </div>
 
@@ -569,6 +583,10 @@
     </div>
 
     <!-- نوار ثانیه‌شمار و راهنمای نوبت -->
+
+    <!-- پنل کنترل نوبت -->
+        <!-- پنل تایمر نوبت بالای دکمه‌های بازی -->
+    <div class="controls-panel" style="background: rgba(0,0,0,0.8); padding: 15px; border-top: 2px solid #333; border-radius: 15px 15px 0 0;">
     <div class="turn-timer-panel">
         <div class="turn-timer-header">
             <div class="turn-name">
@@ -585,12 +603,12 @@
             <div class="turn-progress-fill" id="globalProgressBar" style="width: 0%;"></div>
         </div>
     </div>
-
-    <!-- پنل کنترل نوبت -->
-    <div class="controls-panel">
+    
+    <div style="display: flex; gap: 10px; justify-content: center;">
         <button class="game-btn btn-hit" id="btnHit" onclick="emitHit()" disabled>➕ دریافت کارت (HIT)</button>
         <button class="game-btn btn-stand" id="btnStand" onclick="emitStand()" disabled>✋ کافیه (STAND)</button>
     </div>
+</div>
 
     <!-- مودال پایان بازی -->
     <div class="modal-overlay" id="resultModal">
@@ -617,37 +635,44 @@
         // بررسی ورود
         if (!token) {
             alert("لطفاً ابتدا وارد حساب کاربری خود شوید.");
-            window.location.href = "/lobby21.html";
+            window.location.href = "/anna/lobby21.html";
         }
 
         // راه‌اندازی سوکت
-        socket = io({
-            query: { token }
-        });
+        socket = io({ path: "/21/socket.io", auth: { token }, query: { token }, transports: ["websocket", "polling"] });
 
         socket.on("connect", () => {
-            console.log("Connected to 21 Server");
-            document.getElementById("activePlayerLabel").innerText = "در حال رزرو صندلی...";
-            socket.emit("match:join", { tier: currentTier });
+            document.getElementById("activePlayerLabel").innerText = "در حال بررسی بازی قبلی...";
+            socket.emit("game:restoreSession", {}, (response) => {
+                if (response && response.success) {
+                    console.log("بازیابی با موفقیت انجام شد:", response);
+                } else {
+                    console.log("بازی فعالی پیدا نشد، هدایت به لابی...");
+                    window.location.href = "/anna/lobby21.html";
+                }
+            });
         });
 
-        socket.on("match:joined", (data) => {
+        socket.on("match21:joined", (data) => {
             mySeatKey = data.seatKey;
-            console.log("Joined as:", mySeatKey);
+            if (data.tier) {
+                document.querySelector(".gold-text").innerText =  (data.tier * 1000).toLocaleString("fa-IR")  + " تومان";
+            }
+            console.log("Joined as:", mySeatKey, "Tier:", data.tier);
         });
 
-        socket.on("match:error", (err) => {
+        socket.on("match21:error", (err) => {
             alert(err.message || "خطا در ورود به میز");
-            window.location.href = "/lobby21.html";
+            window.location.href = "/anna/lobby21.html";
         });
 
-        socket.on("match:state", (state) => {
+        socket.on("match21:state", (state) => {
             renderGameState(state);
         });
 
-        socket.on("match:disbanded", () => {
+        socket.on("match21:disbanded", () => {
             alert("میز بسته شد. در حال بازگشت به لابی...");
-            window.location.href = "/lobby21.html";
+            window.location.href = "/anna/lobby21.html";
         });
 
         socket.on("disconnect", () => {
@@ -656,6 +681,15 @@
 
         // رندر کامل وضعیت بازی
         function renderGameState(state) {
+            // نمایش تایمر نوبت
+            const timerEl = document.getElementById("turnTimerDisplay");
+            if (timerEl) {
+                if (state.status === "PLAYING" && state.turnTimeLeft !== undefined) {
+                    timerEl.innerText = "⏳ زمان نوبت: " + state.turnTimeLeft + " ثانیه";
+                } else {
+                    timerEl.innerText = "";
+                }
+            }
             // ۱. بروزرسانی پات
             const potTomans = (state.totalPot || 0) * 1000;
             document.getElementById("potDisplay").innerText = potTomans.toLocaleString("fa-IR") + " تومان";
@@ -692,6 +726,18 @@
                         seatElement.classList.add("active");
                     } else {
                         seatElement.classList.remove("active");
+                    }
+
+                    // آپدیت نوار تایمر صندلی
+                    const seatTimer = document.getElementById(`timer-ui-${uiIndex}`);
+                    if (seatTimer) {
+                        if (state.status === "PLAYING" && state.currentTurnSeat === seatKey) {
+                            const percent = (state.turnTimeLeft / 35) * 100;
+                            seatTimer.style.width = percent + "%";
+                            seatTimer.style.backgroundColor = (state.turnTimeLeft <= 4) ? "#ff3d00" : ((state.turnTimeLeft <= 8) ? "#ffd600" : "#00e676");
+                        } else {
+                            seatTimer.style.width = "0%";
+                        }
                     }
                 } else {
                     seatElement.classList.add("empty");
@@ -732,7 +778,7 @@
                 labelName.innerText = `نوبت: ${activeName}`;
                 textSec.innerText = state.turnTimeLeft;
 
-                const percent = (state.turnTimeLeft / 15) * 100;
+                const percent = (state.turnTimeLeft / 35) * 100;
                 let barColor = "#00e676";
                 if (state.turnTimeLeft <= 4) barColor = "#ff3d00";
                 else if (state.turnTimeLeft <= 8) barColor = "#ffd600";
@@ -757,23 +803,21 @@
         }
 
         // رندر کارت‌های یک دست
-        function renderCards(container, cards) {
-            if (!cards) {
-                container.innerHTML = "";
-                return;
-            }
-            container.innerHTML = "";
-            cards.forEach(c => {
-                const isRed = (c.suit === "♥" || c.suit === "♦");
-                const cardDiv = document.createElement("div");
-                cardDiv.className = `poker-card ${isRed ? "red" : "black"}`;
-                cardDiv.innerHTML = `
-                    <span class="rank">${c.value}</span>
-                    <span class="suit">${c.suit}</span>
-                `;
-                container.appendChild(cardDiv);
-            });
-        }
+function renderCards(container, cards) {
+    if (!cards) { container.innerHTML = ""; return; }
+    container.innerHTML = "";
+    const suitSymbols = { "diamonds": "♦", "hearts": "♥", "spades": "♠", "clubs": "♣" };
+    cards.forEach(c => {
+        const isRed = (c.suit === "hearts" || c.suit === "diamonds");
+        const cardDiv = document.createElement("div");
+        cardDiv.className = `poker-card ${isRed ? "red" : "black"}`;
+        cardDiv.innerHTML = `
+            <div class="rank">${c.rank}</div>
+            <div class="suit">${suitSymbols[c.suit] || c.suit}</div>
+        `;
+        container.appendChild(cardDiv);
+    });
+}
 
         // ترتیب‌دهی صندلی‌ها بر اساس جایگاه کاربر جاری
         function getRelativeSeatOrder(mySeat) {
@@ -804,15 +848,43 @@
             if (results.isAllBusted) {
                 modalBody.innerHTML = `متاسفانه تمامی بازیکنان سوختند (Bust)!<br>پات بازی به خزانه واریز شد.`;
             } else {
-                const winnerNames = results.winners.map(w => `<b>${w.username}</b> با امتیاز ${w.score}`).join(" و ");
-                modalBody.innerHTML = `🏆 برنده دست: ${winnerNames}<br>مجموع پات: <b>${(results.totalPot * 1000).toLocaleString("fa-IR")} تومان</b>`;
+                const winnerNames = results.winners.map(w => `<span style="color: yellow;"><b>${w.username}</b> با امتیاز ${w.score}</span>`).join(" و ");
+                
+                const allPlayersList = results.allPlayers ? results.allPlayers.map(p => {
+                    const isWinner = results.winners.some(w => w.username === p.username);
+                    return `<li style="color: ${isWinner ? "yellow" : "red"};">${p.username}: ${p.isBusted ? "سوخته" : p.score}</li>`;
+                }).join("") : "";
+                
+                modalBody.innerHTML = `🏆 برنده دست: ${winnerNames}<br>مجموع پات: <b>${(results.totalPot * 1000).toLocaleString("fa-IR")} تومان</b><br><br>امتیاز نهایی:<br><ul>${allPlayersList}</ul>`;
             }
             modal.style.display = "flex";
         }
 
         function leaveToLobby() {
-            window.location.href = "/lobby21.html";
+            if (!socket || !socket.connected) {
+                alert("اتصال به سرور برقرار نیست؛ خروج انجام نشد.");
+                return;
+            }
+
+            socket.emit("game:leave", {}, (resp) => {
+                if (resp && resp.success) {
+                    window.location.href = "/anna/lobby21.html";
+                } else {
+                    alert("خروج تأیید نشد؛ صفحه را ترک نکردیم تا وضعیت بازی به‌هم نخورد.");
+                }
+            });
         }
     </script>
+
+<script>
+window.addEventListener('DOMContentLoaded', (event) => {
+    if (!document.getElementById('turnTimerDisplay')) {
+        let dummy = document.createElement('div');
+        dummy.id = 'turnTimerDisplay';
+        dummy.style.display = 'none';
+        document.body.appendChild(dummy);
+    }
+});
+</script>
 </body>
 </html>

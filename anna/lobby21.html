@@ -96,6 +96,7 @@ input, select{
   font-weight:normal;
 }
     </style>
+<script src="/21/socket.io/socket.io.js"></script>
 </head>
 <body>
   <!-- هدر مینیمال و یکپارچه تاج تاس -->
@@ -105,14 +106,14 @@ input, select{
         <span style="font-size: 20px; filter: drop-shadow(0 0 5px rgba(212,175,55,0.4));">👑🎲</span>
         
         <!-- نام برند -->
-        <span style="color: #d4af37; font-size: 19px; font-weight: bold; font-family: Tahoma, sans-serif; letter-spacing: 1px; text-shadow: 0 0 5px rgba(212,175,55,0.5);">تاج تاس</span>
+        <span style="color: #d4af37; font-size: 19px; font-weight: bold; font-family: Tahoma, sans-serif; letter-spacing: 1px; text-shadow: 0 0 5px rgba(212,175,55,0.5);">تاج تاس—21</span>
         
         <span style="font-size: 20px; filter: drop-shadow(0 0 5px rgba(212,175,55,0.4));">🎲👑</span>
     </div>
 </div>
   <!-- باکس پشتیبانی کوچک و شکیل برای تاج تاس -->
 <div class="support-mini-container">
-  <span class="support-label">واریز و برداشت:</span>
+  <span class="support-label">برای واریز و برداشت پیام بدین👈</span>
   <div class="id-mini-wrapper">
     <a href="https://t.me/TajTasAdmin" target="_blank" id="telegram-link-mini">@TajTasAdmin</a>
     <button onclick="copyTelegramIdMini()" class="copy-btn-mini">
@@ -232,7 +233,10 @@ function showToast(message) {
       <div>
         <div style="font-size:18px; font-weight:700;">موجودی شما</div>
       </div>
-      <button id="logoutBtn" style="background:#ef4444;color:#fff;">خروج</button>
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <button id="logoutBtn" style="background:#ef4444;color:#fff;">خروج</button>
+        <button id="dashboardBtn" onclick="location.href='/dashboard.html'" style="background:#2563eb;color:#fff;">داشبورد</button>
+      </div>
     </div>
     <div style="height:10px;"></div>
     <div class="muted" style="text-align:center; width:100%; display:flex; align-items:center; justify-content:center; gap:8px;">
@@ -254,7 +258,6 @@ function showToast(message) {
 
   <div class="panel">
     <div style="display:flex;flex-direction:column;align-items:center;gap:6px; width:100%;">
-      <div class="muted">ورود به صف بازی (بر اساس Tier)</div>
 
       <div style="display:flex; gap:10px; width:100%; justify-content:center; flex-wrap:wrap; margin-top:6px;">
         <div style="max-width:260px; width:100%;">
@@ -493,23 +496,42 @@ function showToast(message) {
         if (socket && socket.connected) return socket;
         if (socket) { try { socket.removeAllListeners(); socket.disconnect(); } catch {} socket = null; }
 
-        socket = io(SOCKET_URL, {
-          auth: { token },
-          autoConnect: false,
-          transports: ["websocket", "polling"],
-          reconnection: true,
-          reconnectionAttempts: 5,
-          reconnectionDelay: 1000
-        });
+      socket = io({
+        path: "/21/socket.io",
+        auth: { token },
+        autoConnect: true,
+        transports: ["websocket", "polling"],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
+      });
 
         socket.on("connect", () => {
           socketStatusEl.textContent = `✅ متصل به سرور (${socket.id})`;
 
           socket.emit("game:restoreSession", {}, (resp) => {
-            if (resp?.success && resp?.restored && resp?.matchId) {
+            if (resp?.success && resp?.matchId) {
               currentMatchId = String(resp.matchId);
-              serverMsgEl.textContent = "بازی شما بازیابی شد. در حال انتقال...";
-              goToStartedGame(currentMatchId);
+              if (resp.status === "PLAYING" || resp.status === "playing") {
+                serverMsgEl.textContent = "بازی شما در حال جریان است. در حال انتقال...";
+                goToStartedGame(currentMatchId);
+              } else {
+                serverMsgEl.textContent = "شما در صف انتظار هستید.";
+                joinInProgress = true;
+                joinBtn.disabled = true;
+                tierInput.disabled = true;
+                leaveQueueBtn.hidden = false;
+                leaveQueueBtn.disabled = false;
+              }
+            } else {
+              currentMatchId = null;
+              joinInProgress = false;
+              joinBtn.disabled = false;
+              tierInput.disabled = false;
+              leaveQueueBtn.hidden = true;
+              leaveQueueBtn.disabled = true;
+              stopLobbyCountdown();
+              joinStatusEl.textContent = "";
             }
           });
         });
@@ -541,13 +563,14 @@ function showToast(message) {
           }
         });
 
-        socket.on("match:state", state => {
+        socket.on("match21:state", state => {
           if (state?.matchId && (state?.status === "playing" || state?.status === "PLAYING")) {
             goToStartedGame(state.matchId);
           }
         });
 
         socket.on("lobby:status", data => {
+          if (currentMatchId && data?.matchId && String(currentMatchId) !== String(data.matchId)) return;
           if (!data) return;
           renderLobbyByDeadline(data);
           if (data?.phase === 5 || data?.phase === 4) {
@@ -565,7 +588,7 @@ function showToast(message) {
           if (onlineEl) onlineEl.textContent = Number(data.online || 0).toLocaleString("en-US");
         });
 
-        socket.on("match:error", payload => {
+        socket.on("match21:error", payload => {
           const message = payload?.message || "خطا در بازی/صف";
           serverMsgEl.textContent = `❌ ${message}`;
           joinStatusEl.textContent = "❌ خطا";

@@ -75,6 +75,44 @@
         <span class="res-label">🟢 کاربران آنلاین واقعی:</span>
         <span id="realOnlineVal" class="res-val" style="color: #22c55e;">-</span>
       </div>
+
+    <!-- تنظیمات آنلاین فیک بازی ۲۱ -->
+    <div class="result" id="fake21Box" style="margin-bottom: 20px; background: #0b1220; border: 1px solid #334155;">
+      <div class="res-row">
+        <span class="res-label">🟣 آنلاین فیک بازی ۲۱:</span>
+        <span id="fake21Status" class="res-val" style="color:#a78bfa;">-</span>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button id="loadFake21Btn" style="flex:1; background:#334155; padding: 8px; width: 100%;">خواندن تنظیمات</button>
+        <button id="saveFake21Btn" style="flex:1; background:#7c3aed; padding: 8px; width: 100%;">ذخیره تنظیمات</button>
+      </div>
+
+      <div style="margin-top:10px; display:flex; gap:8px;">
+        <label style="flex:1; font-size:13px;">
+          <div style="margin-bottom:4px;">فعال؟</div>
+          <select id="fake21Enabled" style="width:100%; padding:8px; background:#0f172a; border:1px solid #334155; color:#e2e8f0;">
+            <option value="true">فعال</option>
+            <option value="false">غیرفعال</option>
+          </select>
+        </label>
+
+        <label style="flex:1; font-size:13px;">
+          <div style="margin-bottom:4px;">حداقل</div>
+          <input id="fake21Min" type="number" min="0" step="1" value="20"
+            style="width:100%; padding:8px; background:#0f172a; border:1px solid #334155; color:#e2e8f0;" />
+        </label>
+
+        <label style="flex:1; font-size:13px;">
+          <div style="margin-bottom:4px;">حداکثر</div>
+          <input id="fake21Max" type="number" min="0" step="1" value="50"
+            style="width:100%; padding:8px; background:#0f172a; border:1px solid #334155; color:#e2e8f0;" />
+        </label>
+      </div>
+
+      <div class="result" id="fake21Result" style="margin-top:10px; background:#0f172a;">-</div>
+    </div>
+
       <button id="refreshStatsBtn" style="margin-top: 10px; background: #3b82f6; padding: 6px; width: 100%;">بروزرسانی آمار</button>
     </div>
 
@@ -381,6 +419,90 @@
       }
     });
 
-  </script>
+  
+
+        // ===== Fake Online 21 Admin Logic =====
+    const loadFake21Btn = document.getElementById("loadFake21Btn");
+    const saveFake21Btn = document.getElementById("saveFake21Btn");
+    const fake21Enabled = document.getElementById("fake21Enabled");
+    const fake21Min = document.getElementById("fake21Min");
+    const fake21Max = document.getElementById("fake21Max");
+    const fake21Status = document.getElementById("fake21Status");
+    const fake21Result = document.getElementById("fake21Result");
+
+    function setFake21Result(html) {
+      if (fake21Result) fake21Result.innerHTML = html;
+    }
+
+    if (loadFake21Btn) {
+      loadFake21Btn.addEventListener("click", async () => {
+        const secret = adminSecretInput ? adminSecretInput.value.trim() : "";
+        if (!secret) {
+          alert("لطفاً ابتدا رمز ادمین را وارد کنید.");
+          return;
+        }
+
+        setFake21Result("<span style='color:#94a3b8;'>در حال دریافت تنظیمات...</span>");
+        try {
+          const res = await fetch("/admin/fake-online-21?adminSecret=" + encodeURIComponent(secret));
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+            setFake21Result("<span style='color:#ef4444;'>" + (data.message || "خطا در دریافت تنظیمات") + "</span>");
+            return;
+          }
+
+          if (fake21Enabled) fake21Enabled.value = String(Boolean(data.enabled));
+          if (fake21Min) fake21Min.value = Number(data.min ?? 0);
+          if (fake21Max) fake21Max.value = Number(data.max ?? 0);
+
+          if (fake21Status) fake21Status.innerText = (data.enabled ? "فعال" : "غیرفعال") + " (" + data.min + "-" + data.max + ")";
+          setFake21Result("<span style='color:#22c55e; font-weight:bold;'>تنظیمات دریافت شد.</span>");
+        } catch (e) {
+          setFake21Result("<span style='color:#ef4444;'>خطا در ارتباط با سرور</span>");
+        }
+      });
+    }
+
+    if (saveFake21Btn) {
+      saveFake21Btn.addEventListener("click", async () => {
+        const secret = adminSecretInput ? adminSecretInput.value.trim() : "";
+        if (!secret) {
+          alert("لطفاً ابتدا رمز ادمین را وارد کنید.");
+          return;
+        }
+
+        const enabled = (fake21Enabled.value === "true");
+        const min = Number(fake21Min.value);
+        const max = Number(fake21Max.value);
+
+        if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < 0 || max < min) {
+          setFake21Result("<span style='color:#ef4444;'>مقادیر min/max معتبر نیستند.</span>");
+          return;
+        }
+
+        setFake21Result("<span style='color:#94a3b8;'>در حال ذخیره...</span>");
+        try {
+          const res = await fetch("/admin/fake-online-21", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ adminSecret: secret, enabled, min, max })
+          });
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+            setFake21Result("<span style='color:#ef4444;'>" + (data.message || "خطا در ذخیره تنظیمات") + "</span>");
+            return;
+          }
+
+          if (fake21Status) fake21Status.innerText = (enabled ? "فعال" : "غیرفعال") + " (" + min + "-" + max + ")";
+          setFake21Result("<span style='color:#22c55e; font-weight:bold;'>ذخیره شد.</span>");
+        } catch (e) {
+          setFake21Result("<span style='color:#ef4444;'>خطا در ارتباط با سرور</span>");
+        }
+      });
+    }
+
+</script>
 </body>
 </html>

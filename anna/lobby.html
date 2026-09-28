@@ -111,14 +111,14 @@ input, select{
         <span style="font-size: 20px; filter: drop-shadow(0 0 5px rgba(212,175,55,0.4));">👑🎲</span>
         
         <!-- نام برند -->
-        <span style="color: #d4af37; font-size: 19px; font-weight: bold; font-family: Tahoma, sans-serif; letter-spacing: 1px; text-shadow: 0 0 5px rgba(212,175,55,0.5);">تاج تاس</span>
+        <span style="color: #d4af37; font-size: 19px; font-weight: bold; font-family: Tahoma, sans-serif; letter-spacing: 1px; text-shadow: 0 0 5px rgba(212,175,55,0.5);">تاج تاس—منچ</span>
         
         <span style="font-size: 20px; filter: drop-shadow(0 0 5px rgba(212,175,55,0.4));">🎲👑</span>
     </div>
 </div>
   <!-- باکس پشتیبانی کوچک و شکیل برای تاج تاس -->
 <div class="support-mini-container">
-  <span class="support-label">واریز و برداشت:</span>
+  <span class="support-label">برای واریز و برداشت پیام بدین👈</span>
   <div class="id-mini-wrapper">
     <a href="https://t.me/TajTasAdmin" target="_blank" id="telegram-link-mini">@TajTasAdmin</a>
     <button onclick="copyTelegramIdMini()" class="copy-btn-mini">
@@ -240,7 +240,10 @@ function showToast(message) {
       <div>
         <div style="font-size:18px; font-weight:700;">موجودی شما</div>
       </div>
-      <button id="logoutBtn" style="background:#ef4444;color:#fff;">خروج</button>
+      <div style="display:flex; flex-direction:column; gap:4px;">
+        <button id="logoutBtn" style="background:#ef4444;color:#fff;">خروج</button>
+        <button id="dashboardBtn" onclick="location.href='/dashboard.html'" style="background:#2563eb;color:#fff;">داشبورد</button>
+      </div>
     </div>
     <div style="height:10px;"></div>
     <div class="muted" style="text-align:center; width:100%; display:flex; align-items:center; justify-content:center; gap:8px;">
@@ -264,7 +267,6 @@ function showToast(message) {
 
   <div class="panel">
     <div style="display:flex;flex-direction:column;align-items:center;gap:6px; width:100%;">
-      <div class="muted">ورود به صف بازی (بر اساس Tier)</div>
 
       <div style="display:flex; gap:10px; width:100%; justify-content:center; flex-wrap:wrap; margin-top:6px;">
         <div style="max-width:260px; width:100%;">

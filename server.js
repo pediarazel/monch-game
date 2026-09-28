@@ -1,3 +1,4 @@
+const fs = require('fs');
 "use strict";
 
 require("dotenv").config({ path: require("path").join(__dirname, ".env") });
@@ -546,6 +547,43 @@ app.post("/admin/treasury-deduct", authenticateAdminSecret, async (req, res) => 
     });
   } catch (e) {
     return safeJsonError(res, 500, e.message || "خطای داخلی سرور");
+  }
+});
+
+app.get("/admin/fake-online-21", authenticateAdminSecret, (req, res) => {
+  try {
+    const configPath = path.join(__dirname, "fake_online_21.json");
+    if (!fs.existsSync(configPath)) {
+      return res.status(200).json({ enabled: false, min: 15, max: 35 });
+    }
+    const data = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    return res.status(200).json(data);
+  } catch (e) {
+    return safeJsonError(res, 500, e.message || "خطا در خواندن تنظیمات");
+  }
+});
+
+app.post("/admin/fake-online-21", authenticateAdminSecret, (req, res) => {
+  try {
+    const { enabled, min, max } = req.body;
+    const numMin = parseInt(min, 10);
+    const numMax = parseInt(max, 10);
+
+    if (isNaN(numMin) || isNaN(numMax) || numMin < 0 || numMax < numMin) {
+      return safeJsonError(res, 400, "مقادیر بازه حداقل و حداکثر نامعتبر هستند.");
+    }
+
+    const config = {
+      enabled: Boolean(enabled),
+      min: numMin,
+      max: numMax
+    };
+
+    const configPath = path.join(__dirname, "fake_online_21.json");
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+    return res.status(200).json({ success: true, config });
+  } catch (e) {
+    return safeJsonError(res, 500, e.message || "خطا در ذخیره تنظیمات");
   }
 });
 
@@ -1119,13 +1157,14 @@ async function settleCoinsForMatch(match) {
   const totalOriginalPlayers = activePlayersCount + forfeitedCount;
   const totalPot = totalOriginalPlayers * tier;
   
+  const isBotMatch = Boolean(match.botUserId);
   const winnerAmount = Math.floor(0.9 * totalPot);
-  const treasuryAmount = Math.floor(0.05 * totalPot);
+  const treasuryAmount = isBotMatch ? Math.floor(0.05 * totalPot) : Math.floor(0.1 * totalPot);
 
   const treasury = await ensureTreasuryUser();
 
   try {
-    console.log(`[SETTLE_PROCESS] Winner: ${winnerUserId}, Amount: ${winnerAmount}, Pot: ${totalPot}`);
+    console.log(`[SETTLE_PROCESS] MatchType: ${isBotMatch ? 'BOT' : 'PVP'}, Winner: ${winnerUserId}, Pot: ${totalPot}, WinnerGet: ${winnerAmount}, TreasuryGet: ${treasuryAmount}`);
     
     await prisma.$transaction(async (tx) => {
       // ۱. واریز به برنده

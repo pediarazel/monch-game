@@ -1,249 +1,112 @@
-/**
- * ============================================================================
- * TAJ TAS - 21 GAME SERVER (server21.js)
- * Architecture: Competitive PvP 5-Player Blackjack Engine
- * DB & Auth: Shared PostgreSQL via Prisma & Unified JWT
- * ============================================================================
- */
+let lastFakeOnline21 = -1;
+let lastUpdateFakeTime21 = 0;
 
-require("dotenv").config();
-const path = require("path");
-const http = require("http");
-const express = require("express");
-const cors = require("cors");
-const jwt = require("jsonwebtoken");
-const bcrypt = require("bcryptjs");
-const { Server } = require("socket.io");
-const { PrismaClient } = require("@prisma/client");
-const { PrismaPg } = require("@prisma/adapter-pg");
 
-// ----------------------------------------------------------------------------
-// 1. CONFIGURATION & CONSTANTS
-// ----------------------------------------------------------------------------
-const PORT = Number(process.env.PORT) || 3001;
-const JWT_SECRET = process.env.JWT_SECRET || "tajtas_jwt_secret_key_2026";
-const ADMIN_SECRET = process.env.ADMIN_SECRET || "tajtas_admin_secret_2026";
-const DATABASE_URL = process.env.DATABASE_URL;
-
-if (!DATABASE_URL) {
-  console.error("FATAL: DATABASE_URL is not defined in environment variables.");
-  process.exit(1);
-}
-
-const SEATS = ["seat_1", "seat_2", "seat_3", "seat_4", "seat_5"];
-const COUNTDOWN_SECONDS = 30; // زمان انتظار برای ورود نفر بعدی
-const TURN_TIMEOUT_SECONDS = 15; // زمان نوبت هر بازیکن برای Hit/Stand
-const ALLOWED_TIERS = [20, 50, 100, 200]; // مبالغ مجاز میز (به هزار تومان / سکه)
-
-// ----------------------------------------------------------------------------
-// 2. DATABASE INITIALIZATION (PRISMA)
-// ----------------------------------------------------------------------------
-const prismaPg = new PrismaPg({
-  connectionString: DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
-const prisma = new PrismaClient({ adapter: prismaPg });
-
-// اطمینان از وجود کاربر خزانه
-async function ensureTreasuryUser() {
+function readFakeOnline21Config() {
   try {
-    const treasury = await prisma.user.findUnique({ where: { username: "treasury" } });
-    if (!treasury) {
-      const hashedPassword = await bcrypt.hash("treasury_secure_pass_" + Date.now(), 10);
-      await prisma.user.create({
-        data: {
-          username: "treasury",
-          password: hashedPassword,
-          coins: 0,
-          role: "TREASURY"
-        }
-      });
-      console.log("✅ Treasury account initialized successfully.");
-    }
-  } catch (err) {
-    console.error("❌ Error ensuring treasury user:", err.message);
-  }
-}
-ensureTreasuryUser();
-
-// ----------------------------------------------------------------------------
-// 3. EXPRESS & HTTP SERVER SETUP
-// ----------------------------------------------------------------------------
-const app = express();
-const httpServer = http.createServer(app);
-
-app.use(cors({ origin: "*" }));
-app.use(express.json());
-
-// سرو فایل‌های استاتیک پوشه anna و روت اصلی
-app.use(express.static(path.join(__dirname, "anna")));
-app.use("/static", express.static(path.join(__dirname, "anna")));
-
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "anna", "game21.html"));
-});
-
-app.get("/lobby21", (req, res) => {
-  res.sendFile(path.join(__dirname, "anna", "lobby21.html"));
-});
-
-// ----------------------------------------------------------------------------
-// 4. AUTH HELPERS & MIDDLEWARES
-// ----------------------------------------------------------------------------
-function getBearerToken(req) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return null;
-  const parts = authHeader.split(" ");
-  if (parts.length === 2 && parts[0].toLowerCase() === "bearer") {
-    return parts[1];
-  }
-  return null;
-}
-
-function verifyJwtToken(token) {
-  try {
-    return jwt.verify(token, JWT_SECRET);
+    const configPath = path.join(__dirname, "fake_online_21.json");
+    if (!fs.existsSync(configPath)) return null;
+    const data = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    if (!data || typeof data !== "object") return null;
+    return {
+      enabled: Boolean(data.enabled),
+      min: parseInt(data.min, 10),
+      max: parseInt(data.max, 10)
+    };
   } catch (e) {
+    console.log("[FAKE-ONLINE-21] Error reading config:", e.message);
     return null;
   }
 }
 
-async function authenticateHttp(req, res, next) {
-  const token = getBearerToken(req);
-  if (!token) return res.status(401).json({ error: "TOKEN_MISSING" });
-  const decoded = verifyJwtToken(token);
-  if (!decoded || !decoded.userId) return res.status(401).json({ error: "TOKEN_INVALID" });
+function broadcastLobbyStats() {
+  const realCount = (typeof activeSocket21 !== 'undefined') ? activeSocket21.size : (io.engine.clientsCount || 0);
 
-  try {
-    const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
-    if (!user) return res.status(401).json({ error: "USER_NOT_FOUND" });
-    req.user = user;
-    next();
-  } catch (err) {
-    return res.status(500).json({ error: "DB_AUTH_ERROR" });
+  let count = realCount;
+  const fakeCfg = readFakeOnline21Config();
+  // اصلاحِ لحظه‌ایِ عددِ فیک اگر از محدوده خارج شده باشد
+  if (fakeCfg && lastFakeOnline21 !== -1) {
+  if (lastFakeOnline21 > fakeCfg.max) lastFakeOnline21 = fakeCfg.max;
+  if (lastFakeOnline21 < fakeCfg.min) lastFakeOnline21 = fakeCfg.min;
   }
-}
 
-function authenticateAdminSecret(req, res, next) {
-  const secret = req.headers["x-admin-secret"] || req.query.adminSecret;
-  if (!secret || secret !== ADMIN_SECRET) {
-    return res.status(401).json({ error: "ADMIN_UNAUTHORIZED" });
-  }
-  next();
-}
-
-// ----------------------------------------------------------------------------
-// 5. HTTP API ROUTES
-// ----------------------------------------------------------------------------
-app.post("/api/auth/login", async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: "MISSING_CREDENTIALS" });
-
-  try {
-    const user = await prisma.user.findUnique({ where: { username } });
-    if (!user) return res.status(401).json({ error: "INVALID_CREDENTIALS" });
-
-    const isValid = await bcrypt.compare(password, user.password);
-    if (!isValid) return res.status(401).json({ error: "INVALID_CREDENTIALS" });
-
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
-    return res.json({ token, user: { id: user.id, username: user.username, coins: user.coins, role: user.role } });
-  } catch (err) {
-    return res.status(500).json({ error: "LOGIN_FAILED" });
-  }
-});
-
-app.get("/api/me/balance", authenticateHttp, async (req, res) => {
-  return res.json({ coins: req.user.coins, username: req.user.username, userId: req.user.id });
-});
-
-// پنل ادمین - گزارش خزانه
-app.get("/admin/treasury-report", authenticateAdminSecret, async (req, res) => {
-  try {
-    const treasuryUser = await prisma.user.findUnique({ where: { username: "treasury" } });
-    const treasuryBalance = treasuryUser ? treasuryUser.coins : 0;
-
-    const cuts = await prisma.transaction.aggregate({
-      _sum: { amount: true },
-      _count: { id: true },
-      where: { type: "TREASURY_CUT" }
-    });
-
-    return res.json({
-      treasuryCoins: treasuryBalance,
-      treasuryTomans: treasuryBalance * 1000,
-      totalCutsCollected: cuts._sum.amount || 0,
-      totalMatchesCut: cuts._count.id || 0
-    });
-  } catch (err) {
-    return res.status(500).json({ error: "TREASURY_REPORT_ERROR" });
-  }
-});
-
-// پنل ادمین - برداشت از خزانه
-app.post("/admin/treasury-deduct", authenticateAdminSecret, async (req, res) => {
-  const { amount, note } = req.body;
-  const numAmount = Number(amount);
-  if (!numAmount || numAmount <= 0) return res.status(400).json({ error: "INVALID_AMOUNT" });
-
-  try {
-    const result = await prisma.$transaction(async (tx) => {
-      const treasury = await tx.user.findUnique({ where: { username: "treasury" } });
-      if (!treasury || treasury.coins < numAmount) {
-        throw new Error("INSUFFICIENT_TREASURY_BALANCE");
+  if (fakeCfg && fakeCfg.enabled && Number.isFinite(fakeCfg.min) && Number.isFinite(fakeCfg.max) && fakeCfg.max >= fakeCfg.min && fakeCfg.max > 0) {
+    const now = Date.now();
+    if (lastFakeOnline21 === -1 || (now - lastUpdateFakeTime21) >= 300000) {
+      if (lastFakeOnline21 === -1) {
+        lastFakeOnline21 = fakeCfg.min + Math.floor(Math.random() * (fakeCfg.max - fakeCfg.min + 1));
+      } else {
+        let change = Math.floor(Math.random() * 4) + 1;
+        change *= (Math.random() > 0.5) ? 1 : -1;
+        lastFakeOnline21 = Math.min(Math.max(lastFakeOnline21 + change, fakeCfg.min), fakeCfg.max);
       }
-
-      const updated = await tx.user.update({
-        where: { id: treasury.id },
-        data: { coins: { decrement: numAmount } }
-      });
-
-      const txRecord = await tx.transaction.create({
-        data: {
-          userId: treasury.id,
-          amount: -numAmount,
-          type: "WITHDRAW",
-          note: note || "Admin treasury withdrawal"
-        }
-      });
-
-      return { remainingCoins: updated.coins, transactionId: txRecord.id };
-    });
-
-    return res.json({ success: true, ...result });
-  } catch (err) {
-    return res.status(400).json({ error: err.message });
+      lastUpdateFakeTime21 = now;
+    }
+    count = lastFakeOnline21;
   }
+
+  io.emit("lobby:stats", { online: count, onlineCount: count, realOnline: realCount });
+}
+
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+const http = require("http");
+const express = require("express");
+const { Server } = require("socket.io");
+const jwt = require("jsonwebtoken");
+const dotenv = require("dotenv");
+const { PrismaClient } = require("@prisma/client");
+const { Pool } = require("pg");
+const { PrismaPg } = require("@prisma/adapter-pg");
+
+dotenv.config();
+
+const app = express();
+const server = http.createServer(app);
+
+const io = new Server(server, {
+  path: "/21/socket.io",
+  pingInterval: 2000,
+  pingTimeout: 4000,
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  },
+  pingInterval: 10000,
+  pingTimeout: 5000
 });
 
-// آمار سرور
-app.get("/admin/server-stats", authenticateAdminSecret, (req, res) => {
-  const activeMatchesCount = Object.keys(matches).length;
-  let totalPlayers = 0;
-  Object.values(matches).forEach(m => {
-    totalPlayers += Object.keys(m.players).length;
-  });
-  return res.json({
-    activeMatches: activeMatchesCount,
-    totalPlayersInMatches: totalPlayers,
-    connectedSockets: io.engine.clientsCount
-  });
-});
+const connectionString = process.env.DATABASE_URL;
+const pool = new Pool({ connectionString });
+const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
-// ----------------------------------------------------------------------------
-// 6. CARD DECK & BLACKJACK SCORING ENGINE
-// ----------------------------------------------------------------------------
-const SUITS = ["♠", "♥", "♦", "♣"];
-const VALUES = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
+const JWT_SECRET = process.env.JWT_SECRET;
+const SEAT_KEYS = ["seat_1", "seat_2", "seat_3", "seat_4", "seat_5"];
+const MAX_SEATS = 5;
+const WAITING_COUNTDOWN_SEC = 30;
+const TURN_TIME_SEC = 35;
+const TREASURY_FEE_PERCENT = 0.10;
 
-function createFreshDeck() {
+const matches = new Map();
+const userMatchMap = new Map();
+const activeSocket21 = new Map();
+const disconnectTimers = new Map();
+
+function createDeck() {
+  const suits = ["hearts", "diamonds", "clubs", "spades"];
+  const values = [
+    { rank: "6", val: 6 }, { rank: "7", val: 7 },
+    { rank: "8", val: 8 }, { rank: "9", val: 9 }, { rank: "10", val: 10 },
+    { rank: "J", val: 2 }, { rank: "Q", val: 3 }, { rank: "K", val: 4 },
+    { rank: "A", val: 11 }
+  ];
   const deck = [];
-  for (const suit of SUITS) {
-    for (const val of VALUES) {
-      deck.push({ suit, value: val });
+  for (const suit of suits) {
+    for (const v of values) {
+      deck.push({ suit, rank: v.rank, value: v.val });
     }
   }
-  // بُر زدن شافل فیشر-یتس
   for (let i = deck.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [deck[i], deck[j]] = [deck[j], deck[i]];
@@ -251,357 +114,197 @@ function createFreshDeck() {
   return deck;
 }
 
-function calculateHandScore(cards) {
-  if (!cards || cards.length === 0) return 0;
-  let score = 0;
-  let aces = 0;
-
-  for (const card of cards) {
-    if (["J", "Q", "K"].includes(card.value)) {
-      score += 10;
-    } else if (card.value === "A") {
-      aces += 1;
-      score += 11;
-    } else {
-      score += parseInt(card.value, 10);
-    }
+function calculateHand(cards) {
+  let total = 0;
+  for (const c of cards) {
+    total += c.value;
   }
-
-  while (score > 21 && aces > 0) {
-    score -= 10;
-    aces -= 1;
-  }
-  return score;
+  const isBlackjack = (cards.length === 2 && total === 21);
+  const isBusted = total > 21;
+  return { score: total, isBlackjack, isBusted };
 }
 
-// ----------------------------------------------------------------------------
-// 7. MATCH & GAME STATE MANAGEMENT
-// ----------------------------------------------------------------------------
-const matches = {}; // matchId -> Match Object
-
-function getOrCreateMatch(tier) {
-  const tierNum = Number(tier);
-  // جستجوی میزی که ظرفیت خالی دارد و هنوز بازی شروع نشده
-  for (const matchId in matches) {
-    const m = matches[matchId];
-    if (m.tier === tierNum && (m.status === "WAITING" || m.status === "COUNTDOWN")) {
-      const seatedCount = Object.keys(m.players).length;
-      if (seatedCount < 5) return m;
-    }
-  }
-
-  // ایجاد میز جدید
-  const newMatchId = "match21_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
-  const newMatch = {
-    id: newMatchId,
-    tier: tierNum,
-    status: "WAITING", // WAITING, COUNTDOWN, PLAYING, FINISHED
-    deck: [],
-    players: {}, // seatKey -> { userId, username, socketId, cards, score, isStand, isBusted, isBlackjack }
-    currentTurnIndex: 0,
-    activeSeatsOrder: [],
-    countdownSeconds: COUNTDOWN_SECONDS,
+function createNewMatch(tier) {
+  return {
+    id: "m21_" + Date.now() + "_" + Math.floor(Math.random() * 1000),
+    tier: Number(tier),
+    status: "WAITING",
+    countdownSeconds: WAITING_COUNTDOWN_SEC,
     countdownTimer: null,
+    currentTurnSeat: null,
+    turnTimeLeft: TURN_TIME_SEC,
     turnTimer: null,
-    turnTimeLeft: TURN_TIMEOUT_SECONDS,
     totalPot: 0,
-    results: null
+    deck: [],
+    players: {},
+    results: null,
+    settled: false,
+    createdAt: Date.now()
   };
-  matches[newMatchId] = newMatch;
-  return newMatch;
 }
 
-function getNextAvailableSeat(match) {
-  for (const seatKey of SEATS) {
-    if (!match.players[seatKey]) return seatKey;
+function getMatchState(match) {
+  const playersState = {};
+  for (const seat of SEAT_KEYS) {
+    const p = match.players[seat];
+    if (p) {
+      playersState[seat] = {
+        userId: p.userId,
+        username: p.username,
+        cards: p.cards,
+        score: p.score,
+        isBlackjack: p.isBlackjack,
+        isBusted: p.isBusted,
+        isStand: p.isStand
+      };
+    } else {
+      playersState[seat] = null;
+    }
   }
-  return null;
-}
-
-function broadcastMatchState(match) {
-  const payload = {
+  return {
     matchId: match.id,
     tier: match.tier,
     status: match.status,
-    countdownSeconds: match.countdownSeconds,
     totalPot: match.totalPot,
-    currentTurnSeat: match.activeSeatsOrder[match.currentTurnIndex] || null,
+    countdownSeconds: match.countdownSeconds,
+    currentTurnSeat: match.currentTurnSeat,
     turnTimeLeft: match.turnTimeLeft,
-    players: {},
+    players: playersState,
     results: match.results
   };
-
-  for (const [seatKey, p] of Object.entries(match.players)) {
-    payload.players[seatKey] = {
-      userId: p.userId,
-      username: p.username,
-      cards: p.cards,
-      score: p.score,
-      isStand: p.isStand,
-      isBusted: p.isBusted,
-      isBlackjack: p.isBlackjack
-    };
-  }
-
-  io.to(match.id).emit("match:state", payload);
 }
 
-// ----------------------------------------------------------------------------
-// 8. MATCHMAKING & TIMER LOGIC (چرخه ۳۰ ثانیه‌ای دقیق منچ)
-// ----------------------------------------------------------------------------
-function handlePlayerJoined(match, seatKey) {
-  const playerCount = Object.keys(match.players).length;
-  match.totalPot = playerCount * match.tier;
-
-  if (playerCount === 1) {
-    // نفر اول وارد شد: منتظر می‌ماند
-    match.status = "WAITING";
-    if (match.countdownTimer) clearInterval(match.countdownTimer);
-    match.countdownSeconds = COUNTDOWN_SECONDS;
-    broadcastMatchState(match);
-  } else if (playerCount >= 2 && playerCount < 5) {
-    // ورود نفر دوم، سوم یا چهارم: ریست تایمر ۳۰ ثانیه برای نفر بعدی
-    match.status = "COUNTDOWN";
-    match.countdownSeconds = COUNTDOWN_SECONDS;
-
-    if (match.countdownTimer) clearInterval(match.countdownTimer);
-
-    match.countdownTimer = setInterval(() => {
-      match.countdownSeconds -= 1;
-      broadcastMatchState(match);
-
-      if (match.countdownSeconds <= 0) {
-        clearInterval(match.countdownTimer);
-        match.countdownTimer = null;
-        startPvPGame(match);
-      }
-    }, 1000);
-
-    broadcastMatchState(match);
-  } else if (playerCount === 5) {
-    // نفر پنجم وارد شد: لغو تایمر و شروع درجا و آنی بازی
-    if (match.countdownTimer) {
-      clearInterval(match.countdownTimer);
-      match.countdownTimer = null;
-    }
-    match.countdownSeconds = 0;
-    startPvPGame(match);
-  }
-}
-
-function handlePlayerLeft(match, seatKey, user) {
-  if (match.players[seatKey]) {
-    delete match.players[seatKey];
-  }
-
-  const remainingCount = Object.keys(match.players).length;
-  match.totalPot = remainingCount * match.tier;
+function broadcastMatchState(match) {
+  const state = getMatchState(match);
+  io.to("match21:" + match.id).emit("match21:state", state);
+  io.to("match21:" + match.id).emit("game:state", state);
 
   if (match.status === "WAITING" || match.status === "COUNTDOWN") {
-    // عودت وجه ورودی در صورت خروج در مرحله لابی
-    refundPlayerEntry(user.id, match.tier, match.id);
+    const pCount = Object.keys(match.players).length;
+    io.to("match21:" + match.id).emit("lobby:status", {
+      matchId: match.id,
+      tier: match.tier,
+      playersCount: pCount,
+      countdown: match.countdownSeconds,
+      phase: pCount === MAX_SEATS ? 5 : (match.status === "COUNTDOWN" ? pCount : 1),
+      message: match.status === "COUNTDOWN"
+        ? `شروع تا ${match.countdownSeconds} ثانیه... (ورود نفر ${pCount + 1})`
+        : "در انتظار ورود بازیکنان..."
+    });
+  }
+}
 
-    if (remainingCount < 2) {
-      if (match.countdownTimer) clearInterval(match.countdownTimer);
-      match.countdownTimer = null;
-      match.status = "WAITING";
-      match.countdownSeconds = COUNTDOWN_SECONDS;
+function stopCountdown(match) {
+  if (match.countdownTimer) {
+    clearInterval(match.countdownTimer);
+    match.countdownTimer = null;
+  }
+}
+
+function startCountdown(match) {
+  stopCountdown(match);
+  match.countdownSeconds = WAITING_COUNTDOWN_SEC;
+  match.countdownTimer = setInterval(() => {
+    match.countdownSeconds--;
+    if (match.countdownSeconds <= 0) {
+      stopCountdown(match);
+      startMatch(match);
     } else {
-      // اگر هنوز ۲ یا بیشتر موندن، تایمر ریست میشه
-      match.countdownSeconds = COUNTDOWN_SECONDS;
+      broadcastMatchState(match);
     }
-    broadcastMatchState(match);
-  } else if (match.status === "PLAYING") {
-    // اگر حین بازی خارج شد، دستش Stand/Bust می‌خورد
-    if (match.activeSeatsOrder[match.currentTurnIndex] === seatKey) {
-      advanceTurn(match);
-    }
-  }
-
-  if (remainingCount === 0) {
-    if (match.countdownTimer) clearInterval(match.countdownTimer);
-    if (match.turnTimer) clearInterval(match.turnTimer);
-    delete matches[match.id];
-  }
+  }, 1000);
 }
 
-// ----------------------------------------------------------------------------
-// 9. FINANCIAL TRANSACTIONS (کسر ورودی، تسویه ۱۰٪ خزانه)
-// ----------------------------------------------------------------------------
-async function deductPlayerEntry(userId, tier, matchId) {
-  return await prisma.$transaction(async (tx) => {
-    const user = await tx.user.findUnique({ where: { id: userId } });
-    if (!user || user.coins < tier) {
-      throw new Error("INSUFFICIENT_COINS");
-    }
-
-    await tx.user.update({
-      where: { id: userId },
-      data: { coins: { decrement: tier } }
-    });
-
-    await tx.transaction.create({
-      data: {
-        userId,
-        amount: -tier,
-        type: "ENTRY_TIER",
-        note: `21 Match Entry - Match: ${matchId}`
-      }
-    });
-
-    return true;
-  });
+function onPlayerJoinedMatch(match) {
+  const count = Object.keys(match.players).length;
+  if (count === 1) {
+    console.log("[DEBUG-STATUS] Setting WAITING for match", match.id); console.log("[DEBUG-STATUS] Setting WAITING for match:", match.id, "Player count after leave:", Object.keys(match.players).length); match.status = "WAITING";
+    stopCountdown(match);
+  } else if (count >= 2 && count < MAX_SEATS) {
+    // با ورود نفر ۲، ۳ یا ۴ تایمر مجدداً ۳۰ ثانیه برای نفر بعدی تمدید می‌شود
+    match.status = "COUNTDOWN";
+    startCountdown(match);
+  } else if (count === MAX_SEATS) {
+    // با تکمیل ظرفیت ۵ نفره بلافاصله شروع می‌شود
+    stopCountdown(match);
+    startMatch(match);
+  }
+  broadcastMatchState(match);
 }
 
-async function refundPlayerEntry(userId, tier, matchId) {
+async function refundPlayer(userId, matchId, tier) {
   try {
     await prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: userId },
         data: { coins: { increment: tier } }
       });
-
       await tx.transaction.create({
         data: {
           userId,
+          matchId,
           amount: tier,
-          type: "REFUND",
-          note: `21 Match Refund - Left Match: ${matchId}`
+          type: "REFUND_TIER_21",
+          note: `21 refund match:${matchId} tier=${tier}`
         }
       });
     });
   } catch (err) {
-    console.error("Refund error:", err.message);
+    console.error("[REFUND_ERROR_21]", err);
   }
 }
 
-async function settlePvPMatchResults(match, winners) {
-  const totalPot = match.totalPot;
-  const tier = match.tier;
-  const winnerCount = winners.length;
+async function startMatch(match) {
+  if (match.status === "PLAYING" || match.status === "FINISHED") return;
+  stopCountdown(match);
 
-  try {
-    const treasuryUser = await prisma.user.findUnique({ where: { username: "treasury" } });
-    if (!treasuryUser) {
-      console.error("Treasury user not found for settlement!");
-      return;
-    }
-
-    if (winnerCount === 0) {
-      // اگر همه سوخته باشند: کل پات به خزانه می‌رسد
-      await prisma.$transaction([
-        prisma.user.update({
-          where: { id: treasuryUser.id },
-          data: { coins: { increment: totalPot } }
-        }),
-        prisma.transaction.create({
-          data: {
-            userId: treasuryUser.id,
-            amount: totalPot,
-            type: "TREASURY_CUT",
-            note: `21 Match ${match.id} - All players busted (Pot to Treasury)`
-          }
-        })
-      ]);
-      return;
-    }
-
-    const sharePerWinner = Math.floor(totalPot / winnerCount);
-
-    await prisma.$transaction(async (tx) => {
-      let totalTreasuryCuts = 0;
-
-      for (const winner of winners) {
-        const netProfit = Math.max(0, sharePerWinner - tier);
-        const treasuryCut = Math.floor(netProfit * 0.10); // ۱۰٪ سهم خزانه از سود خالص
-        const winnerPayout = sharePerWinner - treasuryCut;
-
-        totalTreasuryCuts += treasuryCut;
-
-        // پرداخت به برنده
-        await tx.user.update({
-          where: { id: winner.userId },
-          data: { coins: { increment: winnerPayout } }
-        });
-
-        await tx.transaction.create({
-          data: {
-            userId: winner.userId,
-            amount: winnerPayout,
-            type: "WIN_MATCH",
-            note: `21 Match Win - Match: ${match.id}`
-          }
-        });
-      }
-
-      // واریز مجموع کارمزدهای ۱۰٪ به خزانه
-      if (totalTreasuryCuts > 0) {
-        await tx.user.update({
-          where: { id: treasuryUser.id },
-          data: { coins: { increment: totalTreasuryCuts } }
-        });
-
-        await tx.transaction.create({
-          data: {
-            userId: treasuryUser.id,
-            amount: totalTreasuryCuts,
-            type: "TREASURY_CUT",
-            note: `10% Treasury Cut from Match ${match.id}`
-          }
-        });
-      }
-    });
-
-    console.log(`✅ Match ${match.id} settled successfully. Pot: ${totalPot}, Winners: ${winnerCount}`);
-  } catch (err) {
-    console.error("Settlement error:", err.message);
+  const seatKeys = Object.keys(match.players);
+  if (seatKeys.length < 2) {
+    console.log("[DEBUG-STATUS] Setting WAITING for match", match.id); console.log("[DEBUG-STATUS] Setting WAITING for match:", match.id, "Player count after leave:", Object.keys(match.players).length); match.status = "WAITING";
+    broadcastMatchState(match);
+    return;
   }
-}
 
-// ----------------------------------------------------------------------------
-// 10. PVP GAMEPLAY LOOP (بدون دیلر - لیدر فقط کارت‌پخش‌کن)
-// ----------------------------------------------------------------------------
-function startPvPGame(match) {
   match.status = "PLAYING";
-  match.deck = createFreshDeck();
-  match.activeSeatsOrder = Object.keys(match.players);
-  match.currentTurnIndex = 0;
+  match.deck = createDeck();
+  match.totalPot = seatKeys.length * match.tier;
 
-  // لیدر به هر بازیکن ۲ کارت رو می‌دهد
-  for (const seatKey of match.activeSeatsOrder) {
-    const p = match.players[seatKey];
+  for (const seat of seatKeys) {
+    const p = match.players[seat];
     p.cards = [match.deck.pop(), match.deck.pop()];
-    p.score = calculateHandScore(p.cards);
-    p.isBusted = false;
-    p.isStand = false;
-    p.isBlackjack = p.cards.length === 2 && p.score === 21;
-    if (p.isBlackjack) {
-      p.isStand = true; // با داشتن بلک‌جک نیازی به بازی نیست
-    }
+    const { score, isBlackjack, isBusted } = calculateHand(p.cards);
+    p.score = score;
+    p.isBlackjack = isBlackjack;
+    p.isBusted = isBusted;
+    p.isStand = isBlackjack;
   }
 
-  // پیدا کردن اولین بازیکنی که بلک‌جک ندارد برای شروع نوبت
-  findNextActiveTurn(match);
+  io.to("match21:" + match.id).emit("game:started", { matchId: match.id, success: true });
+
+  const nextSeat = findNextActiveSeat(match, null);
+  if (!nextSeat) {
+    finishMatch(match);
+  } else {
+    setPlayerTurn(match, nextSeat);
+  }
   broadcastMatchState(match);
 }
 
-function startTurnTimer(match) {
+function setPlayerTurn(match, seatKey) {
   if (match.turnTimer) clearInterval(match.turnTimer);
-  match.turnTimeLeft = TURN_TIMEOUT_SECONDS;
+  match.currentTurnSeat = seatKey;
+  match.turnTimeLeft = TURN_TIME_SEC;
 
   match.turnTimer = setInterval(() => {
-    match.turnTimeLeft -= 1;
-    broadcastMatchState(match);
-
+    match.turnTimeLeft--;
     if (match.turnTimeLeft <= 0) {
       clearInterval(match.turnTimer);
       match.turnTimer = null;
-      // تایم‌اوت نوبت -> خودکار Stand می‌شود
-      const currentSeat = match.activeSeatsOrder[match.currentTurnIndex];
-      if (currentSeat && match.players[currentSeat]) {
-        match.players[currentSeat].isStand = true;
-      }
+      const player = match.players[match.currentTurnSeat];
+      if (player) player.isStand = true;
       advanceTurn(match);
+    } else {
+      broadcastMatchState(match);
     }
   }, 1000);
 }
@@ -611,208 +314,420 @@ function advanceTurn(match) {
     clearInterval(match.turnTimer);
     match.turnTimer = null;
   }
-  match.currentTurnIndex += 1;
-  findNextActiveTurn(match);
+  const nextSeat = findNextActiveSeat(match, match.currentTurnSeat);
+  if (!nextSeat) {
+    finishMatch(match);
+  } else {
+    setPlayerTurn(match, nextSeat);
+    broadcastMatchState(match);
+  }
 }
 
-function findNextActiveTurn(match) {
-  while (match.currentTurnIndex < match.activeSeatsOrder.length) {
-    const seatKey = match.activeSeatsOrder[match.currentTurnIndex];
-    const player = match.players[seatKey];
+function findNextActiveSeat(match, currentSeat) {
+  const seats = SEAT_KEYS.filter(s => match.players[s]);
+  if (seats.length === 0) return null;
+  const startIndex = currentSeat ? (seats.indexOf(currentSeat) + 1) : 0;
+  for (let i = 0; i < seats.length; i++) {
+    const seat = seats[(startIndex + i) % seats.length];
+    const p = match.players[seat];
+    if (p && !p.isStand && !p.isBusted) return seat;
+  }
+  return null;
+}
 
-    if (player && !player.isStand && !player.isBusted && !player.isBlackjack) {
-      startTurnTimer(match);
-      broadcastMatchState(match);
-      return;
-    }
-    match.currentTurnIndex++;
+
+
+async function ensureTreasuryUser() {
+  const username = "treasury";
+  const existing = await prisma.user.findUnique({ where: { username } });
+  if (existing) return existing;
+
+  const randomPass = crypto.randomBytes(32).toString("hex");
+  return prisma.user.create({
+    data: { username, password: randomPass, coins: 0, role: "TREASURY" },
+  });
+}
+
+async function finishMatch(match) {
+
+  if (match.status === "FINISHED") return;
+  if (match.turnTimer) clearInterval(match.turnTimer);
+  
+  match.status = "FINISHED";
+  match.currentTurnSeat = null;
+
+  for (const p of Object.values(match.players)) {
+    if (p.userId) userMatchMap.delete(p.userId);
   }
 
-  // نوبت همه تمام شد -> پایان دست و تعیین برنده
-  finishPvPRound(match);
-}
-
-function finishPvPRound(match) {
-  if (match.turnTimer) clearInterval(match.turnTimer);
-  match.status = "FINISHED";
-
-  const allPlayers = Object.entries(match.players).map(([seatKey, p]) => ({
-    seatKey,
-    userId: p.userId,
-    username: p.username,
-    score: p.score,
-    isBusted: p.isBusted,
-    isBlackjack: p.isBlackjack
-  }));
-
-  const eligiblePlayers = allPlayers.filter(p => !p.isBusted && p.score <= 21);
-
-  let winners = [];
-  if (eligiblePlayers.length > 0) {
-    // اولویت ۱: بازیکنانی که بلک‌جک طبیعی (۲۱ با ۲ کارت) دارند
-    const blackjackWinners = eligiblePlayers.filter(p => p.isBlackjack);
-    if (blackjackWinners.length > 0) {
-      winners = blackjackWinners;
-    } else {
-      // اولویت ۲: بالاترین امتیاز زیر یا مساوی ۲۱
-      const maxScore = Math.max(...eligiblePlayers.map(p => p.score));
-      winners = eligiblePlayers.filter(p => p.score === maxScore);
+  const activePlayers = Object.values(match.players);
+  const eligible = activePlayers.filter(p => !p.isBusted);
+  if (eligible.length === 0) {
+    const treasury = await ensureTreasuryUser();
+    if (treasury) {
+      await prisma.transaction.create({ data: { userId: treasury.id, matchId: match.id, amount: match.totalPot, type: "TREASURY_CUT", note: `21 ALL_BUSTED_FULL_POT match:${match.id}` } });
+      await prisma.user.update({ where: { id: treasury.id }, data: { coins: { increment: match.totalPot } } });
     }
+    match.results = { isAllBusted: true, winners: [], totalPot: match.totalPot };
+    broadcastMatchState(match);
+    setTimeout(() => { matches.delete(match.id); }, 10000);
+    return;
+  }
+
+  const maxScore = Math.max(...eligible.map(p => p.score));
+  let winners = eligible.filter(p => p.score === maxScore);
+  const bjWinners = winners.filter(p => p.isBlackjack);
+  if (bjWinners.length > 0) winners = bjWinners;
+
+  const numWinners = winners.length;
+  const rawShare = Math.floor(match.totalPot / numWinners);
+
+  const payouts = [];
+  for (const w of winners) {
+    const commission = Math.floor(rawShare * TREASURY_FEE_PERCENT);
+    const netPayout = rawShare - commission;
+    payouts.push({ userId: w.userId, username: w.username, score: w.score, payout: netPayout, commission });
+  }
+
+  try {
+    const treasury = await ensureTreasuryUser();
+    const totalCommission = payouts.reduce((sum, p) => sum + (p.commission || 0), 0);
+
+    await prisma.$transaction(async (tx) => {
+      for (const p of payouts) {
+        await tx.user.update({
+          where: { id: p.userId },
+          data: { coins: { increment: p.payout } }
+        });
+        await tx.transaction.create({
+          data: {
+            userId: p.userId,
+            matchId: match.id,
+            amount: p.payout,
+            type: "WIN_POT_21",
+            note: `21 win match:${match.id} payout=${p.payout} fee=${p.commission}`
+          }
+        });
+      }
+
+      if (totalCommission > 0 && treasury) {
+        await tx.user.update({
+          where: { id: treasury.id },
+          data: { coins: { increment: totalCommission } }
+        });
+        await tx.transaction.create({
+          data: {
+            userId: treasury.id,
+            matchId: match.id,
+            amount: totalCommission,
+            type: "TREASURY_CUT",
+            note: `21 treasury cut match:${match.id} tier=${match.tier} fee=${totalCommission}`
+          }
+        });
+      }
+    });
+    match.settled = true;
+  } catch (err) {
+    console.error("[SETTLE_ERROR_21]", err);
   }
 
   match.results = {
-    winners: winners.map(w => ({ seatKey: w.seatKey, username: w.username, score: w.score })),
-    isAllBusted: winners.length === 0,
+    isAllBusted: false,
+    winners: winners.map(w => ({ username: w.username, score: w.score })),
+    allPlayers: Object.values(match.players).map(p => ({ username: p.username, score: p.score, isBusted: p.isBusted })),
     totalPot: match.totalPot
   };
 
   broadcastMatchState(match);
 
-  // تسویه مالی در دیتابیس
-  settlePvPMatchResults(match, winners);
-
-  // ریست خودکار میز بعد از ۱۲ ثانیه
   setTimeout(() => {
-    delete matches[match.id];
-    io.to(match.id).emit("match:disbanded");
-  }, 12000);
+    matches.delete(match.id);
+  }, 10000);
 }
 
-// ----------------------------------------------------------------------------
-// 11. SOCKET.IO INTEGRATION & HANDLERS
-// ----------------------------------------------------------------------------
-const io = new Server(httpServer, {
-  cors: { origin: "*", methods: ["GET", "POST"] }
-});
-
-io.use(async (socket, next) => {
+io.use((socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.query?.token;
-  if (!token) return next(new Error("SOCKET_AUTH_TOKEN_MISSING"));
-
-  const decoded = verifyJwtToken(token);
-  if (!decoded || !decoded.userId) return next(new Error("SOCKET_AUTH_TOKEN_INVALID"));
-
+  if (!token) return next(new Error("Authentication token missing"));
   try {
-    const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
-    if (!user) return next(new Error("SOCKET_USER_NOT_FOUND"));
-    socket.user = user;
+    const decoded = jwt.verify(token, JWT_SECRET);
+    socket.userId = decoded.userId || decoded.id;
     next();
   } catch (err) {
-    return next(new Error("SOCKET_DB_ERROR"));
+    next(new Error("Authentication failed"));
   }
 });
 
-io.on("connection", (socket) => {
-  const user = socket.user;
+io.on("connection", async (socket) => {
+  const activeUserKey = String(socket.userId);
+    if (disconnectTimers.has(activeUserKey)) {
+    clearTimeout(disconnectTimers.get(activeUserKey));
+    disconnectTimers.delete(activeUserKey);
+    console.log(`[GRACE-CANCELLED] Reconnect for user ${activeUserKey}`);
+  }
+  activeSocket21.set(activeUserKey, socket.id);
+  socket.join("lobby");
+  broadcastLobbyStats();
+  console.log(">>> [21-SOCKET] Connected:", socket.id, "User:", socket.userId);
+  const userId = socket.userId;
 
-  // ۱. درخواست پیوستن به میز
-  socket.on("match:join", async (data) => {
-    const { tier } = data;
-    const tierNum = Number(tier);
+  socket.on("game:restoreSession", (data, callback) => {
+    console.log("درخواست restoreSession توسط سرور دریافت شد");
+    const matchId = userMatchMap.get(userId);
+    const match = matchId ? matches.get(matchId) : null;
 
-    if (!ALLOWED_TIERS.includes(tierNum)) {
-      return socket.emit("match:error", { message: "میزان شرط میز نامعتبر است." });
+    if (!match || match.status === "FINISHED") {
+      if (typeof callback === "function") callback({ success: false });
+      return;
     }
 
-    try {
-      // کسر مبلغ ورودی به محض نشستن روی صندلی
-      await deductPlayerEntry(user.id, tierNum, "PENDING");
-    } catch (err) {
-      return socket.emit("match:error", { message: "موجودی حساب شما برای ورود به این میز کافی نیست." });
-    }
-
-    const match = getOrCreateMatch(tierNum);
-    const seatKey = getNextAvailableSeat(match);
+    const seatKey = Object.keys(match.players).find(
+      seat => match.players[seat]?.userId === userId
+    );
 
     if (!seatKey) {
-      // اگر در همین لحظه پر شد، پول پس داده می‌شود
-      await refundPlayerEntry(user.id, tierNum, match.id);
-      return socket.emit("match:error", { message: "ظرفیت میز پر شده است." });
+      if (typeof callback === "function") callback({ success: false });
+      return;
     }
 
-    match.players[seatKey] = {
-      userId: user.id,
-      username: user.username,
-      socketId: socket.id,
-      cards: [],
-      score: 0,
-      isStand: false,
-      isBusted: false,
-      isBlackjack: false
-    };
+    match.players[seatKey].socketId = socket.id;
+    socket.join("match21:" + match.id);
+    socket.emit("match21:joined", { seatKey, tier: match.tier });
+    socket.emit("match21:state", getMatchState(match));
 
-    socket.join(match.id);
-    socket.matchId = match.id;
-    socket.seatKey = seatKey;
-
-    socket.emit("match:joined", { matchId: match.id, seatKey });
-    handlePlayerJoined(match, seatKey);
+    if (typeof callback === "function") {
+      callback({
+        success: true,
+        restored: true,
+        matchId: match.id,
+        tier: match.tier,
+        status: match.status
+      });
+    }
   });
 
-  // ۲. دریافت کارت اضافه (Hit)
-  socket.on("game:hit", () => {
-    const match = matches[socket.matchId];
-    if (!match || match.status !== "PLAYING") return;
+  const handleJoin = async (tierVal, callback) => {
+    console.log(">>> [21-JOIN] requested:", { userId, tierVal, socketId: socket.id });
+    const validTier = parseInt(tierVal, 10) || 20;
 
-    const currentSeat = match.activeSeatsOrder[match.currentTurnIndex];
-    if (currentSeat !== socket.seatKey) {
-      return socket.emit("game:error", { message: "نوبت شما نیست." });
+    let existingMatchId = userMatchMap.get(userId);
+    let existingMatch = existingMatchId ? matches.get(existingMatchId) : null;
+    if (existingMatch && existingMatch.status !== "FINISHED") {
+      socket.join("match21:" + existingMatch.id);
+      const mySeat = Object.keys(existingMatch.players).find(s => existingMatch.players[s]?.userId === userId);
+      if (mySeat) existingMatch.players[mySeat].socketId = socket.id;
+      if (typeof callback === "function") callback({ success: true, matchId: existingMatch.id, seatKey: mySeat });
+      socket.emit("match21:joined", { seatKey: mySeat, tier: existingMatch.tier });
+      socket.emit("match21:state", getMatchState(existingMatch));
+      return;
     }
 
-    const player = match.players[socket.seatKey];
-    if (player.isStand || player.isBusted) return;
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, coins: true, username: true }
+    });
 
-    // لیدر یک کارت به بازیکن می‌دهد
-    const card = match.deck.pop();
-    player.cards.push(card);
-    player.score = calculateHandScore(player.cards);
+    if (!user || user.coins < validTier) {
+      console.log(">>> [21-JOIN] insufficient balance:", { userId, validTier, coins: user?.coins });
+      const msg = "موجودی شما کافی نیست.";
+      socket.emit("match21:error", { message: msg });
+      if (typeof callback === "function") callback({ success: false, message: msg });
+      return;
+    }
 
-    if (player.score > 21) {
-      player.isBusted = true;
-      advanceTurn(match);
-    } else if (player.score === 21) {
+    let match = null;
+    for (const m of matches.values()) {
+      if (m.tier === validTier && (m.status === "WAITING" || m.status === "COUNTDOWN")) {
+        if (Object.keys(m.players).length < MAX_SEATS) {
+          match = m;
+          break;
+        }
+      }
+    }
+
+    if (!match) {
+      match = createNewMatch(validTier);
+      matches.set(match.id, match);
+    }
+
+    const emptySeat = SEAT_KEYS.find(s => !match.players[s]);
+    if (!emptySeat) {
+      if (typeof callback === "function") callback({ success: false, message: "میز پر است." });
+      return;
+    }
+
+    // کسر ورودی در لحظه پیوستن به میز
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id: user.id },
+          data: { coins: { decrement: validTier } }
+        });
+        await tx.transaction.create({
+          data: {
+            userId: user.id,
+            matchId: match.id,
+            amount: -validTier,
+            type: "ENTRY_TIER_21",
+            note: `21 match:${match.id} tier=${validTier}`
+          }
+        });
+      });
+    } catch (e) {
+      console.error("[JOIN_CHARGE_ERR]", "Transaction failed:", e.message || e);
+      const msg = "خطا در پردازش تراکنش: " + (e.message || "خطای ناشناخته");
+      socket.emit("match21:error", { message: msg });
+      if (typeof callback === "function") callback({ success: false, message: msg });
+      return;
+    }
+
+          console.log(">>> [21-JOIN] Transaction success, adding player to match:", user.id);
+match.players[emptySeat] = {
+      userId: user.id,
+      username: user.username,
+      cards: [],
+      score: 0,
+      isBlackjack: false,
+      isBusted: false,
+      isStand: false,
+      socketId: socket.id
+    };
+    userMatchMap.set(user.id, match.id);
+
+    socket.join("match21:" + match.id);
+    if (typeof callback === "function") callback({ success: true, matchId: match.id, seatKey: emptySeat });
+    socket.emit("match21:joined", { seatKey: emptySeat, tier: match.tier });
+
+    onPlayerJoinedMatch(match);
+  };
+
+  socket.on("room:join", ({ tier }, callback) => handleJoin(tier, callback));
+  socket.on("match21:join", ({ tier }, callback) => handleJoin(tier, callback));
+  socket.on("join", ({ tier }, callback) => handleJoin(tier, callback));
+
+  socket.on("game:hit", () => {
+    const matchId = userMatchMap.get(userId);
+    if (!matchId) return;
+    const match = matches.get(matchId);
+    if (!match || match.status !== "PLAYING") return;
+    const currentSeat = match.currentTurnSeat;
+    const player = match.players[currentSeat];
+    if (!player || player.userId !== userId) return;
+
+    if (match.deck.length === 0) match.deck = createDeck();
+    player.cards.push(match.deck.pop());
+
+    const { score, isBlackjack, isBusted } = calculateHand(player.cards);
+    player.score = score;
+    player.isBlackjack = isBlackjack;
+    player.isBusted = isBusted;
+
+    if (isBusted || score === 21) {
       player.isStand = true;
       advanceTurn(match);
     } else {
-      // تمدید زمان نوبت بعد از دریافت کارت
-      startTurnTimer(match);
+      setPlayerTurn(match, currentSeat);
       broadcastMatchState(match);
     }
   });
 
-  // ۳. توقف و پایان نوبت (Stand)
   socket.on("game:stand", () => {
-    const match = matches[socket.matchId];
+    const matchId = userMatchMap.get(userId);
+    if (!matchId) return;
+    const match = matches.get(matchId);
     if (!match || match.status !== "PLAYING") return;
+    const currentSeat = match.currentTurnSeat;
+    const player = match.players[currentSeat];
+    if (!player || player.userId !== userId) return;
 
-    const currentSeat = match.activeSeatsOrder[match.currentTurnIndex];
-    if (currentSeat !== socket.seatKey) {
-      return socket.emit("game:error", { message: "نوبت شما نیست." });
-    }
-
-    const player = match.players[socket.seatKey];
     player.isStand = true;
     advanceTurn(match);
   });
 
-  // ۴. خروج بازیکن از میز یا قطع اتصال
-  function onLeave() {
-    if (socket.matchId && matches[socket.matchId]) {
-      const match = matches[socket.matchId];
-      handlePlayerLeft(match, socket.seatKey, user);
+  const handleLeave = async (mId) => {
+    const matchId = mId || userMatchMap.get(userId);
+    if (!matchId) return;
+    const match = matches.get(matchId);
+    if (!match) {
+      console.log("[DEBUG-MAP] Deleted userId:", userId, "from userMatchMap"); userMatchMap.delete(userId);
+      return;
     }
-  }
 
-  socket.on("match:leave", onLeave);
-  socket.on("disconnect", onLeave);
+    const seat = Object.keys(match.players).find(s => match.players[s]?.userId === userId);
+    if (seat) {
+      const isPreGame = (match.status === "WAITING" || match.status === "COUNTDOWN");
+      delete match.players[seat];
+      console.log("[DEBUG-MAP] Deleted userId:", userId, "from userMatchMap"); userMatchMap.delete(userId);
+      console.log("[DEBUG-LEAVE] Player removed from match:", userId, "from match:", match.id, "Player count before:", Object.keys(match.players).length); socket.leave("match21:" + match.id);
+
+      if (isPreGame) {
+        await refundPlayer(userId, match.id, match.tier);
+      }
+
+      const remaining = Object.keys(match.players).length;
+      if (remaining === 0) {
+        stopCountdown(match);
+        matches.delete(match.id);
+      } else if (remaining === 1 && isPreGame) {
+        console.log("[DEBUG-STATUS] Setting WAITING for match", match.id); console.log("[DEBUG-STATUS] Setting WAITING for match:", match.id, "Player count after leave:", Object.keys(match.players).length); match.status = "WAITING";
+        stopCountdown(match);
+        broadcastMatchState(match);
+      } else {
+        broadcastMatchState(match);
+      }
+    }
+  };
+
+  socket.on("game:leave", async ({ matchId }, callback) => {
+    console.log("[DEBUG-CALL] handleLeave called via game:leave with matchId:", matchId); await handleLeave(matchId);
+    if (typeof callback === "function") callback({ success: true });
+  });
+
+  socket.on("disconnect", async () => {
+    const activeSocketId = activeSocket21.get(String(userId));
+    console.log(`[DEBUG-DISCONNECT] User ${userId} disconnected with socket: ${socket.id}; active: ${activeSocketId || "none"}`);
+
+    // قطع اتصال سوکت قدیمی نباید بازیکن را از میز خارج کند.
+    if (activeSocketId !== socket.id) {
+      console.log("[STALE_SOCKET_DISCONNECT_IGNORED]", {
+        userId,
+        staleSocketId: socket.id,
+        activeSocketId: activeSocketId || null
+      });
+      return;
+    }
+
+    activeSocket21.delete(String(userId));
+
+    const mId = userMatchMap.get(userId);
+    if (mId) {
+      const match = matches.get(mId);
+      console.log("[DEBUG-DISCONNECT-STATE]", {
+        userId,
+        mId,
+        matchFound: !!match,
+        status: match?.status || null
+      });
+      if (match) {
+        if (match.status === "WAITING" || match.status === "COUNTDOWN") {
+          console.log(`[LOBBY-LEAVE] User ${userId} disconnected in queue/lobby (${match.status}). Instant leaving match ${mId}`);
+          await handleLeave(mId);
+        } else {
+          console.log(`[GAME-GRACE] User ${userId} disconnected inside active game (${match.status}). Scheduling grace period 15s`);
+          const timer = setTimeout(async () => {
+            console.log(`[DEBUG-TIMEOUT] Grace period expired for user ${userId} in game, leaving match ${mId}`);
+            await handleLeave(mId);
+            disconnectTimers.delete(String(userId));
+          }, 15000);
+          disconnectTimers.set(String(userId), timer);
+        }
+      }
+    }
+  });
 });
 
-// ----------------------------------------------------------------------------
-// 12. START SERVER
-// ----------------------------------------------------------------------------
-httpServer.listen(PORT, "0.0.0.0", () => {
-  console.log(`===================================================`);
-  console.log(`🚀 TAJ TAS 21 (PvP) Server is running on port ${PORT}`);
-  console.log(`📡 WebSocket and Express APIs are active`);
-  console.log(`===================================================`);
+const PORT = process.env.PORT_21 || 3002;
+server.listen(PORT, () => {
+  console.log(`21 Game Server running successfully on port ${PORT}`);
 });
+
+setInterval(broadcastLobbyStats, 10000);
