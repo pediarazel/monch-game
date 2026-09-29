@@ -487,6 +487,24 @@
             cursor: pointer;
             font-size: 13px;
         }
+    
+        /* تنظیم موقعیت کارت‌ها داخل کارت‌پخش‌کن اصلی */
+        .dealer-zone {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            gap: 6px !important;
+        }
+        .dealer-zone .cards-row {
+            justify-content: center !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        .poker-card.card-back {
+            background: repeating-linear-gradient(45deg, #7a0a0a, #7a0a0a 3px, #4e0404 3px, #4e0404 6px) !important;
+            border: 1px solid #d4af37 !important;
+        }
+
     </style>
 <script src="/21/socket.io/socket.io.js"></script>
 
@@ -494,6 +512,69 @@
 body { padding-bottom: 120px !important; }
 .controls-panel { padding-bottom: 20px !important; }
 </style>
+
+<style id="custom-timer-layout">
+    /* ریست موقعیت‌های مطلق قبلی برای جلوگیری از همپوشانی در تبلت و موبایل */
+    .turn-timer-panel {
+        position: static !important;
+        width: 100% !important;
+        max-width: 480px !important;
+        margin: 0 auto 8px auto !important;
+        background: rgba(15, 23, 42, 0.92) !important;
+        border: 1px solid rgba(255, 215, 0, 0.35) !important;
+        border-radius: 12px !important;
+        padding: 6px 14px !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.6) !important;
+        box-sizing: border-box !important;
+    }
+
+    .controls-panel {
+        position: static !important;
+        display: flex !important;
+        flex-direction: row !important;
+        justify-content: center !important;
+        align-items: center !important;
+        gap: 12px !important;
+        width: 100% !important;
+        max-width: 480px !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+        background: transparent !important;
+        border: none !important;
+        box-sizing: border-box !important;
+    }
+
+    .game-btn {
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+        height: 44px !important;
+        padding: 0 8px !important;
+        font-size: 14px !important;
+        font-weight: bold !important;
+        border-radius: 10px !important;
+        white-space: nowrap !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+
+    /* بهینه‌سازی برای تبلت و صفحات افقی */
+    @media (min-width: 768px) {
+        .turn-timer-panel {
+            max-width: 550px !important;
+            padding: 8px 16px !important;
+        }
+        .controls-panel {
+            max-width: 550px !important;
+            gap: 16px !important;
+        }
+        .game-btn {
+            height: 48px !important;
+            font-size: 15px !important;
+        }
+    }
+</style>
+
 </head>
 <body>
 
@@ -522,6 +603,13 @@ body { padding-bottom: 120px !important; }
         <!-- دیلر (فقط نشان کارت‌پخش‌کن در مدل رقابتی PvP) -->
         <div class="dealer-zone">
             <div class="dealer-badge">کارت‌پخش‌کن</div>
+            <div class="cards-row">
+                <div class="poker-card black">
+                    <span class="rank">A</span>
+                    <span class="suit">♠</span>
+                </div>
+                <div class="poker-card card-back"></div>
+            </div>
         </div>
 
         <!-- مجموع جایزه در مرکز میز -->
@@ -586,8 +674,7 @@ body { padding-bottom: 120px !important; }
 
     <!-- پنل کنترل نوبت -->
         <!-- پنل تایمر نوبت بالای دکمه‌های بازی -->
-    <div class="controls-panel" style="background: rgba(0,0,0,0.8); padding: 15px; border-top: 2px solid #333; border-radius: 15px 15px 0 0;">
-    <div class="turn-timer-panel">
+        <div class="turn-timer-panel">
         <div class="turn-timer-header">
             <div class="turn-name">
                 <span class="dot" id="statusDot"></span>
@@ -602,13 +689,12 @@ body { padding-bottom: 120px !important; }
         <div class="turn-progress-track">
             <div class="turn-progress-fill" id="globalProgressBar" style="width: 0%;"></div>
         </div>
-    </div>
-    
-    <div style="display: flex; gap: 10px; justify-content: center;">
+
+    <!-- پنل کنترل نوبت -->
+    <div class="controls-panel">
         <button class="game-btn btn-hit" id="btnHit" onclick="emitHit()" disabled>➕ دریافت کارت (HIT)</button>
         <button class="game-btn btn-stand" id="btnStand" onclick="emitStand()" disabled>✋ کافیه (STAND)</button>
     </div>
-</div>
 
     <!-- مودال پایان بازی -->
     <div class="modal-overlay" id="resultModal">
