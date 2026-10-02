@@ -1,3 +1,99 @@
+
+// --- BOT 21 CONFIGURATION ---
+const BOT_21_ENABLED = true;
+const BOT_INJECT_TIME = 3000;
+
+async function injectBotIntoMatch(match) {
+  try {
+    if (!BOT_21_ENABLED || match.status !== "WAITING") return;
+    const BOT_ALLOWED_TIERS = [20, 50];
+    if (!BOT_ALLOWED_TIERS.includes(Number(match.tier))) return;
+    const currentCount = Object.keys(match.players || {}).length;
+    if (currentCount !== 1) return;
+
+    
+    let botSeat = SEAT_KEYS.find(s => match.players[s] && match.players[s].isBot);
+    let targetSeat;
+    if (botSeat) {
+        delete match.players[botSeat];
+        targetSeat = botSeat;
+    } else {
+        targetSeat = SEAT_KEYS.find(s => !match.players[s]);
+    }
+    const emptySeat = targetSeat;
+
+    if (!emptySeat) return;
+
+    const botUser = typeof ensureBot21User === "function" ? await ensureBot21User() : { id: 999999, username: "Bot_21" };
+    const randomBotName = typeof getRandomBotDisplayName === "function" ? getRandomBotDisplayName() : (BOT_RANDOM_NAMES[Math.floor(Math.random() * BOT_RANDOM_NAMES.length)] || "Bot_21");
+    console.log(`>>> [BOT-21] Injecting bot "${randomBotName}" into match ${match.id} on seat ${emptySeat}`);
+
+    // کسر ورودی شرط برای ربات
+    const botTier = Number(match.tier);
+    try {
+      const freshBot = await prisma.user.findUnique({ where: { id: botUser.id } });
+      if (!freshBot || freshBot.coins < botTier) {
+        console.log("[BOT-21] Bot lacks coins for tier:", botTier);
+        return;
+      }
+      await prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id: botUser.id },
+          data: { coins: { decrement: botTier } }
+        });
+        await tx.transaction.create({
+          data: {
+            userId: botUser.id,
+            matchId: match.id,
+            amount: -botTier,
+            type: "MATCH_JOIN",
+            note: `21 BOT ENTRY FEE ${botTier} match:${match.id}`
+          }
+        });
+      });
+      console.log(`>>> [BOT-21] Deducted ${botTier} coins from bot ${botUser.id}`);
+    } catch (e) {
+      console.error("[BOT-21-ERR] Failed to deduct entry fee from bot:", e);
+      return;
+    }
+
+    match.players[emptySeat] = {
+      userId: botUser.id,
+      username: randomBotName,
+      isBot: true,
+      cards: [],
+      score: 0,
+      isStand: false,
+      isBusted: false,
+      socketId: null
+    };
+
+    match.status = "COUNTDOWN";
+    if (typeof broadcastMatchState === "function") broadcastMatchState(match);
+    if (typeof startCountdown === "function") startCountdown(match);
+  } catch (err) {
+    console.error("[BOT-21-ERR] injectBotIntoMatch failed:", err);
+  }
+}
+
+// ==================== تنظیمات و ۳۰ اسم رندوم ربات ۲۱ ====================
+const BOT_21_USERNAME = 'tajdas21_bot';
+
+const BOT_RANDOM_NAMES = [
+  'AliReza', 'Soroush', 'Mahdi', 'Arman', 'Pouya',
+  'AmirHossein', 'Farhad', 'Kamyar', 'Sina', 'Navid',
+  'Mohammad', 'Hamed', 'Danial', 'Shayan', 'Behzad',
+  'Milad', 'Ashkan', 'Hossein', 'Ehsan', 'Nima',
+  'Saeed', 'Babak', 'Pejman', 'Kian', 'Shahab',
+  'Masoud', 'Morteza', 'Salar', 'Parham', 'Arash'
+];
+
+function getRandomBotDisplayName() {
+  const randomIndex = Math.floor(Math.random() * BOT_RANDOM_NAMES.length);
+  return BOT_RANDOM_NAMES[randomIndex];
+}
+// =======================================================================
+
 let lastFakeOnline21 = -1;
 let lastUpdateFakeTime21 = 0;
 
@@ -23,22 +119,22 @@ function broadcastLobbyStats() {
   const realCount = (typeof activeSocket21 !== 'undefined') ? activeSocket21.size : (io.engine.clientsCount || 0);
 
   let count = realCount;
-  const fakeCfg = readFakeOnline21Config();
+  const fakeCfg2 = readFakeOnline21Config();
   // اصلاحِ لحظه‌ایِ عددِ فیک اگر از محدوده خارج شده باشد
-  if (fakeCfg && lastFakeOnline21 !== -1) {
-  if (lastFakeOnline21 > fakeCfg.max) lastFakeOnline21 = fakeCfg.max;
-  if (lastFakeOnline21 < fakeCfg.min) lastFakeOnline21 = fakeCfg.min;
+  if (fakeCfg2 && lastFakeOnline21 !== -1) {
+  if (lastFakeOnline21 > fakeCfg2.max) lastFakeOnline21 = fakeCfg2.max;
+  if (lastFakeOnline21 < fakeCfg2.min) lastFakeOnline21 = fakeCfg2.min;
   }
 
-  if (fakeCfg && fakeCfg.enabled && Number.isFinite(fakeCfg.min) && Number.isFinite(fakeCfg.max) && fakeCfg.max >= fakeCfg.min && fakeCfg.max > 0) {
+  if (fakeCfg2 && fakeCfg2.enabled && Number.isFinite(fakeCfg2.min) && Number.isFinite(fakeCfg2.max) && fakeCfg2.max >= fakeCfg2.min && fakeCfg2.max > 0) {
     const now = Date.now();
     if (lastFakeOnline21 === -1 || (now - lastUpdateFakeTime21) >= 300000) {
       if (lastFakeOnline21 === -1) {
-        lastFakeOnline21 = fakeCfg.min + Math.floor(Math.random() * (fakeCfg.max - fakeCfg.min + 1));
+        lastFakeOnline21 = fakeCfg2.min + Math.floor(Math.random() * (fakeCfg2.max - fakeCfg2.min + 1));
       } else {
         let change = Math.floor(Math.random() * 4) + 1;
         change *= (Math.random() > 0.5) ? 1 : -1;
-        lastFakeOnline21 = Math.min(Math.max(lastFakeOnline21 + change, fakeCfg.min), fakeCfg.max);
+        lastFakeOnline21 = Math.min(Math.max(lastFakeOnline21 + change, fakeCfg2.min), fakeCfg2.max);
       }
       lastUpdateFakeTime21 = now;
     }
@@ -77,9 +173,12 @@ const io = new Server(server, {
   pingTimeout: 5000
 });
 
-const connectionString = process.env.DATABASE_URL;
-const pool = new Pool({ connectionString });
-const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL,
+  ssl: true
+});
+
+const prisma = new PrismaClient({ adapter });
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const SEAT_KEYS = ["seat_1", "seat_2", "seat_3", "seat_4", "seat_5"];
@@ -202,35 +301,20 @@ function stopCountdown(match) {
 }
 
 function startCountdown(match) {
-  stopCountdown(match);
-  match.countdownSeconds = WAITING_COUNTDOWN_SEC;
+  if (match.countdownTimer) return;
+
+  match.countdownSeconds = typeof WAITING_COUNTDOWN_SEC !== "undefined" ? WAITING_COUNTDOWN_SEC : 30;
   match.countdownTimer = setInterval(() => {
     match.countdownSeconds--;
     if (match.countdownSeconds <= 0) {
-      stopCountdown(match);
-      startMatch(match);
+      if (typeof stopCountdown === "function") stopCountdown(match);
+      if (typeof startMatch === "function") startMatch(match);
     } else {
-      broadcastMatchState(match);
+      if (typeof broadcastMatchState === "function") broadcastMatchState(match);
     }
   }, 1000);
 }
 
-function onPlayerJoinedMatch(match) {
-  const count = Object.keys(match.players).length;
-  if (count === 1) {
-    console.log("[DEBUG-STATUS] Setting WAITING for match", match.id); console.log("[DEBUG-STATUS] Setting WAITING for match:", match.id, "Player count after leave:", Object.keys(match.players).length); match.status = "WAITING";
-    stopCountdown(match);
-  } else if (count >= 2 && count < MAX_SEATS) {
-    // با ورود نفر ۲، ۳ یا ۴ تایمر مجدداً ۳۰ ثانیه برای نفر بعدی تمدید می‌شود
-    match.status = "COUNTDOWN";
-    startCountdown(match);
-  } else if (count === MAX_SEATS) {
-    // با تکمیل ظرفیت ۵ نفره بلافاصله شروع می‌شود
-    stopCountdown(match);
-    startMatch(match);
-  }
-  broadcastMatchState(match);
-}
 
 async function refundPlayer(userId, matchId, tier) {
   try {
@@ -244,13 +328,13 @@ async function refundPlayer(userId, matchId, tier) {
           userId,
           matchId,
           amount: tier,
-          type: "REFUND_TIER_21",
-          note: `21 refund match:${matchId} tier=${tier}`
+          type: "REFUND_TIER_21"
         }
       });
     });
+    console.log(`[REFUND] Success: User ${userId} refunded ${tier}`);
   } catch (err) {
-    console.error("[REFUND_ERROR_21]", err);
+    console.error(`[REFUND] Error: User ${userId} - ${err.message}`);
   }
 }
 
@@ -293,7 +377,7 @@ async function startMatch(match) {
 function setPlayerTurn(match, seatKey) {
   if (match.turnTimer) clearInterval(match.turnTimer);
   match.currentTurnSeat = seatKey;
-  match.turnTimeLeft = TURN_TIME_SEC;
+  if (match.turnTimeLeft === undefined || match.turnTimeLeft === null || match.turnTimeLeft <= 0) match.turnTimeLeft = TURN_TIME_SEC;
 
   match.turnTimer = setInterval(() => {
     match.turnTimeLeft--;
@@ -307,6 +391,9 @@ function setPlayerTurn(match, seatKey) {
       broadcastMatchState(match);
     }
   }, 1000);
+  // BOT: auto-play when turn reaches a bot seat
+  triggerBotTurnIfNeeded(match);
+
 }
 
 function advanceTurn(match) {
@@ -321,6 +408,9 @@ function advanceTurn(match) {
     setPlayerTurn(match, nextSeat);
     broadcastMatchState(match);
   }
+  // BOT: auto-play when turn reaches a bot seat
+  triggerBotTurnIfNeeded(match);
+
 }
 
 function findNextActiveSeat(match, currentSeat) {
@@ -336,6 +426,158 @@ function findNextActiveSeat(match, currentSeat) {
 }
 
 
+
+let bot21CachedUser = null;
+async function ensureBot21User() {
+  if (bot21CachedUser) return bot21CachedUser;
+  try {
+    const username = BOT_21_USERNAME;
+    let botUser = await prisma.user.findUnique({ where: { username } });
+
+    if (!botUser) {
+      const tempBotPassword = crypto.randomBytes(32).toString('hex');
+      botUser = await prisma.user.create({
+        data: {
+          username,
+          password: tempBotPassword,
+          coins: 50000000,
+          role: 'BOT'
+        }
+      });
+      console.log('>>> [BOT-21] Created bot account with 50M coins:', botUser.id);
+    }
+
+    bot21CachedUser = botUser;
+    return botUser;
+  } catch (err) {
+    console.error('[BOT-21] Error ensuring bot user:', err.message);
+    return null;
+  }
+}
+
+// --- BOT 21 DECISION ENGINE (SMART PvP STRATEGY) ---
+function getBotAction(match, currentSeat, botScore) {
+  // 1. اگر ربات به 21 رسیده یا سوخته باشد
+  if (botScore >= 21) return 'STAND';
+
+  // 2. یافتن بالاترین امتیاز معتبر میان سایر بازیکنان نسوخته
+  let bestOpponentScore = 0;
+  if (match && match.players) {
+    for (let s in match.players) {
+      if (Number(s) === Number(currentSeat)) continue;
+      const op = match.players[s];
+      
+      // محاسبه یا خواندن امتیاز حریف
+      let opScore = op.score;
+      if (op.cards && op.cards.length > 0) {
+        const opCalc = calculateHand(op.cards);
+        opScore = opCalc.score;
+        if (opCalc.isBusted) continue; // حریف سوخته است، نادیده بگیر
+      }
+      if (op.isBusted) continue;
+
+      if (opScore > bestOpponentScore && opScore <= 21) {
+        bestOpponentScore = opScore;
+      }
+    }
+  }
+
+  // 3. وضعیت الف: همه رقبای دیگر سوخته‌اند -> ربات بدون ریسک ایست می‌دهد و برنده می‌شود
+  if (bestOpponentScore === 0) {
+    return 'STAND';
+  }
+
+  // 4. وضعیت ب: امتیاز ربات بالاتر از بهترین حریف است -> ایست
+  if (botScore > bestOpponentScore) {
+    return 'STAND';
+  }
+
+  // 5. وضعیت پ: ربات با بهترین حریف مساوی است -> ایست و تقسیم پات بدون ریسک سوختن
+  if (botScore === bestOpponentScore) {
+    return 'STAND';
+  }
+
+  // 6. وضعیت ت: امتیاز ربات کمتر از حریف است (مثلاً حریف 19 و ربات 17 یا 18)
+  // ایست دادن یعنی باخت قطعی؛ بنابراین ربات حتماً کارت می‌کشد تا جلو بیفتد یا مساوی کند
+  return 'HIT';
+}
+
+async function triggerBotTurnIfNeeded(match) {
+  if (!match || match.status !== 'PLAYING') return;
+  const currentSeat = match.currentTurnSeat;
+  if (currentSeat === null || currentSeat === undefined) return;
+
+  const player = match.players[currentSeat];
+  if (!player || !player.isBot || player.isStand || player.isBusted) return;
+
+  // تاخیر طبیعی 1.5 تا 3 ثانیه برای رفتار مشابه انسان
+  const thinkingDelay = Math.floor(Math.random() * 1500) + 1500;
+
+  setTimeout(async () => {
+    try {
+      // بازبینی وضعیت میز پس از سپری شدن تاخیر
+      if (match.status !== 'PLAYING' || match.currentTurnSeat !== currentSeat) return;
+      const p = match.players[currentSeat];
+      if (!p || p.isStand || p.isBusted) return;
+
+      const res = calculateHand(p.cards);
+      const action = getBotAction(match, currentSeat, res.score);
+
+      console.log(`>>> [BOT-21] Seat ${currentSeat} (${p.username || p.name}) Hand: ${res.score} -> Decision: ${action}`);
+
+      if (action === 'HIT') {
+        applyHit(match, currentSeat);
+      } else {
+        applyStand(match, currentSeat);
+      }
+    } catch (err) {
+      console.error('[BOT-21] Error during bot turn action:', err);
+    }
+    }, 2000);
+  }
+// --------------------------------
+
+  // --- BOT 21 INTERNAL ACTIONS (extracted from socket handlers) ---
+  function applyHit(match, seat) {
+    if (!match || match.status !== "PLAYING") return false;
+    if (seat === null || seat === undefined) return false;
+    let player = match.players?.[seat];
+
+    player = match.players?.[seat];
+    if (!player || player.isStand || player.isBusted) return false;
+
+    if (!match.deck || match.deck.length === 0) match.deck = createDeck();
+    player.cards.push(match.deck.pop());
+
+    const { score, isBlackjack, isBusted } = calculateHand(player.cards);
+    player.score = score;
+    player.isBlackjack = isBlackjack;
+    player.isBusted = isBusted;
+
+    if (isBusted || score === 21) {
+      player.isStand = true;
+      advanceTurn(match);
+    } else {
+      setPlayerTurn(match, seat);
+      broadcastMatchState(match);
+      // اینجا هم ممکن است دوباره نوبت همین ربات باشد (اگر seat ربات باشد)
+      triggerBotTurnIfNeeded(match);
+    }
+    return true;
+  }
+
+  function applyStand(match, seat) {
+    if (!match || match.status !== "PLAYING") return false;
+    if (seat === null || seat === undefined) return false;
+
+    const player = match.players?.[seat];
+    if (!player || player.isStand || player.isBusted) return false;
+
+    player.isStand = true;
+    advanceTurn(match);
+    return true;
+  }
+  // ---------------------------------------------------------------
 
 async function ensureTreasuryUser() {
   const username = "treasury";
@@ -384,7 +626,7 @@ async function finishMatch(match) {
 
   const payouts = [];
   for (const w of winners) {
-    const commission = Math.floor(rawShare * TREASURY_FEE_PERCENT);
+    const commission = Math.floor(rawShare * 0.10);
     const netPayout = rawShare - commission;
     payouts.push({ userId: w.userId, username: w.username, score: w.score, payout: netPayout, commission });
   }
@@ -538,6 +780,7 @@ io.on("connection", async (socket) => {
     for (const m of matches.values()) {
       if (m.tier === validTier && (m.status === "WAITING" || m.status === "COUNTDOWN")) {
         if (Object.keys(m.players).length < MAX_SEATS) {
+      console.log(">>> [DEBUG-MATCH-CHECK]", { mId: m.id, mTier: m.tier, validTier, status: m.status });
           match = m;
           break;
         }
@@ -549,7 +792,17 @@ io.on("connection", async (socket) => {
       matches.set(match.id, match);
     }
 
-    const emptySeat = SEAT_KEYS.find(s => !match.players[s]);
+    
+    let botSeat = SEAT_KEYS.find(s => match.players[s] && match.players[s].isBot);
+    let targetSeat;
+    if (botSeat) {
+        delete match.players[botSeat];
+        targetSeat = botSeat;
+    } else {
+        targetSeat = SEAT_KEYS.find(s => !match.players[s]);
+    }
+    const emptySeat = targetSeat;
+
     if (!emptySeat) {
       if (typeof callback === "function") callback({ success: false, message: "میز پر است." });
       return;
@@ -655,23 +908,38 @@ match.players[emptySeat] = {
     const seat = Object.keys(match.players).find(s => match.players[s]?.userId === userId);
     if (seat) {
       const isPreGame = (match.status === "WAITING" || match.status === "COUNTDOWN");
-      delete match.players[seat];
-      console.log("[DEBUG-MAP] Deleted userId:", userId, "from userMatchMap"); userMatchMap.delete(userId);
-      console.log("[DEBUG-LEAVE] Player removed from match:", userId, "from match:", match.id, "Player count before:", Object.keys(match.players).length); socket.leave("match21:" + match.id);
-
+      
+      // ۱. اگر قبل از شروع بازی است، حتماً ابتدا موجودی بازیکن ریفاند شود
       if (isPreGame) {
         await refundPlayer(userId, match.id, match.tier);
+        console.log("[REFUND-LEAVE] Refunded user", userId, "amount:", match.tier);
       }
 
-      const remaining = Object.keys(match.players).length;
-      if (remaining === 0) {
+      delete match.players[seat];
+      console.log("[DEBUG-MAP] Deleted userId:", userId, "from userMatchMap"); userMatchMap.delete(userId);
+      console.log("[DEBUG-LEAVE] Player removed from match:", userId, "from match:", match.id); socket.leave("match21:" + match.id);
+
+      // بررسی وجود بازیکن واقعی
+      const remainingHumans = Object.values(match.players).filter(p => !p.isBot);
+      
+      if (remainingHumans.length === 0) {
+        // اگر هیچ انسانی باقی نمانده، ربات‌ها را ریفاند و میز را حذف کن
+        for (const [sKey, p] of Object.entries(match.players)) {
+          if (p && p.isBot) {
+            await refundPlayer(p.userId, match.id, match.tier);
+            console.log("[DEBUG-REFUND-BOT] Auto-refunded remaining bot on seat:", sKey);
+          }
+        }
         stopCountdown(match);
         matches.delete(match.id);
-      } else if (remaining === 1 && isPreGame) {
-        console.log("[DEBUG-STATUS] Setting WAITING for match", match.id); console.log("[DEBUG-STATUS] Setting WAITING for match:", match.id, "Player count after leave:", Object.keys(match.players).length); match.status = "WAITING";
-        stopCountdown(match);
-        broadcastMatchState(match);
+        console.log("[DEBUG-LEAVE] No humans left. Match deleted:", match.id);
       } else {
+        // اگر انسان باقی مانده، وضعیت را بازبینی کن (اگر در لابی بود، ممکن است به WAITING برگردد)
+        const isPreGame = (match.status === "WAITING" || match.status === "COUNTDOWN");
+        if (isPreGame && Object.keys(match.players).length === 1) {
+            match.status = "WAITING";
+            stopCountdown(match);
+        }
         broadcastMatchState(match);
       }
     }
@@ -724,6 +992,43 @@ match.players[emptySeat] = {
     }
   });
 });
+async function onPlayerJoinedMatch(match) {
+  const count = Object.keys(match.players).length;
+  console.log(`[DEBUG-JOIN] Match ${match.id} player count: ${count}`);
+
+  if (count === 1) {
+    if (typeof stopCountdown === "function") stopCountdown(match);
+    match.status = "WAITING";
+    
+    if (BOT_21_ENABLED) {
+      if (match.botInjectTimer) clearTimeout(match.botInjectTimer);
+      match.botInjectTimer = setTimeout(() => injectBotIntoMatch(match), BOT_INJECT_TIME);
+    }
+    if (typeof broadcastMatchState === "function") broadcastMatchState(match);
+
+  } else if (count >= 2 && count < 5) {
+    if (match.botInjectTimer) {
+      clearTimeout(match.botInjectTimer);
+      match.botInjectTimer = null;
+    }
+    
+    if (match.status === "WAITING") {
+      match.status = "COUNTDOWN";
+      if (typeof startCountdown === "function") startCountdown(match);
+    }
+    if (typeof broadcastMatchState === "function") broadcastMatchState(match);
+    
+  } else if (count === 5) {
+    if (match.botInjectTimer) {
+      clearTimeout(match.botInjectTimer);
+      match.botInjectTimer = null;
+    }
+    if (typeof stopCountdown === "function") stopCountdown(match);
+    match.status = "PLAYING";
+    if (typeof broadcastMatchState === "function") broadcastMatchState(match);
+    if (typeof startMatch === "function") await startMatch(match);
+  }
+}
 
 const PORT = process.env.PORT_21 || 3002;
 server.listen(PORT, () => {
