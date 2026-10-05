@@ -3,506 +3,689 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Admin Balance Panel</title>
+  <title>پنل مدیریت جامع تاج تاس و ۲۱</title>
   <style>
+    :root {
+      --bg: #0b1120;
+      --card-bg: #111827;
+      --panel-bg: #1e293b;
+      --accent: #22c55e;
+      --accent-hover: #16a34a;
+      --purple: #7c3aed;
+      --blue: #3b82f6;
+      --red: #ef4444;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+    }
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
     body {
       margin: 0;
-      font-family: Arial, sans-serif;
-      background: #0f172a;
-      color: #fff;
+      background: var(--bg);
+      color: var(--text);
       display: flex;
       justify-content: center;
-      align-items: center;
-      min-height: 100vh;
+      padding: 20px 12px;
       direction: rtl;
     }
-    .card {
+    .wrapper {
       width: 100%;
-      max-width: 420px;
-      background: #111827;
-      border-radius: 16px;
-      padding: 24px;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
-      box-sizing: border-box;
+      max-width: 900px;
     }
-    h1 { margin-top: 0; font-size: 22px; text-align: center; }
-    p { color: #cbd5e1; font-size: 14px; text-align: center; margin-bottom: 20px; }
-    label { display: block; margin: 12px 0 6px; font-size: 14px; }
+    /* هدر و رمز ادمین سراسری */
+    .top-bar {
+      background: var(--card-bg);
+      padding: 16px 20px;
+      border-radius: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    .top-bar h1 {
+      margin: 0;
+      font-size: 19px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .secret-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .secret-box input {
+      background: var(--panel-bg);
+      border: 1px solid var(--border);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      width: 180px;
+    }
+
+    /* تب‌ها */
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      overflow-x: auto;
+    }
+    .tab-btn {
+      background: var(--card-bg);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      padding: 10px 18px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+    }
+    .tab-btn.active {
+      background: var(--blue);
+      color: #fff;
+      border-color: var(--blue);
+    }
+
+    /* کارت‌ها و کانتنت تب */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.25);
+    }
+    .card h2 {
+      font-size: 16px;
+      margin-top: 0;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 10px;
+    }
+
+    label { display: block; margin: 10px 0 4px; font-size: 13.5px; color: var(--text-muted); }
     input, select, button {
       width: 100%;
-      box-sizing: border-box;
-      border: none;
-      border-radius: 10px;
-      padding: 12px;
-      font-size: 15px;
-      font-family: inherit;
-    }
-    input, select { background: #1f2937; color: #fff; outline: none; }
-    button { margin-top: 14px; background: #22c55e; color: #fff; cursor: pointer; font-weight: bold; }
-    button:hover { background: #16a34a; }
-    .secondary { background: #3b82f6; margin-top: 10px; }
-    .secondary:hover { background: #2563eb; }
-    .result {
-      margin-top: 14px;
-      background: #0b1220;
-      padding: 12px 14px;
-      border-radius: 10px;
-      min-height: 48px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      padding: 10px;
       font-size: 14px;
-      color: #e2e8f0;
-      line-height: 1.4;
-      border: 1px solid #1e293b;
-      box-sizing: border-box;
+      color: #fff;
+      background: var(--panel-bg);
+      outline: none;
     }
-    .section-title {
-      margin-top: 18px;
-      font-size: 16px;
-      font-weight: 800;
-      text-align: center;
-      color: #e5e7eb;
+    button {
+      margin-top: 12px;
+      background: var(--accent);
+      cursor: pointer;
+      font-weight: bold;
+      border: none;
+      transition: 0.2s;
     }
-    .divider { height: 1px; background: #22314f; margin: 18px 0; border-radius: 999px; }
-    .res-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; }
-    .res-label { color: #94a3b8; font-size: 13.5px; }
-    .res-val { font-weight: bold; font-size: 14px; }
+    button:hover { opacity: 0.9; }
+    button.btn-blue { background: var(--blue); }
+    button.btn-purple { background: var(--purple); }
+    button.btn-red { background: var(--red); }
+
+    .result {
+      margin-top: 12px;
+      background: #060913;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .res-row { display: flex; justify-content: space-between; align-items: center; margin: 4px 0; }
+    .res-label { color: var(--text-muted); }
+    .res-val { font-weight: bold; }
+
+    /* جدول‌ها */
+    .table-container {
+      overflow-x: auto;
+      margin-top: 12px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+      text-align: right;
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--text-muted); background: var(--panel-bg); }
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+    .badge-pending { background: #854d0e; color: #fef08a; }
+    .badge-done { background: #166534; color: #bbf7d0; }
+    .badge-rejected { background: #991b1b; color: #fecaca; }
+
+    .action-btn {
+      padding: 4px 8px;
+      font-size: 12px;
+      width: auto;
+      margin: 0 2px;
+      border-radius: 6px;
+      display: inline-block;
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>پنل مدیریت موجودی</h1>
-        <div class="result" id="statsBox" style="margin-bottom: 20px; background: #1e293b;">
-      <div class="res-row">
-        <span class="res-label">🟢 کاربران آنلاین واقعی:</span>
-        <span id="realOnlineVal" class="res-val" style="color: #22c55e;">-</span>
-      </div>
 
-    <!-- تنظیمات آنلاین فیک بازی ۲۱ -->
-    <div class="result" id="fake21Box" style="margin-bottom: 20px; background: #0b1220; border: 1px solid #334155;">
-      <div class="res-row">
-        <span class="res-label">🟣 آنلاین فیک بازی ۲۱:</span>
-        <span id="fake21Status" class="res-val" style="color:#a78bfa;">-</span>
-      </div>
-
-      <div style="display:flex; gap:8px; margin-top:10px;">
-        <button id="loadFake21Btn" style="flex:1; background:#334155; padding: 8px; width: 100%;">خواندن تنظیمات</button>
-        <button id="saveFake21Btn" style="flex:1; background:#7c3aed; padding: 8px; width: 100%;">ذخیره تنظیمات</button>
-      </div>
-
-      <div style="margin-top:10px; display:flex; gap:8px;">
-        <label style="flex:1; font-size:13px;">
-          <div style="margin-bottom:4px;">فعال؟</div>
-          <select id="fake21Enabled" style="width:100%; padding:8px; background:#0f172a; border:1px solid #334155; color:#e2e8f0;">
-            <option value="true">فعال</option>
-            <option value="false">غیرفعال</option>
-          </select>
-        </label>
-
-        <label style="flex:1; font-size:13px;">
-          <div style="margin-bottom:4px;">حداقل</div>
-          <input id="fake21Min" type="number" min="0" step="1" value="20"
-            style="width:100%; padding:8px; background:#0f172a; border:1px solid #334155; color:#e2e8f0;" />
-        </label>
-
-        <label style="flex:1; font-size:13px;">
-          <div style="margin-bottom:4px;">حداکثر</div>
-          <input id="fake21Max" type="number" min="0" step="1" value="50"
-            style="width:100%; padding:8px; background:#0f172a; border:1px solid #334155; color:#e2e8f0;" />
-        </label>
-      </div>
-
-      <div class="result" id="fake21Result" style="margin-top:10px; background:#0f172a;">-</div>
+<div class="wrapper">
+  <!-- نوار بالای صفحه: عنوان و رمز یکبارورود ادمین -->
+  <div class="top-bar">
+    <h1>👑 مدیریت مرکزی تاج تاس & ۲۱</h1>
+    <div class="secret-box">
+      <span>🔑 رمز ادمین:</span>
+      <input id="adminSecret" type="password" placeholder="رمز امنیتی" />
     </div>
-
-      <button id="refreshStatsBtn" style="margin-top: 10px; background: #3b82f6; padding: 6px; width: 100%;">بروزرسانی آمار</button>
-    </div>
-
-    <p>افزایش/کاهش و مشاهده موجودی کاربر (با username)</p>
-
-    <label for="username">نام کاربری</label>
-    <input id="username" type="text" placeholder="مثلا ali" />
-
-    <label for="amount">مقدار (تومان)</label>
-    <input id="amount" type="text" inputmode="numeric" placeholder="مثلا 100,000" />
-
-    <label for="action">عملیات</label>
-    <select id="action">
-      <option value="add">افزایش موجودی</option>
-      <option value="subtract">کاهش موجودی</option>
-    </select>
-
-    <label for="note">توضیح (اختیاری)</label>
-    <input id="note" type="text" placeholder="مثلا admin adjustment" />
-
-    <label for="adminSecret">رمز ادمین</label>
-    <input id="adminSecret" type="password" placeholder="رمز ادمین" />
-
-    <button id="updateBtn">ثبت تغییر موجودی</button>
-    <button id="getBtn" class="secondary">دریافت موجودی</button>
-
-    <div class="result" id="result">نتیجه اینجا نمایش داده می‌شود</div>
-
-    <div class="divider"></div>
-    <div class="section-title">گزارش خزانه (Treasury Report)</div>
-
-    <button id="treasuryBtn" class="secondary" style="margin-top:14px;">گرفتن گزارش خزانه</button>
-    <div class="result" id="treasuryResult">گزارش اینجا نمایش داده می‌شود</div>
-
-    <div class="divider"></div>
-    <div class="section-title">برداشت از خزانه</div>
-    <label for="deductAmount">مبلغ برداشت (تومان)</label>
-    <input id="deductAmount" type="text" inputmode="numeric" placeholder="مثلا 50,000" />
-    <button id="deductBtn" style="background: #ef4444; margin-top: 10px;">ثبت برداشت از خزانه</button>
-    <div class="result" id="deductResult">نتیجه برداشت اینجا نمایش داده می‌شود</div>
   </div>
 
-  <script>
-    const usernameInput = document.getElementById("username");
-    const amountInput = document.getElementById("amount");
-    const actionInput = document.getElementById("action");
-    const noteInput = document.getElementById("note");
-    const adminSecretInput = document.getElementById("adminSecret");
+  <!-- منوی تب‌ها -->
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab(event, 'tab-game')">🎮 بازی و خزانه</button>
+    <button class="tab-btn" onclick="switchTab(event, 'tab-balance')">💳 موجودی کاربر</button>
+    <button class="tab-btn" onclick="switchTab(event, 'tab-withdraw')">📥 درخواست‌های تسویه</button>
+    <button class="tab-btn" onclick="switchTab(event, 'tab-users')">👥 لیست کاربران</button>
+  </div>
 
-    const resultBox = document.getElementById("result");
-    const updateBtn = document.getElementById("updateBtn");
-    const getBtn = document.getElementById("getBtn");
-
-    const deductAmountInput = document.getElementById("deductAmount");
-    const deductBtn = document.getElementById("deductBtn");
-    const deductResultBox = document.getElementById("deductResult");
-
-    const treasuryBtn = document.getElementById("treasuryBtn");
-    const treasuryResultBox = document.getElementById("treasuryResult");
-
-    // تابع ۳ رقم جدا کردن
-    function toComma(val) {
-      if (val === null || val === undefined || val === "") return "0";
-      let str = String(val).replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
-      str = str.replace(/[^\d.-]/g, "");
-      if (!str) return "0";
-      let parts = str.split(".");
-      parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-      return parts.join(".");
-    }
-
-    // اتصال فرمت‌دهی خودکار هنگام تایپ در موبایل و دسکتاپ
-    function attachLiveComma(inputEl) {
-      if (!inputEl) return;
-      const applyFormat = () => {
-        let val = inputEl.value;
-        if (!val) return;
-        let raw = val.replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
-        raw = raw.replace(/\D/g, "");
-        if (!raw) {
-          inputEl.value = "";
-          return;
-        }
-        inputEl.value = raw.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-      };
-
-      inputEl.addEventListener("input", applyFormat);
-      inputEl.addEventListener("keyup", applyFormat);
-      inputEl.addEventListener("change", applyFormat);
-      inputEl.addEventListener("blur", applyFormat);
-    }
-
-    attachLiveComma(amountInput);
-    attachLiveComma(deductAmountInput);
-
-    // ثبت افزایش/کاهش موجودی
-    updateBtn.addEventListener("click", async () => {
-      const username = usernameInput.value.trim();
-      const amountRaw = amountInput.value.replace(/,/g, "").trim();
-      const action = actionInput.value;
-      const note = (noteInput.value || "").trim();
-      const adminSecret = adminSecretInput.value.trim();
-
-      if (!username || !amountRaw || !adminSecret) {
-        resultBox.innerHTML = '<span style="color:#ef4444;">لطفاً نام کاربری، مبلغ و رمز ادمین را کامل کنید.</span>';
-        return;
-      }
-
-      let amountValue = Number(amountRaw);
-      if (!Number.isFinite(amountValue) || amountValue <= 0) {
-        resultBox.innerHTML = '<span style="color:#ef4444;">مبلغ باید یک عدد معتبر و بزرگ‌تر از صفر باشد.</span>';
-        return;
-      }
-
-      resultBox.innerHTML = "در حال پردازش...";
-
-      try {
-        const res = await fetch("/admin/update-balance-by-username", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username,
-            amount: amountValue,
-            action,
-            note,
-            adminSecret
-          })
-        });
-
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data.success === false) {
-          resultBox.innerHTML = `<span style="color:#ef4444;">${data.message || "خطا در تغییر موجودی"}</span>`;
-          return;
-        }
-
-        const isAdd = action === "add";
-        
-        // استخراج موجودی جدید بر حسب تومان
-        let newCoinsToman = 0;
-        if (data.newCoinsToman !== undefined) {
-          newCoinsToman = Number(data.newCoinsToman);
-        } else if (data.newCoins !== undefined) {
-          newCoinsToman = Number(data.newCoins) * 1000;
-        }
-
-        // محاسبه دقیق موجودی قبلی بر حسب تومان
-        let prevCoinsToman = isAdd ? (newCoinsToman - amountValue) : (newCoinsToman + amountValue);
-
-        resultBox.innerHTML = `
-          <div class="res-row"><span class="res-label">👤 نام کاربری:</span> <span class="res-val">${username}</span></div>
-          <div class="res-row"><span class="res-label">موجودی قبلی:</span> <span class="res-val">${toComma(prevCoinsToman)} تومان</span></div>
-          <div class="res-row">
-            <span class="res-label">${isAdd ? 'اضافه کردن موجودی:' : 'کم کردن موجودی:'}</span>
-            <span class="res-val" style="color: ${isAdd ? '#22c55e' : '#ef4444'}; font-size: 14.5px;">
-              ${isAdd ? '+' : '-'}${toComma(amountValue)} تومان
-            </span>
-          </div>
-          <div style="margin: 4px 0; border-top: 1px dashed #334155;"></div>
-          <div class="res-row"><span class="res-label">موجودی جدید:</span> <span class="res-val" style="color: #38bdf8;">${toComma(newCoinsToman)} تومان</span></div>
-        `;
-      } catch (err) {
-        resultBox.innerHTML = '<span style="color:#ef4444;">خطا در ارتباط با سرور</span>';
-      }
-    });
-
-    // دریافت موجودی کاربر
-    getBtn.addEventListener("click", async () => {
-      const username = usernameInput.value.trim();
-      const adminSecret = adminSecretInput.value.trim();
-
-      if (!username || !adminSecret) {
-        resultBox.innerHTML = '<span style="color:#ef4444;">نام کاربری و رمز ادمین را وارد کنید.</span>';
-        return;
-      }
-
-      resultBox.innerHTML = "در حال دریافت موجودی...";
-      const url = `/admin/user-balance/${encodeURIComponent(username)}?adminSecret=${encodeURIComponent(adminSecret)}&t=${Date.now()}`;
-
-      try {
-        const res = await fetch(url, {
-          method: "GET",
-          cache: "no-store",
-          headers: { "Cache-Control": "no-cache" }
-        });
-
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data.success === false) {
-          resultBox.innerHTML = `<span style="color:#ef4444;">${data.message || "خطا در دریافت موجودی"}</span>`;
-          return;
-        }
-
-        // استخراج موجودی به تومان
-        let balToman = 0;
-        if (data.coinsToman !== undefined) {
-          balToman = Number(data.coinsToman);
-        } else if (data.coins !== undefined) {
-          balToman = Number(data.coins) * 1000;
-        }
-
-        resultBox.innerHTML = `
-          <div class="res-row"><span class="res-label">👤 نام کاربری:</span> <span class="res-val">${data.username || username}</span></div>
-          <div class="res-row"><span class="res-label">موجودی:</span> <span class="res-val" style="color: #22c55e; font-size: 14.5px;">${toComma(balToman)} تومان</span></div>
-        `;
-      } catch (err) {
-        resultBox.innerHTML = '<span style="color:#ef4444;">خطا در ارتباط با سرور</span>';
-      }
-    });
-
-    // نمایش گزارش خزانه
-    function showTreasuryResult(data) {
-      if (typeof data === "string") {
-        treasuryResultBox.innerHTML = data;
-        return;
-      }
-      if (!data.success) {
-        treasuryResultBox.innerHTML = `<span style="color:#ef4444;">${data.message || "خطا در دریافت اطلاعات"}</span>`;
-        return;
-      }
-
-      treasuryResultBox.innerHTML = `
-        <div style="line-height: 1.8; font-size: 14.5px; direction: rtl; text-align: right;">
-          <div>💰 <b>درآمد امروز (۲۴ ساعته):</b> <span style="color: #22c55e; font-weight: bold;">${toComma(data.todayCutToman)} تومان</span></div>
-          <div>🎮 <b>تعداد دست‌های امروز:</b> ${toComma(data.todayCount || 0)} بازی</div>
-          <div style="margin: 6px 0; border-top: 1px dashed #334155;"></div>
-          <div>🏦 <b>موجودی کل خزانه:</b> <span style="color: #38bdf8; font-weight: bold;">${toComma(data.totalBalanceToman)} تومان</span></div>
+  <!-- تب اول: وضعیت بازی، آنلاین فیک ۲۱ و خزانه -->
+  <div id="tab-game" class="tab-content active">
+    <div class="grid-2">
+      <!-- آمار آنلاین و ربات فیک ۲۱ -->
+      <div class="card">
+        <h2>🟢 آمار سرور و آنلاین فیک</h2>
+        <div class="res-row">
+          <span class="res-label">کاربران آنلاین واقعی سرور:</span>
+          <span id="realOnlineVal" class="res-val" style="color:var(--accent);">-</span>
         </div>
+        <button class="btn-blue" id="refreshStatsBtn">🔄 بروزرسانی آنلاین واقعی</button>
+
+        <div style="margin: 16px 0; border-top: 1px dashed var(--border);"></div>
+
+        <div class="res-row">
+          <span class="res-label">وضعیت آنلاین فیک ۲۱:</span>
+          <span id="fake21Status" class="res-val" style="color:#a78bfa;">-</span>
+        </div>
+
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <div style="flex:1;">
+            <label>فعال/غیرفعال</label>
+            <select id="fake21Enabled">
+              <option value="true">فعال</option>
+              <option value="false">غیرفعال</option>
+            </select>
+          </div>
+          <div style="flex:1;">
+            <label>حداقل</label>
+            <input id="fake21Min" type="number" min="0" step="1" value="20" />
+          </div>
+          <div style="flex:1;">
+            <label>حداکثر</label>
+            <input id="fake21Max" type="number" min="0" step="1" value="50" />
+          </div>
+        </div>
+
+        <div style="display:flex; gap:8px; margin-top: 10px;">
+          <button id="loadFake21Btn" style="background:var(--panel-bg); border:1px solid var(--border); margin-top:0;">خواندن تنظیمات</button>
+          <button id="saveFake21Btn" class="btn-purple" style="margin-top:0;">ذخیره تنظیمات فیک</button>
+        </div>
+        <div class="result" id="fake21Result">-</div>
+      </div>
+
+      <!-- گزارش خزانه و کسر سهم -->
+      <div class="card">
+        <h2>🏦 درآمد و خزانه تاج تاس</h2>
+        <button class="btn-blue" id="treasuryBtn">📊 دریافت گزارش زنده خزانه</button>
+        <div class="result" id="treasuryResult">گزارش درآمد ۲۴ ساعته و کل اینجا نمایش داده می‌شود.</div>
+
+        <label style="margin-top:16px;">برداشت از خزانه (تومان)</label>
+        <input id="deductAmount" type="text" inputmode="numeric" placeholder="مثلاً ۵۰,۰۰۰" />
+        <button id="deductBtn" class="btn-red">ثبت برداشت از خزانه</button>
+        <div class="result" id="deductResult">-</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- تب دوم: افزایش / کاهش و استعلام موجودی -->
+  <div id="tab-balance" class="tab-content">
+    <div class="card" style="max-width:520px; margin: 0 auto;">
+      <h2>💰 تغییر موجودی و شارژ هدیه</h2>
+      <label>نام کاربری (Username)</label>
+      <input id="username" type="text" placeholder="نام کاربری بازیکن" />
+
+      <label>مبلغ (تومان)</label>
+      <input id="amount" type="text" inputmode="numeric" placeholder="مثلاً ۱۰۰,۰۰۰" />
+
+      <label>نوع عملیات</label>
+      <select id="action">
+        <option value="add">➕ افزایش موجودی (شارژ / جایزه)</option>
+        <option value="subtract">➖ کاهش موجودی (جریمه / کسر)</option>
+      </select>
+
+      <label>توضیحات (اختیاری)</label>
+      <input id="note" type="text" placeholder="مثلاً شارژ هدیه عید" />
+
+      <div style="display:flex; gap:8px; margin-top: 14px;">
+        <button id="updateBtn" style="margin-top:0;">ثبت عملیات</button>
+        <button id="getBtn" class="btn-blue" style="margin-top:0;">استعلام موجودی</button>
+      </div>
+
+      <div class="result" id="balanceResult">نتیجه تراکنش اینجا نمایش داده می‌شود.</div>
+    </div>
+  </div>
+
+  <!-- تب سوم: بررسی درخواست‌های تسویه (برداشت وجه کاربران با آیدی عددی) -->
+  <div id="tab-withdraw" class="tab-content">
+    <div class="card">
+      <h2>
+        <span>📥 صف درخواست‌های تسویه حساب</span>
+        <button onclick="loadWithdrawals()" class="action-btn btn-blue">رفرش لیست</button>
+      </h2>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>کاربر</th>
+              <th>آیدی عددی تلگرام</th>
+              <th>مبلغ</th>
+              <th>شماره شبا / کارت</th>
+              <th>وضعیت</th>
+              <th>عملیات</th>
+            </tr>
+          </thead>
+          <tbody id="withdrawTbody">
+            <tr>
+              <td colspan="6" style="text-align:center; color:var(--text-muted); padding:20px;">
+                روی "رفرش لیست" بزنید تا درخواست‌ها بارگذاری شوند.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- تب چهارم: مدیریت کاربران -->
+  <div id="tab-users" class="tab-content">
+    <div class="card">
+      <h2>👥 لیست و جستجوی کاربران</h2>
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <input id="searchUser" type="text" placeholder="جستجو بر اساس نام کاربری یا آیدی عددی..." />
+        <button class="btn-blue" style="width:120px; margin-top:0;">جستجو</button>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>نام کاربری</th>
+              <th>آیدی تلگرام</th>
+              <th>موجودی فعلی</th>
+              <th>وضعیت</th>
+              <th>اقدام</th>
+            </tr>
+          </thead>
+          <tbody id="usersTbody">
+            <tr>
+              <td colspan="5" style="text-align:center; color:var(--text-muted); padding:20px;">
+                در حال اتصال به دیتابیس کاربران...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // سوییچ بین تب‌ها
+  function switchTab(e, tabId) {
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById(tabId).classList.add('active');
+    e.currentTarget.classList.add('active');
+  }
+
+  // دریافت رمز سراسری ادمین
+  function getAdminSecret() {
+    const s = document.getElementById("adminSecret").value.trim();
+    if (!s) {
+      alert("لطفاً ابتدا رمز ادمین را در بالای صفحه وارد کنید.");
+      return null;
+    }
+    return s;
+  }
+
+  // جداسازی سه رقمی اعداد
+  function toComma(val) {
+    if (val === null || val === undefined || val === "") return "0";
+    let str = String(val).replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+    str = str.replace(/[^\d.-]/g, "");
+    if (!str) return "0";
+    let parts = str.split(".");
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return parts.join(".");
+  }
+
+  // اتصال ۳ رقم جدا کردن خودکار هنگام تایپ
+  function attachLiveComma(inputEl) {
+    if (!inputEl) return;
+    const applyFormat = () => {
+      let val = inputEl.value;
+      if (!val) return;
+      let raw = val.replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/\D/g, "");
+      inputEl.value = raw ? raw.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : "";
+    };
+    inputEl.addEventListener("input", applyFormat);
+    inputEl.addEventListener("keyup", applyFormat);
+    inputEl.addEventListener("change", applyFormat);
+    inputEl.addEventListener("blur", applyFormat);
+  }
+
+  attachLiveComma(document.getElementById("amount"));
+  attachLiveComma(document.getElementById("deductAmount"));
+
+  // ================= 1. آنلاین واقعی =================
+  document.getElementById("refreshStatsBtn").addEventListener("click", async () => {
+    const secret = getAdminSecret();
+    if (!secret) return;
+    const el = document.getElementById("realOnlineVal");
+    el.innerText = "در حال دریافت...";
+    try {
+      const res = await fetch(`/admin/server-stats?adminSecret=${encodeURIComponent(secret)}`);
+      const data = await res.json();
+      el.innerText = (res.ok && data.success) ? (data.realOnline + " نفر") : "خطا";
+    } catch {
+      el.innerText = "خطای ارتباط";
+    }
+  });
+
+  // ================= 2. آنلاین فیک ۲۱ =================
+  const fake21Enabled = document.getElementById("fake21Enabled");
+  const fake21Min = document.getElementById("fake21Min");
+  const fake21Max = document.getElementById("fake21Max");
+  const fake21Status = document.getElementById("fake21Status");
+  const fake21Result = document.getElementById("fake21Result");
+
+  document.getElementById("loadFake21Btn").addEventListener("click", async () => {
+    const secret = getAdminSecret();
+    if (!secret) return;
+    fake21Result.innerHTML = "<span style='color:var(--text-muted);'>در حال بارگذاری...</span>";
+    try {
+      const res = await fetch(`/admin/fake-online-21?adminSecret=${encodeURIComponent(secret)}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        fake21Enabled.value = String(Boolean(data.enabled));
+        fake21Min.value = Number(data.min ?? 0);
+        fake21Max.value = Number(data.max ?? 0);
+        fake21Status.innerText = (data.enabled ? "فعال" : "غیرفعال") + ` (${data.min}-${data.max})`;
+        fake21Result.innerHTML = "<span style='color:var(--accent); font-weight:bold;'>تنظیمات فیک لود شد.</span>";
+      } else {
+        fake21Result.innerHTML = `<span style='color:var(--red);'>${data.message || "خطا در دریافت"}</span>`;
+      }
+    } catch {
+      fake21Result.innerHTML = "<span style='color:var(--red);'>خطا در ارتباط با سرور</span>";
+    }
+  });
+
+  document.getElementById("saveFake21Btn").addEventListener("click", async () => {
+    const secret = getAdminSecret();
+    if (!secret) return;
+
+    const enabled = (fake21Enabled.value === "true");
+    const min = Number(fake21Min.value);
+    const max = Number(fake21Max.value);
+
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < 0 || max < min) {
+      fake21Result.innerHTML = "<span style='color:var(--red);'>مقادیر min/max معتبر نیستند.</span>";
+      return;
+    }
+
+    fake21Result.innerHTML = "<span style='color:var(--text-muted);'>در حال ذخیره...</span>";
+    try {
+      const res = await fetch("/admin/fake-online-21", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminSecret: secret, enabled, min, max })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        fake21Status.innerText = (enabled ? "فعال" : "غیرفعال") + ` (${min}-${max})`;
+        fake21Result.innerHTML = "<span style='color:var(--accent); font-weight:bold;'>تنظیمات با موفقیت ذخیره شد.</span>";
+      } else {
+        fake21Result.innerHTML = `<span style='color:var(--red);'>${data.message || "خطا در ذخیره"}</span>`;
+      }
+    } catch {
+      fake21Result.innerHTML = "<span style='color:var(--red);'>خطا در ذخیره‌سازی</span>";
+    }
+  });
+
+  // ================= 3. گزارش خزانه و کسر =================
+  const treasuryResultBox = document.getElementById("treasuryResult");
+
+  document.getElementById("treasuryBtn").addEventListener("click", async () => {
+    const secret = getAdminSecret();
+    if (!secret) return;
+
+    treasuryResultBox.innerHTML = "در حال دریافت گزارش...";
+    try {
+      const res = await fetch(`/admin/treasury-report?range=day&adminSecret=${encodeURIComponent(secret)}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        treasuryResultBox.innerHTML = `
+          <div>💰 <b>درآمد امروز (۲۴ ساعته):</b> <span style="color:var(--accent); font-weight:bold;">${toComma(data.todayCutToman)} تومان</span></div>
+          <div>🎮 <b>تعداد دست‌های امروز:</b> ${toComma(data.todayCount || 0)} بازی</div>
+          <div style="margin: 6px 0; border-top: 1px dashed var(--border);"></div>
+          <div>🏦 <b>موجودی کل خزانه:</b> <span style="color:var(--blue); font-weight:bold;">${toComma(data.totalBalanceToman)} تومان</span></div>
+        `;
+      } else {
+        treasuryResultBox.innerHTML = `<span style="color:var(--red);">${data.message || "خطا در دریافت گزارش"}</span>`;
+      }
+    } catch {
+      treasuryResultBox.innerHTML = "<span style='color:var(--red);'>خطا در ارتباط با سرور</span>";
+    }
+  });
+
+  document.getElementById("deductBtn").addEventListener("click", async () => {
+    const secret = getAdminSecret();
+    if (!secret) return;
+
+    const amt = Number(document.getElementById("deductAmount").value.replace(/,/g, "").trim());
+    const box = document.getElementById("deductResult");
+
+    if (!amt || amt <= 0) {
+      box.innerHTML = "<span style='color:var(--red);'>لطفاً مبلغ معتبر وارد کنید.</span>";
+      return;
+    }
+
+    box.innerHTML = "در حال ثبت برداشت...";
+    try {
+      const res = await fetch("/admin/treasury-deduct", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: amt, adminSecret: secret })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        box.innerHTML = "<span style='color:var(--accent); font-weight:bold;'>✅ برداشت با موفقیت ثبت شد.</span>";
+        document.getElementById("treasuryBtn").click();
+      } else {
+        box.innerHTML = `<span style="color:var(--red);">${data.message || "خطا در برداشت"}</span>`;
+      }
+    } catch {
+      box.innerHTML = "<span style='color:var(--red);'>خطا در ثبت برداشت</span>";
+    }
+  });
+
+  // ================= 4. افزایش / کاهش و استعلام موجودی =================
+  const balanceResultBox = document.getElementById("balanceResult");
+
+  document.getElementById("updateBtn").addEventListener("click", async () => {
+    const secret = getAdminSecret();
+    if (!secret) return;
+
+    const username = document.getElementById("username").value.trim();
+    const amountRaw = document.getElementById("amount").value.replace(/,/g, "").trim();
+    const action = document.getElementById("action").value;
+    const note = document.getElementById("note").value.trim();
+
+    if (!username || !amountRaw) {
+      balanceResultBox.innerHTML = '<span style="color:var(--red);">لطفاً نام کاربری و مبلغ را وارد کنید.</span>';
+      return;
+    }
+
+    let amountValue = Number(amountRaw);
+    if (!Number.isFinite(amountValue) || amountValue <= 0) {
+      balanceResultBox.innerHTML = '<span style="color:var(--red);">مبلغ باید عددی معتبر و بزرگ‌تر از صفر باشد.</span>';
+      return;
+    }
+
+    balanceResultBox.innerHTML = "در حال پردازش...";
+    try {
+      const res = await fetch("/admin/update-balance-by-username", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username,
+          amount: amountValue,
+          action,
+          note,
+          adminSecret: secret
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        balanceResultBox.innerHTML = `<span style="color:var(--red);">${data.message || "خطا در تغییر موجودی"}</span>`;
+        return;
+      }
+
+      const isAdd = action === "add";
+      let newCoinsToman = 0;
+      if (data.newCoinsToman !== undefined) {
+        newCoinsToman = Number(data.newCoinsToman);
+      } else if (data.newCoins !== undefined) {
+        newCoinsToman = Number(data.newCoins) * 1000;
+      }
+
+      let prevCoinsToman = isAdd ? (newCoinsToman - amountValue) : (newCoinsToman + amountValue);
+
+      balanceResultBox.innerHTML = `
+        <div class="res-row"><span class="res-label">👤 نام کاربری:</span> <span class="res-val">${username}</span></div>
+        <div class="res-row"><span class="res-label">موجودی قبلی:</span> <span class="res-val">${toComma(prevCoinsToman)} تومان</span></div>
+        <div class="res-row">
+          <span class="res-label">${isAdd ? 'اضافه کردن موجودی:' : 'کم کردن موجودی:'}</span>
+          <span class="res-val" style="color: ${isAdd ? 'var(--accent)' : 'var(--red)'}; font-size: 14.5px;">
+            ${isAdd ? '+' : '-'}${toComma(amountValue)} تومان
+          </span>
+        </div>
+        <div style="margin: 4px 0; border-top: 1px dashed var(--border);"></div>
+        <div class="res-row"><span class="res-label">موجودی جدید:</span> <span class="res-val" style="color: var(--blue); font-size: 15px;">${toComma(newCoinsToman)} تومان</span></div>
       `;
+    } catch {
+      balanceResultBox.innerHTML = '<span style="color:var(--red);">خطا در ارتباط با سرور</span>';
+    }
+  });
+
+  document.getElementById("getBtn").addEventListener("click", async () => {
+    const secret = getAdminSecret();
+    if (!secret) return;
+
+    const username = document.getElementById("username").value.trim();
+    if (!username) {
+      balanceResultBox.innerHTML = '<span style="color:var(--red);">لطفاً نام کاربری را وارد کنید.</span>';
+      return;
     }
 
-    treasuryBtn.addEventListener("click", async () => {
-      const adminSecret = adminSecretInput.value.trim();
+    balanceResultBox.innerHTML = "در حال دریافت موجودی...";
+    const url = `/admin/user-balance/${encodeURIComponent(username)}?adminSecret=${encodeURIComponent(secret)}&t=${Date.now()}`;
 
-      if (!adminSecret) {
-        showTreasuryResult('<span style="color:#ef4444;">رمز ادمین را وارد کنید.</span>');
-        return;
-      }
-
-      showTreasuryResult("در حال دریافت گزارش...");
-      try {
-        const res = await fetch(
-          `/admin/treasury-report?range=day&adminSecret=${encodeURIComponent(adminSecret)}`
-        );
-
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          showTreasuryResult(`<span style="color:#ef4444;">${data.message || "خطا در دریافت گزارش خزانه"}</span>`);
-          return;
-        }
-        showTreasuryResult(data);
-      } catch (e) {
-        showTreasuryResult('<span style="color:#ef4444;">خطا در ارتباط با سرور</span>');
-      }
-    });
-
-    deductBtn.addEventListener("click", async () => {
-      const amount = Number(deductAmountInput.value.replace(/,/g, "").trim());
-      const adminSecret = adminSecretInput.value.trim();
-
-      if (!amount || amount <= 0 || !adminSecret) {
-        deductResultBox.innerHTML = '<span style="color:#ef4444;">لطفاً مبلغ و رمز ادمین را وارد کنید.</span>';
-        return;
-      }
-
-      deductResultBox.innerHTML = "در حال ثبت درخواست...";
-      try {
-        const res = await fetch("/admin/treasury-deduct", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ amount, adminSecret })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          deductResultBox.innerHTML = `<span style="color:#ef4444;">${data.message || "خطا در برداشت از خزانه"}</span>`;
-          return;
-        }
-        deductResultBox.innerHTML = '<span style="color:#22c55e; font-weight:bold;">✅ برداشت با موفقیت ثبت شد.</span>';
-        treasuryBtn.click();
-      } catch (err) {
-        deductResultBox.innerHTML = '<span style="color:#ef4444;">خطا در ارتباط با سرور</span>';
-      }
-    });
-        // منطق دریافت آمار واقعی برای ادمین
-    const refreshStatsBtn = document.getElementById("refreshStatsBtn");
-    const realOnlineVal = document.getElementById("realOnlineVal");
-
-    refreshStatsBtn.addEventListener("click", async () => {
-      const adminSecret = adminSecretInput.value.trim();
-      if (!adminSecret) {
-        alert("لطفاً ابتدا رمز ادمین را وارد کنید.");
-        return;
-      }
-
-      realOnlineVal.innerText = "در حال دریافت...";
-      try {
-        const res = await fetch(`/admin/server-stats?adminSecret=${encodeURIComponent(adminSecret)}`);
-        const data = await res.json();
-        if (res.ok && data.success) {
-          realOnlineVal.innerText = data.realOnline + " نفر";
-        } else {
-          realOnlineVal.innerText = "خطا";
-        }
-      } catch (err) {
-        realOnlineVal.innerText = "خطا در اتصال";
-      }
-    });
-
-  
-
-        // ===== Fake Online 21 Admin Logic =====
-    const loadFake21Btn = document.getElementById("loadFake21Btn");
-    const saveFake21Btn = document.getElementById("saveFake21Btn");
-    const fake21Enabled = document.getElementById("fake21Enabled");
-    const fake21Min = document.getElementById("fake21Min");
-    const fake21Max = document.getElementById("fake21Max");
-    const fake21Status = document.getElementById("fake21Status");
-    const fake21Result = document.getElementById("fake21Result");
-
-    function setFake21Result(html) {
-      if (fake21Result) fake21Result.innerHTML = html;
-    }
-
-    if (loadFake21Btn) {
-      loadFake21Btn.addEventListener("click", async () => {
-        const secret = adminSecretInput ? adminSecretInput.value.trim() : "";
-        if (!secret) {
-          alert("لطفاً ابتدا رمز ادمین را وارد کنید.");
-          return;
-        }
-
-        setFake21Result("<span style='color:#94a3b8;'>در حال دریافت تنظیمات...</span>");
-        try {
-          const res = await fetch("/admin/fake-online-21?adminSecret=" + encodeURIComponent(secret));
-          const data = await res.json().catch(() => ({}));
-
-          if (!res.ok) {
-            setFake21Result("<span style='color:#ef4444;'>" + (data.message || "خطا در دریافت تنظیمات") + "</span>");
-            return;
-          }
-
-          if (fake21Enabled) fake21Enabled.value = String(Boolean(data.enabled));
-          if (fake21Min) fake21Min.value = Number(data.min ?? 0);
-          if (fake21Max) fake21Max.value = Number(data.max ?? 0);
-
-          if (fake21Status) fake21Status.innerText = (data.enabled ? "فعال" : "غیرفعال") + " (" + data.min + "-" + data.max + ")";
-          setFake21Result("<span style='color:#22c55e; font-weight:bold;'>تنظیمات دریافت شد.</span>");
-        } catch (e) {
-          setFake21Result("<span style='color:#ef4444;'>خطا در ارتباط با سرور</span>");
-        }
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" }
       });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        balanceResultBox.innerHTML = `<span style="color:var(--red);">${data.message || "خطا در دریافت موجودی"}</span>`;
+        return;
+      }
+
+      let balToman = 0;
+      if (data.coinsToman !== undefined) {
+        balToman = Number(data.coinsToman);
+      } else if (data.coins !== undefined) {
+        balToman = Number(data.coins) * 1000;
+      }
+
+      balanceResultBox.innerHTML = `
+        <div class="res-row"><span class="res-label">👤 نام کاربری:</span> <span class="res-val">${data.username || username}</span></div>
+        <div class="res-row"><span class="res-label">موجودی فعلی:</span> <span class="res-val" style="color: var(--accent); font-size: 15px;">${toComma(balToman)} تومان</span></div>
+      `;
+    } catch {
+      balanceResultBox.innerHTML = '<span style="color:var(--red);">خطا در ارتباط با سرور</span>';
     }
+  });
 
-    if (saveFake21Btn) {
-      saveFake21Btn.addEventListener("click", async () => {
-        const secret = adminSecretInput ? adminSecretInput.value.trim() : "";
-        if (!secret) {
-          alert("لطفاً ابتدا رمز ادمین را وارد کنید.");
-          return;
-        }
+  // ================= 5. لیست تسویه‌ها =================
+  async function loadWithdrawals() {
+    const secret = getAdminSecret();
+    if (!secret) return;
 
-        const enabled = (fake21Enabled.value === "true");
-        const min = Number(fake21Min.value);
-        const max = Number(fake21Max.value);
+    const tbody = document.getElementById("withdrawTbody");
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">در حال دریافت...</td></tr>`;
 
-        if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < 0 || max < min) {
-          setFake21Result("<span style='color:#ef4444;'>مقادیر min/max معتبر نیستند.</span>");
-          return;
-        }
-
-        setFake21Result("<span style='color:#94a3b8;'>در حال ذخیره...</span>");
-        try {
-          const res = await fetch("/admin/fake-online-21", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ adminSecret: secret, enabled, min, max })
-          });
-          const data = await res.json().catch(() => ({}));
-
-          if (!res.ok) {
-            setFake21Result("<span style='color:#ef4444;'>" + (data.message || "خطا در ذخیره تنظیمات") + "</span>");
-            return;
-          }
-
-          if (fake21Status) fake21Status.innerText = (enabled ? "فعال" : "غیرفعال") + " (" + min + "-" + max + ")";
-          setFake21Result("<span style='color:#22c55e; font-weight:bold;'>ذخیره شد.</span>");
-        } catch (e) {
-          setFake21Result("<span style='color:#ef4444;'>خطا در ارتباط با سرور</span>");
-        }
-      });
+    try {
+      const res = await fetch(`/admin/withdraw-requests?adminSecret=${encodeURIComponent(secret)}`);
+      const list = await res.json();
+      if (!Array.isArray(list) || list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">هیچ درخواستی در صف ثبت نشده است.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = list.map(item => `
+        <tr>
+          <td>${item.username || '-'}</td>
+          <td style="font-family:monospace; direction:ltr;">${item.telegramId || '-'}</td>
+          <td>${toComma(item.amount)} تومان</td>
+          <td style="font-family:monospace; direction:ltr;">${item.cardNumber || item.iban || '-'}</td>
+          <td><span class="badge ${item.status === 'pending' ? 'badge-pending' : (item.status === 'done' ? 'badge-done' : 'badge-rejected')}">${item.status}</span></td>
+          <td>
+            <button class="action-btn" style="background:var(--accent);">تأیید</button>
+            <button class="action-btn btn-red">رد</button>
+          </td>
+        </tr>
+      `).join('');
+    } catch {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">در حال حاضر درخواست تسویه‌ای یافت نشد.</td></tr>`;
     }
-
+  }
 </script>
 </body>
 </html>
