@@ -1,1 +1,1589 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>دبرنای آنلاین فینگیلی - نسخه کامل</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Rubik+Bubbles&family=Varela+Round&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="particles" id="particles"></div>
 
+  <!-- صفحه عدم اتصال به اینترنت -->
+  <div class="no-internet-container" id="no-internet-page">
+    <div class="no-internet-content">
+      <div class="no-internet-icon">📶</div>
+      <h1 class="no-internet-title">!</h1>
+      <p class="no-internet-message">اتصال به اینترنت شما قطع شده است. لطفاً اتصال اینترنت خود را بررسی کرده و دوباره تلاش کنید.</p>
+      <button class="reconnect-btn button-hover micro-interaction" id="reconnect-btn">
+        <span id="reconnect-text">اتصال مجدد به صفحه بازی</span>
+        <div class="reconnect-loading" id="reconnect-loading"></div>
+      </button>
+    </div>
+  </div>
+
+  <!-- صفحه جشن پایان بازی -->
+  <div class="celebration-container" id="celebration-page">
+    <div class="celebration-content">
+      <h1 class="celebration-title">🎉 تبریک! بازی به پایان رسید</h1>
+      <div class="celebration-emojis">🤑💰🎊🏆💎</div>
+      <div class="winner-list" id="winner-list"></div>
+      <button class="login-btn button-hover micro-interaction" id="back-to-main-from-celebration">بازگشت به صفحه اصلی</button>
+    </div>
+  </div>
+
+  <div class="emoji-rain" id="emoji-rain"></div>
+
+  <div class="page-container">
+    <!-- صفحه ورود -->
+    <div id="login-page" class="page active">
+      <div class="login-container fade-in-up">
+        <h1 class="login-title">🎮 دبرنای فینگیلی</h1>
+        <div class="form-group">
+          <label for="login-username">👤 نام کاربری</label>
+          <input type="text" id="login-username" placeholder="نام کاربری خود را وارد کنید" class="micro-interaction">
+        </div>
+        <div class="form-group">
+          <label for="login-password">🔒 رمز عبور</label>
+          <input type="password" id="login-password" placeholder="رمز عبور خود را وارد کنید" class="micro-interaction">
+          <button type="button" class="password-toggle" id="login-password-toggle"><i class="fas fa-eye"></i></button>
+        </div>
+        <button class="login-btn button-hover micro-interaction" id="login-btn">ورود به بازی</button>
+        <div class="register-link">حساب کاربری ندارید؟ <a href="#" id="go-to-register" class="micro-interaction">ثبت نام کنید</a></div>
+      </div>
+    </div>
+
+    <!-- صفحه ثبت نام -->
+    <div id="register-page" class="page">
+      <div class="back-btn button-hover micro-interaction" data-page="login-page">←</div>
+      <div class="register-container fade-in-up">
+        <h1 class="register-title">📝 ثبت نام جدید</h1>
+        <div class="form-group">
+          <label for="register-fullname">👤 نام و نام خانوادگی</label>
+          <input type="text" id="register-fullname" placeholder="نام و نام خانوادگی خود را وارد کنید" class="micro-interaction">
+        </div>
+        <div class="form-group">
+          <label for="register-phone">📞 شماره تماس</label>
+          <input type="tel" id="register-phone" placeholder="09123456789" class="micro-interaction" maxlength="11">
+        </div>
+        <div class="form-group">
+          <label for="register-username">👤 نام کاربری</label>
+          <input type="text" id="register-username" placeholder="حداقل 3 کاراکتر" class="micro-interaction">
+        </div>
+        <div class="form-group">
+          <label for="register-password">🔒 رمز عبور</label>
+          <input type="password" id="register-password" placeholder="حداقل 6 کاراکتر" class="micro-interaction">
+          <button type="button" class="password-toggle" id="register-password-toggle"><i class="fas fa-eye"></i></button>
+        </div>
+        <div class="form-group">
+          <label for="register-confirm-password">🔒 تایید رمز عبور</label>
+          <input type="password" id="register-confirm-password" placeholder="رمز عبور خود را تکرار کنید" class="micro-interaction">
+          <button type="button" class="password-toggle" id="register-confirm-password-toggle"><i class="fas fa-eye"></i></button>
+        </div>
+        <button class="register-btn button-hover micro-interaction" id="register-btn">ثبت نام و ورود به بازی</button>
+        <div class="back-to-login">قبلاً ثبت نام کرده‌اید؟ <a href="#" id="back-to-login" class="micro-interaction">وارد شوید</a></div>
+      </div>
+    </div>
+
+    <!-- صفحه اصلی -->
+    <div id="main-page" class="page">
+      <div class="header performance-optimized">
+        <div class="profile-section button-hover micro-interaction" id="profile-section">
+          <div class="profile-sticker">👤</div>
+          <div class="profile-name" id="main-username">user123</div>
+        </div>
+        <div class="balance-section button-hover micro-interaction" id="balance-section">
+          <div class="balance-sticker">$</div>
+          <div class="balance" id="user-balance">0</div>
+        </div>
+      </div>
+      <div class="main-menu">
+        <div class="main-menu-item start-game button-hover micro-interaction" data-page="room-selection">
+          <i>🎪</i><span>شروع بازی</span>
+        </div>
+        <div class="sub-menu">
+          <div class="menu-item button-hover micro-interaction" data-page="charge"><i>💳</i><span>شارژ حساب</span></div>
+          <div class="menu-item button-hover micro-interaction" data-page="withdrawal"><i>💸</i><span>برداشت وجه</span></div>
+          <div class="menu-item button-hover micro-interaction" data-page="financial-reports"><i>📊</i><span>گزارش مالی</span></div>
+          <div class="menu-item button-hover micro-interaction" data-page="profile"><i>👤</i><span>پروفایل</span></div>
+          <div class="menu-item button-hover micro-interaction" data-page="dice-page"><i>🎲</i><span>تاس شانسی</span></div>
+          <div class="menu-item button-hover micro-interaction" data-page="rules"><i>📜</i><span>قوانین بازی</span></div>
+        </div>
+      </div>
+      <div class="support">
+        <p>✉️ کانال تلگرام: <a href="https://t.me/fingili_bingo" style="color:#00ffaa;" class="micro-interaction">@fingili_bingo</a></p>
+      </div>
+    </div>
+
+    <!-- صفحه گزارش مالی -->
+    <div id="financial-reports" class="page">
+      <div class="compact-header">
+        <div class="back-btn" id="report-back-btn">←</div>
+        <div class="page-title">💰 گزارش تراکنش‌ها و آمار روزانه</div>
+      </div>
+      <div class="scrollable-content">
+        <div id="transactions-page" class="compact-transactions-page active">
+          <div class="compact-transactions-list" id="transactions-list"></div>
+        </div>
+      </div>
+      <div class="single-fixed-bottom">
+        <div class="summary-top-row">
+          <div class="time-display" id="current-date-time">آمار از ساعت 09:00 صبح تا ...</div>
+          <div class="total-prize-display" id="total-prize-display">0 تومان</div>
+        </div>
+        <div class="rooms-list" id="rooms-list"></div>
+      </div>
+    </div>
+
+    <!-- صفحه اتاق بازی -->
+    <div id="room-selection" class="page">
+      <div class="back-btn button-hover micro-interaction" data-page="main-page">←</div>
+      <h2 style="text-align: center; margin: 15px 0;">🎪 انتخاب اتاق بازی</h2>
+      <div class="room-selection">
+        <div class="room button-hover micro-interaction" data-price="5000">
+          <img src="/room1.jpg" alt="اتاق 5,000 تومانی" class="room-image">
+        </div>
+        <div class="room button-hover micro-interaction" data-price="10000">
+          <img src="/room2.jpg" alt="اتاق 10,000 تومانی" class="room-image">
+        </div>
+        <div class="room button-hover micro-interaction" data-price="20000">
+          <img src="/room3.jpg" alt="اتاق 20,000 تومانی" class="room-image">
+        </div>
+      </div>
+    </div>
+
+    <!-- صفحه خرید کارت -->
+    <div id="purchase" class="page">
+      <div class="back-btn button-hover micro-interaction" data-page="room-selection">←</div>
+      <div class="purchase-info" style="background: #00cc66; margin-bottom: 15px; border-radius: 15px; padding: 12px; text-align: center;">
+        <div style="font-size: 14px; color: white;">💰 موجودی شما:</div>
+        <div style="font-size: 24px; font-weight: bold; color: #ffcc00;" id="purchase-balance">0</div>
+      </div>
+      <div class="game-stats-card">
+        <div class="stats-item players">
+          <div class="stats-icon">👥</div>
+          <div class="stats-value" id="online-players">0/30</div>
+        </div>
+        <div class="stats-item timer">
+          <div class="timer-circle-container">
+            <svg class="timer-circle-svg">
+              <circle class="timer-circle-bg" cx="50" cy="50" r="45"></circle>
+<circle class="timer-circle-progress" id="purchase-timer-progress" cx="50" cy="50" r="45" stroke="#00ccff" stroke-width="6" fill="none"></circle>
+            </svg>
+            <div class="timer-circle-text" id="purchase-timer">120</div>
+          </div>
+        </div>
+        <div class="stats-item cards">
+          <div class="stats-icon">🎟️</div>
+          <div class="stats-value" id="cards-sold">0/30</div>
+        </div>
+      </div>
+      <div class="purchase-control-card">
+        <div class="card-counter">
+          <button class="counter-btn minus button-hover micro-interaction" id="decrease-cards">−</button>
+          <div class="card-count" id="card-count">1</div>
+          <button class="counter-btn plus button-hover micro-interaction" id="increase-cards">+</button>
+        </div>
+        <button class="payment-btn button-hover micro-interaction" id="final-purchase-btn">
+          پرداخت (<span id="payment-amount">5,000</span> تومان)
+        </button>
+      </div>
+      <div class="players-card">
+        <div class="players-list" id="players-list-container"></div>
+      </div>
+    </div>
+
+    <!-- صفحه بازی -->
+    <div id="game" class="page">
+      <div class="back-btn button-hover micro-interaction" data-page="main-page"
+           style="position: fixed; top: 15px; left: 15px; z-index: 1000; background: rgba(0, 204, 255, 0.9); color: white; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; border: 2px solid white;">←</div>
+      <div class="game-info-panel performance-optimized">
+        <div class="prize-display">
+          <div class="prize-item">
+            <div class="prize-label">خط کامل</div>
+            <div class="prize-amount" id="line-prize">۰</div>
+            <div class="prize-winner" id="line-winner"></div>
+          </div>
+          <div class="current-number-container">
+            <div class="current-number" id="current-number">?</div>
+            <button id="sound-toggle-game" class="sound-toggle-game micro-interaction" title="کنترل صدا">🔊</button>
+          </div>
+          <div class="prize-item">
+            <div class="prize-label">کارت کامل</div>
+            <div class="prize-amount" id="full-house-prize">۰</div>
+            <div class="prize-winner" id="full-house-winner"></div>
+          </div>
+        </div>
+      </div>
+      <div class="cards-container" id="game-cards-container"></div>
+    </div>
+
+    <!-- صفحه شارژ حساب -->
+    <div id="charge" class="page">
+      <div class="back-btn button-hover micro-interaction" data-page="main-page">←</div>
+      <h2 style="text-align: center; margin: 15px 0;">💳 شارژ حساب</h2>
+      <div class="charge-amounts-header">💰 مقادیر مجاز شارژ:</div>
+      <div class="charge-amounts-list" id="charge-amounts-list"></div>
+      <div class="custom-amount">
+        <h3>💰 مبلغ مورد نظر را انتخاب کرده و پرداخت کنید</h3>
+        <input type="number" id="custom-amount-input" placeholder="مبلغ مورد نظر را وارد کنید" class="micro-interaction">
+        <button class="gateway-btn button-hover micro-interaction" id="custom-charge-btn">انتقال به درگاه پرداختی</button>
+      </div>
+    </div>
+
+    <!-- صفحه برداشت وجه -->
+    <div id="withdrawal" class="page">
+      <div class="back-btn button-hover micro-interaction" data-page="main-page">←</div>
+      <h2 style="text-align: center; margin: 15px 0;">💸 برداشت وجه</h2>
+      <div class="withdrawal-info-text">
+        <p>💰 امکان برداشت از 200 هزار تومان به بالا می‌باشد.</p>
+        <p>⏰ برداشت وجه هر 24 ساعت یک بار قابل انجام است.</p>
+      </div>
+      <div class="withdrawal-form">
+        <div class="form-group">
+          <label for="withdrawal-amount">💰 مبلغ برداشت (تومان):</label>
+          <input type="number" id="withdrawal-amount" placeholder="مبلغ مورد نظر را وارد کنید" min="200000" class="user-data micro-interaction">
+        </div>
+        <div class="form-group">
+          <label for="full-name">👤 نام و نام خانوادگی صاحب حساب:</label>
+          <input type="text" id="full-name" placeholder="ابتدا در پروفایل ثبت کنید" readonly class="user-data micro-interaction" style="background:#222; color:#ccc;">
+        </div>
+        <div class="form-group">
+          <label for="card-number">🔢 شماره کارت 16 رقمی:</label>
+          <input type="text" id="card-number" placeholder="ابتدا در پروفایل ثبت کنید" readonly maxlength="16" class="user-data micro-interaction" style="background:#222; color:#ccc;">
+        </div>
+        <button class="withdrawal-btn button-hover micro-interaction" id="withdrawal-submit-btn">ثبت برداشت وجه</button>
+      </div>
+    </div>
+
+    <!-- صفحه پروفایل -->
+    <div id="profile" class="page">
+      <div class="back-btn button-hover micro-interaction" data-page="main-page">←</div>
+      <h2 style="text-align: center; margin: 15px 0;">👤 پروفایل کاربری</h2>
+      <div class="profile-form">
+        <div class="form-group">
+          <label for="profile-fullname">👤 نام و نام خانوادگی:</label>
+          <input type="text" id="profile-fullname" value="" readonly class="user-data micro-interaction">
+        </div>
+        <div class="form-group">
+          <label for="profile-username">👤 نام کاربری:</label>
+          <input type="text" id="profile-username" value="user123" readonly class="user-data micro-interaction">
+        </div>
+        <div class="form-group">
+          <label for="profile-phone">📞 شماره تماس:</label>
+          <input type="text" id="profile-phone" value="09123456789" readonly class="user-data micro-interaction">
+        </div>
+        <div class="form-group">
+          <label for="profile-card">💳 شماره کارت 16 رقمی:</label>
+          <input type="text" id="profile-card" placeholder="شماره کارت خود را وارد کنید" class="user-data micro-interaction">
+        </div>
+        <div class="form-group">
+          <label for="profile-sheba">🏦 شماره شبا 24 رقمی:</label>
+          <input type="text" id="profile-sheba" placeholder="شماره شبا خود را وارد کنید" class="user-data micro-interaction">
+        </div>
+        <button class="edit-btn button-hover micro-interaction" id="profile-edit-btn">ویرایش اطلاعات</button>
+        <button class="logout-btn button-hover micro-interaction" id="profile-logout-btn">خروج از حساب کاربری</button>
+      </div>
+    </div>
+
+    <!-- صفحه تاس شانسی -->
+    <div id="dice-page" class="page">
+      <div class="back-btn button-hover micro-interaction" data-page="main-page">←</div>
+      <h2 style="text-align: center; margin: 15px 0;">🎲 تاس شانسی</h2>
+      <div class="dice-requirements" id="dice-requirements">
+        <p>🎯 برای فعال‌سازی تاس شانسی باید:</p>
+        <p>¹. حساب بازی خود را شارژ کنید</p>
+        <p>². 5 دور از اتاق های بازی کارت خریداری کنید</p>
+        <p>🔄 دست‌های بازی شده: <span id="dice-games-played">0</span>/5</p>
+      </div>
+      <div class="dice-timer" id="dice-timer-container" style="display: none;">
+        <p>⏳ زمان باقی‌مانده تا تاس ریختن بعدی: <span id="dice-cooldown">24:00:00</span></p>
+      </div>
+      <div class="dice-scene">
+        <div class="dice" id="dice">
+          <div class="dice-face face-1">10,000 تومان</div>
+          <div class="dice-face face-2">5,000 تومان</div>
+          <div class="dice-face face-3">5,000 تومان</div>
+          <div class="dice-face face-4">5,000 تومان</div>
+          <div class="dice-face face-5">پوچ</div>
+          <div class="dice-face face-6">پوچ</div>
+        </div>
+        <div class="dice-shadow"></div>
+      </div>
+      <button class="roll-button button-hover micro-interaction" id="rollButton" disabled>
+        <span class="button-text">تاس بریز!</span>
+        <div class="loading-spinner" id="loadingSpinner"></div>
+      </button>
+      <div class="dice-result" id="diceResult">
+        <div class="dice-result-text">برای شروع دکمه را فشار دهید</div>
+        <div class="dice-result-desc">تاس را بچرخانید و جایزه خود را دریافت کنید</div>
+      </div>
+    </div>
+
+    <!-- صفحه قوانین -->
+    <div id="rules" class="page">
+      <div class="back-btn button-hover micro-interaction" data-page="main-page">←</div>
+      <h2 style="text-align: center; margin: 15px 0;">📜 قوانین و مقررات</h2>
+      <div class="rules-container">
+        <div class="rules-title">🎯 قوانین بازی دبرنای فینگیلی</div>
+        <div class="rules-text">
+          <p>♦♣به بازی دبرنای آنلاین فینگیلی خوش آمدید♠♥</p>
+          <p>بازی دبرنا جزو معدود بازی هایی است که امکان تقلب در آن وجود نداشته</p>
+          <p>و تمام قوانین بازی به گونه ای است که همه چیز آشکار و واضح است</p>
+          <p>این ویژگی بازی دبرنا را به یکی از محبوب ترین بازی بومی ایرانی تبدیل کرده</p>
+          <p>هدف ما از ساخت این بازی زنده نگهداشتن بازی های سنتی و بومی ایرانی و جلب رضایت و خوشنودی شماست♥</p>
+          <p>قوانین بازی:هربازیکن میتواند ¹تا⁴ کارت در هر دست خریداری کند،هر کارت شامل یک جدول با¹⁵ عدد است که به طور تصادفی از ¹تا⁹⁰انتخاب شده است</p>
+          <p>ربات برگزار کننده بازی به صورت تصادفی اعداد را اعلام میکند و با کارت بازیکنان مقایسه میکند و درصورت وجود عدد رو از کارت بازیکنان حذف میکند</p>
+          <p>بازی تا جایی ادامه دارد که یکی از بازیکنان برنده شود،برنده ها به ² دسته تقسیم میشن،اولین نفری که ¹ خط از یک کارت رو ⁵ عدد در خط را پر کند برنده خطی میشود،</p>
+          <p>و بازی ادامه داره تا اولین بازیکن یک کارت را کامل یعنی ¹⁵ خانه را که دارای عدد میباشد را پرکند برنده کامل بازی میشود. تقسیم جایزه:اگر ² یا چند بازیکن به طور هم زمان برنده شوند مبلغ جایزه به طور مساوی بین برندگان تقسیم میشود.</p>
+        </div>
+        <a href="https://t.me/fingili_bingo" class="telegram-link" style="color:#00ffaa; text-decoration:none;">📢 عضویت در کانال تلگرام</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- صفحه نتیجه تاس -->
+  <div class="dice-result-screen" id="diceResultScreen">
+    <div class="dice-result-sticker" id="diceResultSticker">🎁</div>
+    <div class="dice-result-message" id="diceResultMessage">تبریک! شما برنده شدید!</div>
+    <button class="dice-back-button button-hover micro-interaction" id="diceBackButton">بازگشت به بازی</button>
+  </div>
+
+  <div class="dice-money-rain" id="diceMoneyRain"></div>
+
+  <div class="notification" id="notification">
+    <span class="close-notification micro-interaction">×</span>
+    <span id="notification-text">این یک اعلان است!</span>
+  </div>
+
+  <!-- Socket.IO Client -->
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+  <script>
+    // ==================== اتصال به سرور ====================
+const socket = io({
+  transports: ['websocket', 'polling'],
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
+  timeout: 300000,
+  pingTimeout: 300000,
+  pingInterval: 30000
+});
+    let currentUser = null;
+    let currentRoomId = null;
+    let currentRoomPrice = 0;
+    let gameVoiceSystem = { isEnabled: true, isPlaying: false, startGame: function(){}, stop: function(){}, toggle: function(){ this.isEnabled = !this.isEnabled; return this.isEnabled; }, playNumber: function(){} };
+
+    // ==================== توابع کمکی ====================
+    function showNotification(message, type = 'info') {
+      const notification = document.getElementById('notification');
+      const notificationText = document.getElementById('notification-text');
+      if (!notification || !notificationText) return;
+      notificationText.textContent = message;
+      notification.className = 'notification ' + type;
+      notification.style.display = 'block';
+      setTimeout(() => { if (notification.style.display === 'block') notification.style.display = 'none'; }, 5000);
+    }
+
+    function changePage(pageId) {
+    // اگر کاربر وجود نداره، از localStorage بازیابی کن
+    if (!currentUser && pageId !== 'login-page' && pageId !== 'register-page') {
+const storedUserData = localStorage.getItem('fingili_current_user');
+if (storedUserData) {
+            try {
+currentUser = JSON.parse(storedUserData);
+                document.getElementById('main-username').textContent = currentUser.username;
+                updateUserBalance();
+                updateProfileDisplay();
+                socket.emit('authenticate', { phone: currentUser.phone, username: currentUser.username });
+            } catch (e) {}
+        }
+    }
+if (pageId !== 'login-page' && currentUser) {
+    fetchUserData(currentUser.phone).then(data => {
+        if (data && (data.status === 'banned' || data.status === 'deleted')) {
+            currentUser = null;
+            localStorage.removeItem('fingili_current_user');
+            showNotification('🚫 حساب کاربری شما از پنل مدیریت مسدود شده است!', 'error');
+            pageId = 'login-page';
+        }
+    });
+}
+      document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
+      const newPage = document.getElementById(pageId);
+      if (newPage) {
+        newPage.classList.add('active');
+        if (pageId === 'financial-reports') loadFinancialReports();
+        if (pageId === 'dice-page') loadDiceProgress();
+        if (pageId === 'charge' && currentUser) loadChargeAmounts();
+if (pageId === 'withdrawal') setTimeout(syncProfileToWithdrawal, 100);
+      }
+
+      if (pageId !== 'game' && pageId !== 'purchase') {
+        gameVoiceSystem.stop();
+        if (currentRoomId) {
+          socket.emit('leaveRoom');
+          currentRoomId = null;
+        }
+      }
+    }
+// ===== مدیریت دکمه برگشت گوشی =====
+window.addEventListener('popstate', function(event) {
+    const activePage = document.querySelector('.page.active');
+    if (activePage) {
+        const backBtn = activePage.querySelector('.back-btn');
+        if (backBtn) {
+            backBtn.click();
+        } else {
+            changePage('main-page');
+        }
+    }
+});
+// ===== تشخیص بازگشت به صفحه =====
+document.addEventListener('visibilitychange', function() {
+  if (!document.hidden && currentUser) {
+    console.log('📱 صفحه فعال شد، اتصال مجدد...');
+    socket.emit('authenticate', { phone: currentUser.phone, username: currentUser.username });
+    if (currentRoomId) {
+      socket.emit('getGameCards', { phone: currentUser.phone });
+    }
+  }
+});
+// وقتی صفحه عوض میشه، یه state جدید به تاریخچه اضافه کن
+const originalChangePage = changePage;
+changePage = function(pageId) {
+    originalChangePage(pageId);
+    if (pageId && pageId !== 'login-page' && pageId !== 'register-page') {
+        history.pushState({page: pageId}, '');
+    }
+};
+    function updateUserBalance() {
+      if (!currentUser) return;
+      const balanceElement = document.getElementById('user-balance');
+      const purchaseBalanceElement = document.getElementById('purchase-balance');
+      if (balanceElement) balanceElement.textContent = currentUser.balance.toLocaleString();
+      if (purchaseBalanceElement) purchaseBalanceElement.textContent = currentUser.balance.toLocaleString();
+    }
+
+    function updateProfileDisplay() {
+      if (!currentUser) return;
+      const el = (id) => document.getElementById(id);
+      if (el('profile-fullname')) el('profile-fullname').value = currentUser.fullname || '';
+      if (el('profile-username')) el('profile-username').value = currentUser.username || '';
+      if (el('profile-phone')) el('profile-phone').value = currentUser.phone || '';
+      if (el('profile-card')) el('profile-card').value = currentUser.cardNumber || '';
+      if (el('profile-sheba')) el('profile-sheba').value = currentUser.sheba || '';
+    }
+
+    function syncProfileToWithdrawal() {
+      if (!currentUser) return;
+      const fullNameInput = document.getElementById('full-name');
+      const cardNumberInput = document.getElementById('card-number');
+      if (fullNameInput) fullNameInput.value = currentUser.fullname || '';
+      if (cardNumberInput) cardNumberInput.value = currentUser.cardNumber || '';
+    }
+
+    function resetCardCounter() {
+      const cardCountElement = document.getElementById('card-count');
+      if (cardCountElement) cardCountElement.textContent = '1';
+    }
+
+    async function fetchUserData(phone) {
+      try {
+        const response = await fetch(`/api/user/${phone}`);
+        if (response.ok) return await response.json();
+      } catch (e) {}
+      return null;
+    }
+
+    async function syncCurrentUser() {
+      if (!currentUser) return;
+      const data = await fetchUserData(currentUser.phone);
+      if (data) {
+        currentUser = data;
+        document.getElementById('main-username').textContent = currentUser.username;
+        updateUserBalance();
+      }
+    }
+
+    // ==================== API ارتباط با سرور ====================
+    async function apiCall(url, method = 'POST', body = null) {
+      try {
+        const options = { method, headers: { 'Content-Type': 'application/json' } };
+        if (body) options.body = JSON.stringify(body);
+        const response = await fetch(url, options);
+        const data = await response.json();
+        return data;
+      } catch (error) {
+        console.error('API Error:', error);
+        return null;
+      }
+    }
+
+    // ==================== Socket.IO رویدادها ====================
+    socket.on('connect', () => {
+      console.log('✅ متصل به سرور');
+      if (currentUser) {
+        socket.emit('authenticate', { phone: currentUser.phone, username: currentUser.username });
+      }
+    });
+
+    socket.on('disconnect', () => {
+      console.log('❌ قطع اتصال از سرور');
+    });
+
+socket.on('roomJoined', (data) => {
+  console.log('✅ roomJoined اجرا شد!', data);
+  currentRoomId = data.roomId;
+  currentRoomPrice = data.roomPrice;
+  updatePurchaseDisplay(data);
+
+  // ===== شروع تایمر محلی =====
+  window.currentTimer = data.timer || 120;
+  if (window.timerInterval) clearInterval(window.timerInterval);
+  window.timerInterval = setInterval(() => {
+    if (window.currentTimer > 0) {
+      window.currentTimer--;
+      updateCircleTimer(window.currentTimer);
+    } else {
+      clearInterval(window.timerInterval);
+      console.log('⏰ تایمر تمام شد!');
+    }
+  }, 1000);
+  console.log('⏰ تایمر شروع شد:', window.currentTimer);
+});
+    socket.on('roomUpdate', (data) => {
+      if (currentRoomId === data.roomId) {
+        updatePurchaseDisplay(data);
+      }
+    });
+
+    socket.on('purchaseSuccess', async (data) => {
+      showNotification(`${data.cardCount} کارت با موفقیت خریداری شد!`, 'info');
+localStorage.setItem('last_purchase_time_' + currentUser.phone, Date.now().toString());
+      // بروزرسانی موجودی از سرور
+      await syncCurrentUser();
+      updateUserBalance();
+    });
+
+    socket.on('purchaseError', (data) => {
+      showNotification(data.error, 'error');
+    });
+
+    socket.on('gameStarted', (data) => {
+      if (currentRoomId === data.roomId) {
+        resetCardCounter();
+        const linePrizeElement = document.getElementById('line-prize');
+        const fullHousePrizeElement = document.getElementById('full-house-prize');
+        const currentNumberElement = document.getElementById('current-number');
+        const lineWinnerElement = document.getElementById('line-winner');
+        const fullHouseWinnerElement = document.getElementById('full-house-winner');
+
+        if (linePrizeElement) linePrizeElement.textContent = data.linePrize.toLocaleString() + ' تومان';
+        if (fullHousePrizeElement) fullHousePrizeElement.textContent = data.fullHousePrize.toLocaleString() + ' تومان';
+        if (currentNumberElement) currentNumberElement.textContent = '?';
+        if (lineWinnerElement) lineWinnerElement.textContent = '';
+        if (fullHouseWinnerElement) fullHouseWinnerElement.textContent = '';
+
+        // درخواست کارت‌ها از سرور
+        socket.emit('getGameCards', { phone: currentUser.phone });
+        changePage('game');
+      }
+    });
+socket.on('gameCards', (data) => {
+    window.currentGameData = data;
+    if (currentRoomId === data.roomId) {
+        displayGameCards(data);
+    }
+});
+socket.on('newNumber', (data) => {
+  if (currentRoomId === data.roomId) {
+    const currentNumberElement = document.getElementById('current-number');
+    if (currentNumberElement) {
+      currentNumberElement.textContent = data.number;
+      new Audio('/audio_files/number_' + data.number + '.mp3').play().catch(e=>{});
+      currentNumberElement.classList.add('active');
+      setTimeout(() => currentNumberElement.classList.remove('active'), 2000);
+    }
+
+    // چشمک زدن و حذف عدد
+    const cells = [];
+    document.querySelectorAll('.card-cell').forEach(cell => {
+        if (cell.textContent == data.number) {
+            cells.push(cell);
+            cell.classList.add('highlighted');
+        }
+    });
+
+    if (cells.length > 0) {
+        let blinkCount = 0;
+        const blinkInterval = setInterval(() => {
+            if (blinkCount >= 6) {
+                clearInterval(blinkInterval);
+                cells.forEach(cell => {
+                    cell.classList.remove('highlighted');
+                    cell.classList.add('removed');
+                    cell.textContent = '';
+                    cell.style.backgroundColor = '';
+                });
+            } else {
+                const color = blinkCount % 2 === 0 ? '#ffcc00' : '#ffffff';
+                cells.forEach(cell => {
+                    cell.style.backgroundColor = color;
+                });
+                blinkCount++;
+            }
+        }, 300);
+    }
+
+    if (currentUser) {
+        socket.emit('getGameCards', { phone: currentUser.phone });
+    }
+  }
+});
+    socket.on('lineWinner', (data) => {
+      if (currentRoomId === data.roomId) {
+        const lineWinnerElement = document.getElementById('line-winner');
+        if (lineWinnerElement) {
+          lineWinnerElement.textContent = data.winners.map(w => w.player).join('، ');
+          lineWinnerElement.style.color = '#00ffaa';
+          lineWinnerElement.style.fontWeight = 'bold';
+        }
+        if (navigator.vibrate) {
+          try { navigator.vibrate([500, 100, 500, 100, 500]); } catch (e) {}
+        }
+      }
+    });
+
+    socket.on('fullHouseWinner', (data) => {
+      if (currentRoomId === data.roomId) {
+        const fullHouseWinnerElement = document.getElementById('full-house-winner');
+        if (fullHouseWinnerElement) {
+          fullHouseWinnerElement.textContent = data.winners.map(w => w.player).join('، ');
+          fullHouseWinnerElement.style.color = '#ffcc00';
+          fullHouseWinnerElement.style.fontWeight = 'bold';
+        }
+        if (navigator.vibrate) {
+          try { navigator.vibrate([500, 100, 500, 100, 500]); } catch (e) {}
+        }
+      }
+    });
+
+    socket.on('prizeWon', async (data) => {
+      showNotification(`🎉 تبریک! شما ${data.amount.toLocaleString()} تومان برنده شدید! (${data.prizeType})`, 'info');
+      await syncCurrentUser();
+      updateUserBalance();
+      if (navigator.vibrate) {
+        try { navigator.vibrate([500, 100, 500, 100, 500]); } catch (e) {}
+      }
+    });
+
+    socket.on('gameEnded', (data) => {
+      if (currentRoomId === data.roomId) {
+        setTimeout(() => {
+          showCelebration(data.allWinners);
+        }, 3000);
+      }
+    });
+
+// ==================== نمایش کارت‌های بازی ====================
+function displayGameCards(data) {
+    const container = document.getElementById('game-cards-container');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (data.userCards) {
+        data.userCards.forEach(card => {
+            container.appendChild(createCardElement(card, true));
+        });
+    }
+    if (data.otherCards) {
+        data.otherCards.forEach(({ player, card }) => {
+            container.appendChild(createCardElement(card, false, player));
+        });
+    }
+}
+    function createCardElement(card, isUserCard = false, player = null) {
+      const cardElement = document.createElement('div');
+      cardElement.className = isUserCard ? 'user-card' : 'card';
+
+let cardHTML = `<div class="card-number">${card.number}</div>`;
+// نمایش نام کاربری برای همه کارت‌ها
+let playerName = '';
+if (isUserCard && currentUser) {
+  playerName = currentUser.username; // نام خود کاربر
+} else if (player) {
+  playerName = player.name; // نام سایر بازیکنان
+}
+if (playerName) cardHTML += `<div class="card-player">${playerName}</div>`;
+      cardHTML += `<div class="card-grid">`;
+
+      const highlightedSet = new Set(window._lastHighlightedNumbers || []);
+
+      for (let row = 0; row < 3; row++) {
+        for (let col = 8; col >= 0; col--) {
+          const number = card.template[row][col];
+          const isRemoved = number !== '' && card.removedNumbers.includes(parseInt(number));
+          const isHighlighted = number !== '' && highlightedSet.has(parseInt(number));
+
+          let cellClass = number === '' ? 'empty' : '';
+          if (isRemoved) cellClass = 'removed';
+          else if (isHighlighted) cellClass = 'highlighted';
+
+          const displayNumber = isRemoved ? '' : number;
+          cardHTML += `<div class="card-cell ${cellClass}">${displayNumber}</div>`;
+        }
+      }
+
+      cardHTML += `</div>`;
+      cardElement.innerHTML = cardHTML;
+      return cardElement;
+    }
+
+    // ==================== نمایش جشن ====================
+    function showCelebration(winners) {
+      const celebrationPage = document.getElementById('celebration-page');
+      const winnerList = document.getElementById('winner-list');
+      if (!celebrationPage || !winnerList) return;
+
+      winnerList.innerHTML = '';
+      if (winners && winners.length > 0) {
+        winners.forEach(winner => {
+          const winnerItem = document.createElement('div');
+          winnerItem.className = 'winner-item';
+          winnerItem.innerHTML = `
+            <div class="winner-name">${winner.player}</div>
+            <div class="winner-details">${winner.type} - کارت شماره ${winner.cardNumber}<br>مبلغ: ${(winner.amount || 0).toLocaleString()} تومان</div>
+          `;
+          winnerList.appendChild(winnerItem);
+        });
+      } else {
+        winnerList.innerHTML = '<div class="winner-item">هیچ برنده‌ای در این دور وجود ندارد</div>';
+      }
+
+      celebrationPage.classList.add('active');
+      startEmojiRain();
+
+      if (navigator.vibrate) {
+        try { navigator.vibrate([100, 50, 100, 50, 100]); } catch (e) {}
+      }
+    }
+
+    function startEmojiRain() {
+      const container = document.getElementById('emoji-rain');
+      if (!container) return;
+      const emojis = ['🤑', '💰', '🎊', '🏆', '💎', '💸', '🎯', '⭐', '🔥', '✨'];
+      container.innerHTML = '';
+
+      for (let i = 0; i < 50; i++) {
+        setTimeout(() => {
+          const emoji = document.createElement('div');
+          emoji.className = 'falling-emoji';
+          emoji.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+          emoji.style.left = Math.random() * 100 + 'vw';
+          emoji.style.fontSize = (Math.random() * 20 + 20) + 'px';
+          const duration = Math.random() * 3 + 2;
+          emoji.style.animationDuration = duration + 's';
+          container.appendChild(emoji);
+          setTimeout(() => { if (emoji.parentNode) emoji.parentNode.removeChild(emoji); }, duration * 1000);
+        }, i * 100);
+      }
+
+      setTimeout(() => { container.innerHTML = ''; }, 7000);
+    }
+
+    // ==================== بروزرسانی صفحه خرید ====================
+    function updatePurchaseDisplay(data) {
+      const onlinePlayersElement = document.getElementById('online-players');
+      const cardsSoldElement = document.getElementById('cards-sold');
+      const timerElement = document.getElementById('purchase-timer');
+
+      if (onlinePlayersElement) {
+        const playerCount = data.players ? data.players.length : 0;
+        onlinePlayersElement.textContent = `${playerCount}/30`;
+      }
+      if (cardsSoldElement) cardsSoldElement.textContent = `${data.soldCards || 0}/30`;
+      if (timerElement) {
+        updateCircleTimer(data.timer, 120);
+      }
+
+      updatePlayersList(data.players || []);
+      updateTotalPrice();
+    // ذخیره وضعیت حذف شده برای کارت‌ها
+    if (typeof window.removedCellsState === 'undefined') {
+        window.removedCellsState = {};
+    }
+    
+    document.querySelectorAll('.card-cell.removed').forEach(cell => {
+        const cardId = cell.closest('.card, .user-card')?.querySelector('.card-number')?.textContent;
+        const cellNumber = cell.textContent;
+        if (cardId && cellNumber) {
+            if (!window.removedCellsState[cardId]) window.removedCellsState[cardId] = [];
+            if (!window.removedCellsState[cardId].includes(cellNumber)) {
+                window.removedCellsState[cardId].push(cellNumber);
+            }
+        }
+    });
+    }
+
+    function updateCircleTimer(currentTime, totalTime = 120) {
+      try {
+        const progressCircle = document.getElementById('purchase-timer-progress');
+        const timerText = document.getElementById('purchase-timer');
+        if (!progressCircle || !timerText) return;
+
+        let safeTime = parseInt(currentTime);
+        if (isNaN(safeTime)) safeTime = 120;
+        if (safeTime < 0) safeTime = 0;
+        if (safeTime > totalTime) safeTime = totalTime;
+
+        const circumference = 2 * Math.PI * 45;
+        const percent = safeTime / totalTime;
+        const offset = circumference * (1 - percent);
+        progressCircle.style.strokeDasharray = circumference;
+        progressCircle.style.strokeDashoffset = offset;
+        timerText.textContent = safeTime;
+
+        if (safeTime > 90) timerText.style.color = '#00ccff';
+        else if (safeTime > 60) timerText.style.color = '#00ffaa';
+        else if (safeTime > 30) timerText.style.color = '#ffaa00';
+        else timerText.style.color = '#ff3366';
+      } catch (e) {}
+    }
+
+    function updatePlayersList(players) {
+      const container = document.getElementById('players-list-container');
+      if (!container) return;
+      container.innerHTML = '';
+      players.forEach(player => {
+        const playerItem = document.createElement('div');
+        playerItem.className = 'player-item';
+        playerItem.innerHTML = `<span class="player-name">${player.name}</span><span class="player-cards">${player.cardCount} کارت</span>`;
+        container.appendChild(playerItem);
+      });
+    }
+
+    function updateTotalPrice() {
+      if (!currentRoomPrice) return;
+      const cardCountElement = document.getElementById('card-count');
+      const paymentAmountElement = document.getElementById('payment-amount');
+      if (!cardCountElement || !paymentAmountElement) return;
+      const cardCount = parseInt(cardCountElement.textContent);
+      const totalPrice = currentRoomPrice * cardCount;
+      paymentAmountElement.textContent = totalPrice.toLocaleString();
+    }
+
+    // ==================== سیستم تاس شانسی ====================
+    let diceRolling = false;
+    const DICE_COOLDOWN = 24 * 60 * 60 * 1000;
+    const DICE_REQUIRED_GAMES = 5;
+
+    function loadDiceProgress() {
+      if (!currentUser) return;
+      const gamesPlayed = currentUser.diceProgress?.gamesPlayed || 0;
+      const hasCharged = currentUser.balance > 0;
+      const lastRoll = currentUser.diceProgress?.lastRollTime || 0;
+      const now = Date.now();
+
+      const gamesPlayedElement = document.getElementById('dice-games-played');
+      const rollButton = document.getElementById('rollButton');
+      const diceRequirements = document.getElementById('dice-requirements');
+      const timerContainer = document.getElementById('dice-timer-container');
+
+      if (gamesPlayedElement) gamesPlayedElement.textContent = gamesPlayed;
+
+      if (!rollButton) return;
+
+      const timeRemaining = DICE_COOLDOWN - (now - lastRoll);
+
+      if (gamesPlayed >= DICE_REQUIRED_GAMES && hasCharged) {
+        if (diceRequirements) diceRequirements.style.display = 'none';
+
+        if (timeRemaining <= 0) {
+          rollButton.disabled = false;
+          rollButton.querySelector('.button-text').textContent = 'تاس بریز!';
+          if (timerContainer) timerContainer.style.display = 'none';
+        } else {
+          rollButton.disabled = true;
+          showDiceCooldown(timeRemaining);
+        }
+      } else {
+        rollButton.disabled = true;
+        if (diceRequirements) diceRequirements.style.display = 'block';
+        if (!hasCharged) {
+          rollButton.querySelector('.button-text').textContent = 'شارژ حساب لازم است';
+        } else {
+          rollButton.querySelector('.button-text').textContent = `${gamesPlayed}/${DICE_REQUIRED_GAMES} دست بازی`;
+        }
+        if (timerContainer) timerContainer.style.display = 'none';
+      }
+    }
+
+    function showDiceCooldown(remainingTime) {
+      const timerContainer = document.getElementById('dice-timer-container');
+      const timerElement = document.getElementById('dice-cooldown');
+      if (!timerContainer || !timerElement) return;
+
+      timerContainer.style.display = 'block';
+
+      const updateTimer = () => {
+        if (remainingTime <= 0) {
+          timerContainer.style.display = 'none';
+          loadDiceProgress();
+          return;
+        }
+        const hours = Math.floor(remainingTime / (1000 * 60 * 60));
+        const minutes = Math.floor((remainingTime % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((remainingTime % (1000 * 60)) / 1000);
+        timerElement.textContent = `${hours.toString().padStart(2,'0')}:${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}`;
+        remainingTime -= 1000;
+        setTimeout(updateTimer, 1000);
+      };
+      updateTimer();
+    }
+
+    async function rollDice() {
+      if (diceRolling || !currentUser) return;
+      diceRolling = true;
+
+      const rollButton = document.getElementById('rollButton');
+      const buttonText = rollButton?.querySelector('.button-text');
+      const loadingSpinner = document.getElementById('loadingSpinner');
+      const diceElement = document.getElementById('dice');
+
+      if (rollButton) { rollButton.disabled = true; rollButton.classList.add('loading'); }
+      if (buttonText) buttonText.style.display = 'none';
+      if (loadingSpinner) loadingSpinner.style.display = 'block';
+
+      // چرخاندن تاس
+      if (diceElement) {
+        const randomX = Math.floor(Math.random() * 10) + 15;
+        const randomY = Math.floor(Math.random() * 10) + 15;
+        const randomZ = Math.floor(Math.random() * 10) + 15;
+        diceElement.style.transform = `rotateX(${randomX * 360}deg) rotateY(${randomY * 360}deg) rotateZ(${randomZ * 360}deg)`;
+      }
+
+      // ارسال به سرور
+      const result = await apiCall('/api/dice-roll', 'POST', { phone: currentUser.phone });
+
+      setTimeout(() => {
+        if (result && result.success) {
+          const prize = result.result;
+          currentUser = result.user;
+
+          // چرخاندن تاس به نتیجه
+          if (diceElement) {
+            let finalRotationX, finalRotationY;
+            switch (prize.face) {
+              case 1: finalRotationX = 0; finalRotationY = 0; break;
+              case 2: finalRotationX = 0; finalRotationY = 90; break;
+              case 3: finalRotationX = 0; finalRotationY = 180; break;
+              case 4: finalRotationX = 0; finalRotationY = -90; break;
+              case 5: finalRotationX = 90; finalRotationY = 0; break;
+              case 6: finalRotationX = -90; finalRotationY = 0; break;
+            }
+            diceElement.style.transform = `rotateX(${finalRotationX}deg) rotateY(${finalRotationY}deg)`;
+          }
+
+          const resultText = document.querySelector('.dice-result-text');
+          const resultDesc = document.querySelector('.dice-result-desc');
+          if (resultText) { resultText.textContent = prize.value; resultText.className = 'dice-result-text ' + (prize.type === 'prize' ? 'prize-10000' : 'prize-empty'); resultText.classList.add('dice-glowing'); }
+          if (resultDesc) resultDesc.textContent = prize.message;
+
+          const resultSticker = document.getElementById('diceResultSticker');
+          const resultMessage = document.getElementById('diceResultMessage');
+          const resultScreen = document.getElementById('diceResultScreen');
+          if (resultSticker) resultSticker.textContent = prize.sticker;
+          if (resultMessage) resultMessage.textContent = prize.message;
+          if (resultScreen) resultScreen.style.display = 'flex';
+
+          if (prize.moneyRain) createMoneyRain();
+
+          updateUserBalance();
+          showNotification(prize.message, prize.type === 'prize' ? 'info' : 'warning');
+        } else {
+          showNotification(result?.error || 'خطا در تاس شانسی!', 'error');
+        }
+
+        diceRolling = false;
+        if (rollButton) {
+          rollButton.classList.remove('loading');
+          if (buttonText) { buttonText.style.display = 'block'; buttonText.textContent = '⏳ 24 ساعت بعد'; }
+          if (loadingSpinner) loadingSpinner.style.display = 'none';
+          rollButton.disabled = true;
+        }
+        showDiceCooldown(DICE_COOLDOWN);
+      }, 3500);
+    }
+
+    function createMoneyRain() {
+      const moneyRain = document.getElementById('diceMoneyRain');
+      if (!moneyRain) return;
+      moneyRain.innerHTML = '';
+      moneyRain.style.display = 'block';
+
+      for (let i = 0; i < 30; i++) {
+        const money = document.createElement('div');
+        money.classList.add('dice-money');
+        money.innerHTML = '💵';
+        money.style.fontSize = `${Math.random() * 30 + 20}px`;
+        money.style.left = `${Math.random() * 100}%`;
+        money.style.animationDuration = `${Math.random() * 3 + 2}s`;
+        money.style.animationDelay = `${Math.random() * 2}s`;
+        moneyRain.appendChild(money);
+      }
+
+      setTimeout(() => { moneyRain.style.display = 'none'; }, 3000);
+    }
+
+    // ==================== سیستم شارژ ====================
+    function loadChargeAmounts() {
+      if (!currentUser) return;
+      const chargeAmountsList = document.getElementById('charge-amounts-list');
+      if (!chargeAmountsList) return;
+      chargeAmountsList.innerHTML = '';
+
+      const chargeSection = currentUser.chargeSection || [];
+      chargeSection.forEach(amount => {
+        const chargeItem = document.createElement('div');
+        chargeItem.className = 'charge-amount-item micro-interaction';
+        chargeItem.setAttribute('data-amount', amount);
+        chargeItem.textContent = amount.toLocaleString() + ' تومان';
+        chargeAmountsList.appendChild(chargeItem);
+      });
+    }
+
+    // ==================== گزارش مالی ====================
+    function loadFinancialReports() {
+      if (!currentUser) return;
+      loadTransactionsList();
+      loadDailySummary();
+    }
+
+    function loadTransactionsList() {
+      const container = document.getElementById('transactions-list');
+      if (!container || !currentUser) return;
+      container.innerHTML = '';
+
+      const history = currentUser.transactionHistory || [];
+      if (history.length === 0) {
+        container.innerHTML = '<div class="compact-transaction-item" style="text-align:center;color:#888;padding:20px;">هیچ تراکنشی ثبت نشده است</div>';
+        return;
+      }
+
+      const sorted = [...history].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 12);
+// حذف تراکنش‌های خرید کارت
+const filtered = sorted.filter(transaction => transaction.type !== 'purchase');
+if (filtered.length === 0) {
+  container.innerHTML = '<div class="compact-transaction-item" style="text-align:center;color:#888;padding:20px;">هیچ تراکنشی ثبت نشده است</div>';
+  return;
+}
+filtered.forEach(transaction => {
+        const el = document.createElement('div');
+        el.className = `compact-transaction-item ${transaction.type}`;
+
+        let title = '', amountClass = '', amountSign = '', amountValue = '';
+
+        switch (transaction.type) {
+          case 'charge': case 'واریز':
+            title = `شارژ ${transaction.amount.toLocaleString()} تومان`;
+            amountClass = 'compact-amount-positive'; amountSign = '+'; amountValue = transaction.amount.toLocaleString();
+            break;
+          case 'withdrawal': case 'برداشت':
+            title = `برداشت ${transaction.amount.toLocaleString()} تومان`;
+            amountClass = 'compact-amount-negative'; amountSign = '-'; amountValue = transaction.amount.toLocaleString();
+            break;
+case 'dice-win': case 'جایزه':
+  // استفاده از description برای تشخیص نوع جایزه
+  let prizeType = transaction.description || 'جایزه';
+  // اگر description شامل "خط کامل" یا "کامل" باشه
+  let roomText = 'تاس شانسی';
+  if (prizeType.includes('خط کامل')) {
+    roomText = 'اتاق (خط کامل)';
+  } else if (prizeType.includes('برنده کامل')) {
+    roomText = 'اتاق (کارت کامل)';
+  }
+  title = `برنده ${roomText}`;
+  amountClass = 'compact-amount-positive';
+  amountSign = '';
+  amountValue = `${prizeType}: ${Number(transaction.amount).toLocaleString()} تومان`;
+  break;
+          case 'dice-no-win':
+            title = 'تاس شانسی 0 تومان';
+            amountClass = 'compact-amount-neutral'; amountSign = ''; amountValue = '0';
+            break;
+          case 'admin-bonus':
+            title = `جایزه مدیریت ${transaction.amount.toLocaleString()} تومان`;
+            amountClass = 'compact-amount-positive'; amountSign = '+'; amountValue = transaction.amount.toLocaleString();
+            break;
+        }
+
+        el.innerHTML = `
+          <div class="compact-transaction-header">
+            <div class="compact-transaction-title">${title}</div>
+            <div class="compact-transaction-date">${transaction.dateTime || ''}</div>
+          </div>
+          <div class="compact-transaction-amount ${amountClass}">${amountSign}${amountValue} تومان</div>
+        `;
+        container.appendChild(el);
+      });
+    }
+
+    function loadDailySummary() {
+      const roomsSummary = { 5000: { cards: 0, prize: 0 }, 10000: { cards: 0, prize: 0 }, 20000: { cards: 0, prize: 0 } };
+      let totalPrize = 0;
+
+      const dailyGames = currentUser?.dailyGames || [];
+      dailyGames.forEach(game => {
+        if (roomsSummary[game.roomPrice]) {
+          roomsSummary[game.roomPrice].cards += game.cardCount;
+          roomsSummary[game.roomPrice].prize += game.prizeWon;
+          totalPrize += game.prizeWon;
+        }
+      });
+
+      const totalEl = document.getElementById('total-prize-display');
+      const roomsEl = document.getElementById('rooms-list');
+
+      if (totalEl) totalEl.textContent = totalPrize.toLocaleString() + ' تومان';
+      if (roomsEl) {
+        roomsEl.innerHTML = `
+          <div class="room-line"><span class="room-name">اتاق 5,000 تومانی</span><span class="room-cards">${roomsSummary[5000].cards} کارت</span><span class="room-prize">${roomsSummary[5000].prize.toLocaleString()} تومان</span></div>
+          <div class="room-line"><span class="room-name">اتاق 10,000 تومانی</span><span class="room-cards">${roomsSummary[10000].cards} کارت</span><span class="room-prize">${roomsSummary[10000].prize.toLocaleString()} تومان</span></div>
+          <div class="room-line"><span class="room-name">اتاق 20,000 تومانی</span><span class="room-cards">${roomsSummary[20000].cards} کارت</span><span class="room-prize">${roomsSummary[20000].prize.toLocaleString()} تومان</span></div>
+        `;
+      }
+
+      const dateTimeEl = document.getElementById('current-date-time');
+      const now = new Date();
+      const hours = now.getHours().toString().padStart(2, '0');
+      const minutes = now.getMinutes().toString().padStart(2, '0');
+      if (dateTimeEl) dateTimeEl.textContent = `گزارشات از ساعت 09:00 صبح تا ${hours}:${minutes}`;
+    }
+
+    // ==================== مدیریت رویدادها ====================
+    document.addEventListener('DOMContentLoaded', function () {
+      // بازیابی کاربر از localStorage
+      const savedUser = localStorage.getItem('fingili_current_user');
+      if (savedUser) {
+          try {
+              currentUser = JSON.parse(savedUser);
+              document.getElementById('main-username').textContent = currentUser.username;
+              updateUserBalance();
+              updateProfileDisplay();
+              socket.emit('authenticate', { phone: currentUser.phone, username: currentUser.username });
+              changePage('main-page');
+          } catch (e) {
+              console.log('خطا در بازیابی کاربر');
+          }
+      }	
+      // ==================== ثبت نام ====================
+      document.getElementById('register-btn').addEventListener('click', async function () {
+        const fullname = document.getElementById('register-fullname').value.trim();
+        const phone = document.getElementById('register-phone').value.trim();
+        const username = document.getElementById('register-username').value.trim();
+        const password = document.getElementById('register-password').value;
+        const confirmPassword = document.getElementById('register-confirm-password').value;
+
+        if (!fullname || !phone || !username || !password || !confirmPassword) {
+          showNotification('لطفاً تمام فیلدها را پر کنید!', 'error'); return;
+        }
+        if (fullname.length < 4) { showNotification('نام و نام خانوادگی باید حداقل 4 کاراکتر باشد!', 'error'); return; }
+        if (!/^09[0-9]{9}$/.test(phone)) { showNotification('شماره تماس باید 11 رقمی و با 09 شروع شود!', 'error'); return; }
+        if (username.length < 3) { showNotification('نام کاربری باید حداقل 3 کاراکتر باشد!', 'error'); return; }
+        if (password.length < 6) { showNotification('رمز عبور باید حداقل 6 کاراکتر باشد!', 'error'); return; }
+        if (password !== confirmPassword) { showNotification('رمز عبور و تکرار آن مطابقت ندارند!', 'error'); return; }
+
+        const result = await apiCall('/register', 'POST', { phone, username, password, fullname });
+        if (result && result.success) {
+          currentUser = result.user;
+localStorage.setItem('fingili_current_user', JSON.stringify(currentUser));
+         document.getElementById('main-username').textContent = currentUser.username;
+          updateUserBalance();
+          updateProfileDisplay();
+          socket.emit('authenticate', { phone: currentUser.phone, username: currentUser.username });
+          showNotification(`ثبت نام با موفقیت انجام شد! خوش آمدید ${username}!`, 'info');
+          setTimeout(() => changePage('main-page'), 1500);
+        } else {
+          showNotification(result?.error || 'خطا در ثبت نام!', 'error');
+        }
+      });
+
+      // ==================== ورود ====================
+      document.getElementById('login-btn').addEventListener('click', async function () {
+        const username = document.getElementById('login-username').value.trim();
+        const password = document.getElementById('login-password').value;
+
+        if (!username || !password) { showNotification('لطفاً نام کاربری و رمز عبور را وارد کنید!', 'error'); return; }
+
+        const result = await apiCall('/login', 'POST', { username, password });
+        if (result && result.success) {
+          currentUser = result.user;
+localStorage.setItem('fingili_current_user', JSON.stringify(currentUser));
+          document.getElementById('main-username').textContent = currentUser.username;
+          updateUserBalance();
+          updateProfileDisplay();
+          socket.emit('authenticate', { phone: currentUser.phone, username: currentUser.username });
+          showNotification(`خوش آمدید ${currentUser.username}!`, 'info');
+          setTimeout(() => changePage('main-page'), 1000);
+        } else {
+          showNotification(result?.error || 'نام کاربری یا رمز عبور اشتباه است!', 'error');
+        }
+      });
+
+      // ==================== نمایش/مخفی رمز عبور ====================
+      function setupPasswordToggles() {
+        const toggles = [
+          { toggleId: 'login-password-toggle', inputId: 'login-password' },
+          { toggleId: 'register-password-toggle', inputId: 'register-password' },
+          { toggleId: 'register-confirm-password-toggle', inputId: 'register-confirm-password' }
+        ];
+        toggles.forEach(({ toggleId, inputId }) => {
+          const toggle = document.getElementById(toggleId);
+          const input = document.getElementById(inputId);
+          if (toggle && input) {
+            toggle.addEventListener('click', function () {
+              input.type = input.type === 'password' ? 'text' : 'password';
+              toggle.innerHTML = input.type === 'password' ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
+            });
+          }
+        });
+      }
+      setupPasswordToggles();
+
+      // ==================== لینک‌های ورود/ثبت نام ====================
+      document.getElementById('go-to-register')?.addEventListener('click', (e) => { e.preventDefault(); changePage('register-page'); });
+      document.getElementById('back-to-login')?.addEventListener('click', (e) => { e.preventDefault(); changePage('login-page'); });
+
+      // ==================== دکمه‌های بازگشت ====================
+      document.querySelectorAll('.back-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+          resetCardCounter();
+          if (document.getElementById('game').classList.contains('active')) {
+            gameVoiceSystem.stop();
+            socket.emit('leaveRoom');
+            currentRoomId = null;
+            changePage('room-selection');
+            return;
+          }
+          const targetPage = this.getAttribute('data-page') || 'main-page';
+          changePage(targetPage);
+        });
+      });
+
+      // ==================== منوها ====================
+      document.querySelectorAll('.menu-item, .main-menu-item').forEach(item => {
+        item.addEventListener('click', function () { changePage(this.getAttribute('data-page')); });
+      });
+
+      document.getElementById('profile-section')?.addEventListener('click', () => changePage('profile'));
+
+      document.getElementById('balance-section')?.addEventListener('click', async () => {
+        await syncCurrentUser();
+        updateUserBalance();
+        showNotification('✅ موجودی حساب به‌روز شد!', 'info');
+      });
+
+      // ==================== بازگشت از جشن ====================
+      document.getElementById('back-to-main-from-celebration')?.addEventListener('click', () => {
+        document.getElementById('celebration-page')?.classList.remove('active');
+        document.getElementById('emoji-rain').innerHTML = '';
+        changePage('main-page');
+      });
+
+      // ==================== بازگشت از تاس ====================
+      document.getElementById('diceBackButton')?.addEventListener('click', () => {
+        document.getElementById('diceResultScreen').style.display = 'none';
+      });
+
+      // ==================== اتاق‌های بازی ====================
+      document.querySelectorAll('.room').forEach(element => {
+        element.addEventListener('click', function () {
+          const price = this.getAttribute('data-price');
+          resetCardCounter();
+          gameVoiceSystem.stop();
+          socket.emit('joinRoom', { roomPrice: parseInt(price), phone: currentUser?.phone });
+          currentRoomPrice = parseInt(price);
+          updateUserBalance();
+          changePage('purchase');
+        });
+      });
+
+      // ==================== خرید کارت ====================
+      document.getElementById('final-purchase-btn')?.addEventListener('click', function () {
+        if (!currentUser) { showNotification('لطفاً ابتدا وارد حساب کاربری خود شوید!', 'error'); return; }
+        if (!currentRoomId) { showNotification('❌ اتاق بازی پیدا نشد!', 'error'); changePage('room-selection'); return; }
+// ===== بخش لودینگ =====
+let lastPurchaseTime = localStorage.getItem('last_purchase_time_' + currentUser.phone);
+if (lastPurchaseTime) {
+  let timePassed = (Date.now() - parseInt(lastPurchaseTime)) / 1000;
+  if (timePassed < 1.5) {
+    let btn = this;
+    let originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '⏳ لطفاً صبر کنید...';
+    let remaining = (1.5 - timePassed) * 1000;
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+    }, remaining);
+    return;
+  }
+}
+// ===== پایان بخش لودینگ =====
+        const cardCount = parseInt(document.getElementById('card-count')?.textContent || '1');
+        socket.emit('purchaseCards', { phone: currentUser.phone, cardCount });
+      });
+
+      // ==================== +/- کارت ====================
+      document.addEventListener('click', function (e) {
+        if (e.target?.id === 'increase-cards') {
+          const el = document.getElementById('card-count');
+          let count = parseInt(el?.textContent || '1');
+          if (count < 4) { el.textContent = ++count; updateTotalPrice(); }
+        }
+        if (e.target?.id === 'decrease-cards') {
+          const el = document.getElementById('card-count');
+          let count = parseInt(el?.textContent || '1');
+          if (count > 1) { el.textContent = --count; updateTotalPrice(); }
+        }
+      });
+
+      // ==================== شارژ حساب ====================
+      document.addEventListener('click', function (e) {
+        if (e.target.classList.contains('charge-amount-item')) {
+          document.querySelectorAll('.charge-amount-item').forEach(el => el.classList.remove('selected'));
+          e.target.classList.add('selected');
+          const amount = e.target.getAttribute('data-amount');
+          const customAmountInput = document.getElementById('custom-amount-input');
+          if (customAmountInput) customAmountInput.value = amount;
+        }
+      });
+
+document.getElementById('custom-charge-btn')?.addEventListener('click', async function () {
+  const amount = document.getElementById('custom-amount-input')?.value;
+  if (!amount) { showNotification('لطفاً یکی از مقادیر مجاز را انتخاب کنید!', 'error'); return; }
+  if (!currentUser.cardNumber) { showNotification('❌ لطفاً ابتدا شماره کارت بانکی خود را در پروفایل ثبت کنید', 'error'); return; }
+
+  // ===== بخش تایمر ۲ دقیقه =====
+  const btn = this;
+  const originalText = btn.innerHTML;
+  
+  // چک کردن اینکه قبلاً تایمر فعال هست
+  const lastChargeTime = localStorage.getItem('last_charge_time_' + currentUser.phone);
+  if (lastChargeTime) {
+    const timePassed = (Date.now() - parseInt(lastChargeTime)) / 1000;
+    if (timePassed < 120) {
+      const remaining = Math.ceil(120 - timePassed);
+      showNotification(`⏳ لطفاً ${remaining} ثانیه دیگر صبر کنید`, 'error');
+      return;
+    }
+  }
+
+  // غیرفعال کردن دکمه و شروع تایمر
+  btn.disabled = true;
+  let timeLeft = 120;
+  localStorage.setItem('last_charge_time_' + currentUser.phone, Date.now().toString());
+
+  // نمایش تایمر روی دکمه
+ // const timerInterval = setInterval(() => {
+   // timeLeft--;
+   // const minutes = Math.floor(timeLeft / 60);
+    //const seconds = timeLeft % 60;
+    //btn.innerHTML = `⏳ ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    
+   // if (timeLeft <= 0) {
+     // clearInterval(timerInterval);
+     // btn.disabled = false;
+     //btn.innerHTML = originalText;
+     //localStorage.removeItem('last_charge_time_' + currentUser.phone);
+  //  }
+ // }, 1000);
+  // ===== پایان بخش تایمر =====
+
+  showNotification(`در حال انتقال به درگاه پرداخت برای مبلغ ${parseInt(amount).toLocaleString()} تومان...`, 'info');
+
+  setTimeout(async () => {
+    const paymentSuccess = Math.random() > 0.3;
+    if (paymentSuccess) {
+      const result = await apiCall('/api/charge', 'POST', { phone: currentUser.phone, amount: parseInt(amount) });
+      if (result && result.success) {
+        currentUser = result.user;
+        updateUserBalance();
+        showNotification(`✅ پرداخت موفق! مبلغ ${parseInt(amount).toLocaleString()} تومان به حساب شما اضافه شد.`, 'info');
+        loadDiceProgress();
+      } else {
+        showNotification('❌ خطا در شارژ حساب!', 'error');
+      }
+    } else {
+      showNotification('❌ خطا در پرداخت! لطفاً دوباره تلاش کنید.', 'error');
+    }
+    // دکمه رو غیرفعال نکن چون تایمر خودش مدیریت میکنه
+  }, 2000);
+});
+      // ==================== برداشت وجه ====================
+      document.getElementById('withdrawal-submit-btn')?.addEventListener('click', async function () {
+        const amount = document.getElementById('withdrawal-amount')?.value;
+        const fullName = document.getElementById('full-name')?.value;
+        const cardNumber = document.getElementById('card-number')?.value;
+
+        if (!amount || !fullName || !cardNumber) { showNotification('لطفاً تمام فیلدها را پر کنید!', 'error'); return; }
+        if (parseInt(amount) < 200000) { showNotification('حداقل مبلغ برداشت 200,000 تومان است!', 'error'); return; }
+        if (currentUser.balance < parseInt(amount)) { showNotification('موجودی کافی نیست!', 'error'); return; }
+        if (cardNumber.length !== 16 || !/^\d+$/.test(cardNumber)) { showNotification('شماره کارت باید ۱۶ رقم باشد!', 'error'); return; }
+
+        // بررسی محدودیت 24 ساعته
+        const lastRequest = currentUser.lastWithdrawalRequest;
+        if (lastRequest) {
+          const hoursPassed = (Date.now() - lastRequest) / (1000 * 60 * 60);
+          if (hoursPassed < 24) {
+            showNotification(`⏰ شما فقط هر ۲۴ ساعت یک بار می‌توانید برداشت کنید. ${Math.ceil(24 - hoursPassed)} ساعت دیگر`, 'error');
+            return;
+          }
+        }
+
+        const result = await apiCall('/withdrawal', 'POST', {
+          phone: currentUser.phone,
+          amount: parseInt(amount),
+          cardNumber: cardNumber,
+          fullName: fullName
+        });
+
+        if (result && result.success) {
+          await syncCurrentUser();
+          updateUserBalance();
+          showNotification('درخواست برداشت وجه با موفقیت ثبت شد!', 'info');
+          document.getElementById('withdrawal-amount').value = '';
+        } else {
+          showNotification(result?.error || 'خطا در ثبت درخواست برداشت!', 'error');
+        }
+      });
+
+      // ==================== تاس شانسی ====================
+      document.getElementById('rollButton')?.addEventListener('click', () => rollDice());
+
+// ==================== صدا ====================
+let soundEnabled = true;
+
+document.getElementById('sound-toggle-game')?.addEventListener('click', function () {
+    soundEnabled = !soundEnabled;
+    this.textContent = soundEnabled ? '🔊' : '🔇';
+    showNotification(soundEnabled ? 'صدا فعال شد' : 'صدا غیرفعال شد', 'info');
+});
+      // ==================== ویرایش پروفایل ====================
+      document.getElementById('profile-edit-btn')?.addEventListener('click', async function () {
+        const cardNumber = document.getElementById('profile-card')?.value;
+        const sheba = document.getElementById('profile-sheba')?.value;
+
+        if (currentUser) {
+          const result = await apiCall('/api/user/update', 'POST', {
+            phone: currentUser.phone,
+            cardNumber: cardNumber,
+            sheba: sheba
+          });
+          if (result && result.success) {
+            currentUser = result.user;
+            showNotification('اطلاعات پروفایل با موفقیت به‌روزرسانی شد.', 'info');
+          }
+        }
+      });
+
+      // ==================== خروج ====================
+      document.getElementById('profile-logout-btn')?.addEventListener('click', () => {
+localStorage.removeItem('fingili_current_user');
+        currentUser = null;
+        socket.emit('leaveRoom');
+        currentRoomId = null;
+        showNotification('با موفقیت از حساب کاربری خارج شدید.', 'info');
+        changePage('login-page');
+      });
+
+      // ==================== بستن نوتیفیکیشن ====================
+      document.querySelector('.close-notification')?.addEventListener('click', () => {
+        document.getElementById('notification').style.display = 'none';
+      });
+
+      // ==================== اینترنت ====================
+      document.getElementById('reconnect-btn')?.addEventListener('click', () => {
+        document.getElementById('reconnect-text').style.display = 'none';
+        document.getElementById('reconnect-loading').style.display = 'block';
+        setTimeout(() => {
+          if (navigator.onLine) {
+            document.getElementById('no-internet-page')?.classList.remove('active');
+          }
+          document.getElementById('reconnect-text').style.display = 'block';
+          document.getElementById('reconnect-loading').style.display = 'none';
+        }, 2000);
+      });
+
+      window.addEventListener('online', () => document.getElementById('no-internet-page')?.classList.remove('active'));
+      window.addEventListener('offline', () => document.getElementById('no-internet-page')?.classList.add('active'));
+
+      // ==================== برگشت گزارش مالی ====================
+      document.getElementById('report-back-btn')?.addEventListener('click', () => {
+        gameVoiceSystem.stop();
+        changePage('main-page');
+      });
+
+// ==================== بررسی دوره‌ای مسدودی ====================
+setInterval(async () => {
+    if (currentUser) {
+        const data = await fetchUserData(currentUser.phone);
+        if (!data) {
+            currentUser = null;
+            localStorage.removeItem('fingili_current_user');
+            showNotification('❌ حساب کاربری شما حذف شده است!', 'error');
+            changePage('login-page');
+        } else if (data.status === 'banned' || data.status === 'deleted') {
+            currentUser = null;
+            localStorage.removeItem('fingili_current_user');
+            showNotification('🚫 حساب کاربری شما از پنل مدیریت مسدود شده است!', 'error');
+            changePage('login-page');
+        }
+    }
+}, 5000);
+// ==================== بارگذاری اولیه ====================
+const storedUser = localStorage.getItem('fingili_current_user');
+if (storedUser) {
+    try {
+        const userData = JSON.parse(storedUser);
+        if (userData && userData.phone) {
+            fetchUserData(userData.phone).then(data => {
+                if (data && data.status !== 'banned') {
+                    currentUser = data;
+                    document.getElementById('main-username').textContent = currentUser.username;
+                    updateUserBalance();
+                    updateProfileDisplay();
+                    socket.emit('authenticate', { phone: currentUser.phone, username: currentUser.username });
+                    changePage('main-page');
+                } else {
+                    localStorage.removeItem('fingili_current_user');
+                    changePage('login-page');
+                }
+            }).catch(() => {
+                localStorage.removeItem('fingili_current_user');
+                changePage('login-page');
+            });
+        } else {
+            localStorage.removeItem('fingili_current_user');
+            changePage('login-page');
+        }
+    } catch (e) {
+        localStorage.removeItem('fingili_current_user');
+        changePage('login-page');
+    }
+} else {
+    changePage('login-page');
+}
+
+console.log('🎮 سیستم بازی فینگیلی (نسخه سروری) راه‌اندازی شد');
+
+// ==================== بستن تمام رویدادها ====================
+});
+</script>
+</body>
+</html>
