@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>دبرنا آنلاین | میز رقابتی</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: Tahoma, sans-serif; }
+    body {
+      background: radial-gradient(circle at center, #1b382b 0%, #0d1f17 100%);
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+    }
+    header {
+      background: rgba(0,0,0,0.4);
+      padding: 10px 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255,215,0,0.2);
+    }
+    .badge {
+      background: #111;
+      padding: 6px 12px;
+      border-radius: 20px;
+      border: 1px solid #d4af37;
+      font-size: 13px;
+      color: #ffd700;
+    }
+    .top-bar {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 20px;
+      padding: 15px;
+      background: rgba(0,0,0,0.2);
+    }
+    .barrel-current {
+      width: 75px;
+      height: 75px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #e67e22, #962d00);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.6), inset 0 2px 4px rgba(255,255,255,0.4);
+      border: 3px solid #f39c12;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      font-weight: bold;
+      color: #fff;
+      animation: pop 0.4s ease-out;
+    }
+    @keyframes pop {
+      0% { transform: scale(0.4); }
+      70% { transform: scale(1.15); }
+      100% { transform: scale(1); }
+    }
+    .history-strip {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      max-width: 60%;
+      padding: 5px;
+    }
+    .history-item {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #333;
+      border: 1px solid #d4af37;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      color: #ffd700;
+      flex-shrink: 0;
+    }
+    #cards-container {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 15px;
+      padding: 15px;
+      max-width: 1200px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    .card-box {
+      background: #fdfbf7;
+      border-radius: 8px;
+      padding: 10px;
+      box-shadow: 0 6px 15px rgba(0,0,0,0.5);
+      border: 2px solid #b8860b;
+    }
+    .card-header {
+      font-size: 11px;
+      color: #666;
+      margin-bottom: 5px;
+      text-align: left;
+      font-family: monospace;
+    }
+    .grid-3x9 {
+      display: grid;
+      grid-template-columns: repeat(9, 1fr);
+      grid-gap: 4px;
+      background: #e0d7c6;
+      padding: 4px;
+      border-radius: 4px;
+    }
+    .cell {
+      aspect-ratio: 1;
+      background: #fff;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: bold;
+      color: #111;
+      cursor: pointer;
+      position: relative;
+    }
+    .cell.empty {
+      background: #efebe2;
+      cursor: default;
+    }
+    .cell.marked::after {
+      content: '';
+      position: absolute;
+      width: 80%;
+      height: 80%;
+      background: radial-gradient(circle, #e74c3c, #962d00);
+      border-radius: 50%;
+      opacity: 0.85;
+      box-shadow: inset 0 2px 2px #fff;
+    }
+    /* Popup */
+    #endModal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .modal-card {
+      background: #1e272e;
+      border: 2px solid #ffd700;
+      padding: 25px;
+      border-radius: 12px;
+      text-align: center;
+      max-width: 350px;
+      width: 90%;
+    }
+    .modal-card h2 { color: #ffd700; margin-bottom: 12px; }
+    .modal-card button {
+      background: #27ae60;
+      color: #fff;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      margin-top: 15px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div>کد اتاق: <span id="roomCode" style="color:#ffd700;">---</span></div>
+    <div class="badge">موجودی: <span id="userBalance">۰</span> تومان</div>
+  </header>
+
+  <div class="top-bar">
+    <div class="barrel-current" id="currentBarrel">-</div>
+    <div class="history-strip" id="historyStrip"></div>
+  </div>
+
+  <main id="cards-container"></main>
+
+  <div id="endModal">
+    <div class="modal-card">
+      <h2 id="modalTitle">برنده بازی!</h2>
+      <p id="modalDesc"></p>
+      <button onclick="window.location.href='/lobbyDaberna.html'">بازگشت به لابی</button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/gameDaberna.js"></script>
+</body>
+</html>
