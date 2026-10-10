@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>اتاق بازی دبرنا</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Tahoma, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            padding: 12px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 420px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        /* Top Header بدون آواتار و زنگوله */
+        .top-bar {
+            background-color: #1e1e1e;
+            border-radius: 16px;
+            padding: 14px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid #2a2a2a;
+        }
+
+        .balance-label {
+            font-size: 14px;
+            color: #a1a1a6;
+            font-weight: 500;
+        }
+
+        .user-balance {
+            font-size: 22px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            color: #2ed573;
+        }
+
+        /* Room Card / Banner */
+        .room-card {
+            background-color: #1c1c1e;
+            border-radius: 20px;
+            padding: 16px;
+            position: relative;
+            overflow: hidden;
+            border: 1px solid #2c2c2e;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .room-card::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 140px;
+            background: radial-gradient(circle at top right, rgba(212, 107, 8, 0.25), transparent 70%);
+            pointer-events: none;
+        }
+
+        .room-title-area {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            z-index: 1;
+        }
+
+        .room-name {
+            font-size: 16px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .room-code {
+            font-size: 13px;
+            color: #d1d1d6;
+            font-family: monospace;
+            direction: ltr;
+            text-align: right;
+            display: inline-block;
+        }
+
+        .card-counter-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 24px;
+            margin-top: 6px;
+            z-index: 1;
+        }
+
+        .counter-btn {
+            background: linear-gradient(135deg, #8a4fff, #6f2cf5);
+            border: none;
+            color: #ffffff;
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            font-size: 22px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(111, 44, 245, 0.3);
+            transition: transform 0.1s;
+        }
+
+        .counter-btn:active {
+            transform: scale(0.95);
+        }
+
+        .counter-value {
+            font-size: 20px;
+            font-weight: bold;
+            min-width: 24px;
+            text-align: center;
+        }
+
+        /* Action Button */
+        .buy-card-btn {
+            background: linear-gradient(90deg, #7c4dff, #651fff);
+            color: #ffffff;
+            border: none;
+            border-radius: 14px;
+            padding: 13px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(101, 31, 255, 0.4);
+            transition: transform 0.1s;
+            text-align: center;
+        }
+
+        .buy-card-btn:active {
+            transform: scale(0.98);
+        }
+
+        /* Stats Grid */
+        .stats-section {
+            background-color: #1a1a1c;
+            border-radius: 16px;
+            padding: 14px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            border: 1px solid #262628;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+        }
+
+        .stat-label {
+            color: #e5e5ea;
+        }
+
+        .stat-val {
+            font-weight: bold;
+            color: #ffffff;
+        }
+
+        .stat-val.red-val {
+            color: #ff453a;
+            font-size: 16px;
+        }
+
+        .timer-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: #fff;
+            font-weight: bold;
+            font-size: 15px;
+        }
+
+        /* Players List */
+        .players-container {
+            background-color: #1a1a1c;
+            border-radius: 16px;
+            padding: 14px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            border: 1px solid #262628;
+        }
+
+        .players-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #8e8e93;
+            font-size: 13px;
+            border-bottom: 1px solid #2c2c2e;
+            padding-bottom: 8px;
+        }
+
+        .players-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .player-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+        }
+
+        .player-name {
+            font-size: 14px;
+            font-weight: 500;
+            color: #f2f2f7;
+        }
+
+        .player-card-count {
+            font-size: 15px;
+            font-weight: bold;
+            color: #ffffff;
+        }
+
+        .return-btn {
+            background-color: #1e1e20;
+            color: #d1d1d6;
+            border: 1px solid #2c2c2e;
+            border-radius: 14px;
+            padding: 13px;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            text-align: center;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <!-- Top Bar (بدون زنگوله و بدون آواتار) -->
+        <header class="top-bar">
+            <span class="balance-label">موجودی حساب شما:</span>
+            <div class="user-balance" id="userBalanceDisplay">0 تومان</div>
+        </header>
+
+        <!-- Room Information & Buy Cards -->
+        <section class="room-card">
+            <div class="room-title-area">
+                <div class="room-name" id="roomNameDisplay">در حال بارگذاری اتاق...</div>
+                <div class="room-code">کد بازی : <span id="roomCodeDisplay">BG-WAIT</span></div>
+            </div>
+
+            <div class="card-counter-row">
+                <button class="counter-btn" onclick="changeCardCount(1)">+</button>
+                <div class="counter-value" id="cardCountDisplay">1</div>
+                <button class="counter-btn" onclick="changeCardCount(-1)">-</button>
+            </div>
+        </section>
+
+        <!-- Buy Action Button -->
+        <button class="buy-card-btn" id="btnBuyCards" onclick="handleBuyCards()">تهیه کارت</button>
+
+        <!-- Live Statistics -->
+        <section class="stats-section">
+            <div class="stat-row">
+                <div class="stat-label">تعداد کارت‌های شما : <span class="stat-val" id="myCardCount">0</span></div>
+                <div class="stat-label">نفرات حاضر در اتاق : <span class="stat-val" id="onlinePlayersCount">0</span></div>
+            </div>
+            <div class="stat-row">
+                <div class="stat-label">مجموع کارت‌های بازی : <span class="stat-val red-val" id="activeCardsTotal">0</span></div>
+                <div class="timer-badge">
+                    <span>⏱️</span>
+                    <span id="gameTimer">150</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Players List Table -->
+        <section class="players-container">
+            <div class="players-header">
+                <span>نام بازیکن</span>
+                <span>تعداد کارت</span>
+            </div>
+            <div class="players-list" id="playersList"></div>
+        </section>
+
+        <button class="return-btn" onclick="goToLobby()">بازگشت به لیست اتاق‌ها</button>
+    </div>
+
+    <!-- Client-side Socket integration -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        let selectedCardCount = 1;
+        const maxCardsAllowed = 6;
+        const minCardsAllowed = 1;
+
+        function changeCardCount(delta) {
+            const nextVal = selectedCardCount + delta;
+            if (nextVal >= minCardsAllowed && nextVal <= maxCardsAllowed) {
+                selectedCardCount = nextVal;
+                document.getElementById('cardCountDisplay').innerText = selectedCardCount;
+            }
+        }
+
+        function goToLobby() {
+            window.location.href = '/lobbyDaberna.html';
+        }
+
+        function handleBuyCards() {
+            if (window.dabernaSocket) {
+                window.dabernaSocket.emit('buyCards', { count: selectedCardCount });
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const token = localStorage.getItem('token');
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomId = urlParams.get('room') || '5';
+
+            // سرور دبرنا روی پورت ۳۰۰۳
+            const socketHost = window.location.hostname;
+            const socketPort = 3003;
+            window.dabernaSocket = io(`https://${socketHost}:${socketPort}`, {
+                auth: { token },
+                transports: ['websocket', 'polling']
+            });
+
+            window.dabernaSocket.on('connect', () => {
+                window.dabernaSocket.emit('joinDabernaRoom', { roomId });
+            });
+
+            window.dabernaSocket.on('initSync', (data) => {
+                if (data.balance !== undefined) {
+                    document.getElementById('userBalanceDisplay').innerText = Number(data.balance).toLocaleString('fa-IR') + ' تومان';
+                }
+            });
+
+            window.dabernaSocket.on('purchaseSuccess', (data) => {
+                document.getElementById('userBalanceDisplay').innerText = Number(data.balance).toLocaleString('fa-IR') + ' تومان';
+                document.getElementById('myCardCount').innerText = data.newCardsCount;
+            });
+
+            window.dabernaSocket.on('errorMsg', (msg) => {
+                alert(msg);
+            });
+
+            window.dabernaSocket.on('roomState', (data) => {
+                if (data.code) document.getElementById('roomCodeDisplay').innerText = data.code;
+                if (data.timer !== undefined) document.getElementById('gameTimer').innerText = data.timer;
+                if (data.onlineCount !== undefined) document.getElementById('onlinePlayersCount').innerText = data.onlineCount;
+                if (data.totalActiveCards !== undefined) document.getElementById('activeCardsTotal').innerText = data.totalActiveCards;
+                if (data.myCards !== undefined) document.getElementById('myCardCount').innerText = data.myCards;
+
+                // در صورت شروع بازی، هدایت خودکار به زمین مسابقه
+                if (data.status === 'PLAYING') {
+                    window.location.href = `/gameDaberna.html?room=${roomId}`;
+                }
+
+                if (Array.isArray(data.players)) {
+                    const listEl = document.getElementById('playersList');
+                    listEl.innerHTML = data.players.map(p => `
+                        <div class="player-row">
+                            <span class="player-name">${p.username || 'بازیکن'}</span>
+                            <span class="player-card-count">${p.cardCount || 0}</span>
+                        </div>
+                    `).join('');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
