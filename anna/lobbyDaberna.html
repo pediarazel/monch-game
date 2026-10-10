@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>لابی دبرنا - اتاق‌ها</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Tahoma, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            min-height: 100vh;
+            padding: 14px 14px 90px 14px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 480px;
+        }
+
+        .top-bar {
+            background-color: #1c1c1e;
+            border-radius: 20px;
+            padding: 14px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+            border: 1px solid #2a2a2c;
+        }
+
+        .top-bar-title {
+            font-size: 15px;
+            color: #98989f;
+            font-weight: bold;
+        }
+
+        .balance-value {
+            font-size: 22px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            color: #2ed573;
+        }
+
+        .room-list {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .room-card {
+            background: linear-gradient(180deg, #2b7af3 0%, #1754be 100%);
+            border-radius: 22px;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 6px 18px rgba(18, 77, 185, 0.35);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.1s ease;
+        }
+
+        .room-card:active {
+            transform: scale(0.98);
+        }
+
+        .bill-container {
+            width: 110px;
+            height: 62px;
+            flex-shrink: 0;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.35);
+            background: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(255,255,255,0.4);
+        }
+
+        .bill-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .bill-fallback {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 900;
+            border-radius: 6px;
+            padding: 4px;
+            text-align: center;
+        }
+
+        .room-number {
+            font-size: 54px;
+            font-weight: 900;
+            color: #ffffff;
+            text-align: center;
+            flex: 1;
+            text-shadow: 0 3px 10px rgba(0,0,0,0.35);
+            font-family: Impact, Arial Black, sans-serif;
+            letter-spacing: -1px;
+        }
+
+        .room-meta {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 6px;
+            min-width: 110px;
+        }
+
+        .room-meta .title {
+            font-size: 15px;
+            font-weight: 800;
+            color: #ffffff;
+        }
+
+        .room-meta .online-count {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 13px;
+            font-weight: 700;
+            color: #ffffff;
+            opacity: 0.95;
+        }
+
+        .flame-icon {
+            font-size: 16px;
+        }
+
+        .bottom-nav {
+            position: fixed;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: calc(100% - 24px);
+            max-width: 480px;
+            background-color: #1a1a1c;
+            border-radius: 24px;
+            display: flex;
+            justify-content: space-around;
+            padding: 10px 6px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.6);
+            border: 1px solid #2a2a2c;
+            z-index: 100;
+        }
+
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            color: #7b7b80;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .nav-item svg {
+            width: 24px;
+            height: 24px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .nav-item.active {
+            color: #72db2e;
+        }
+
+        .nav-item.active .nav-indicator {
+            width: 26px;
+            height: 3px;
+            background-color: #72db2e;
+            border-radius: 2px;
+            margin-top: 2px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="top-bar">
+        <span class="top-bar-title">موجودی کیف پول:</span>
+        <div class="balance-value" id="userBalance">در حال بارگذاری...</div>
+    </div>
+
+    <div class="room-list" id="roomList"></div>
+</div>
+
+<nav class="bottom-nav">
+    <div class="nav-item active" onclick="location.href='/dashboard.html'">
+        <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+        <span>خانه</span>
+        <div class="nav-indicator"></div>
+    </div>
+    <div class="nav-item">
+        <svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+        <span>لیست بردها</span>
+    </div>
+    <div class="nav-item">
+        <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"></rect><line x1="2" y1="10" x2="22" y2="10"></line></svg>
+        <span>برداشت وجه</span>
+    </div>
+    <div class="nav-item">
+        <svg viewBox="0 0 24 24"><path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4"></path><path d="M4 6v12a2 2 0 0 0 2 2h14v-4"></path><circle cx="18" cy="16" r="2"></circle></svg>
+        <span>شارژ حساب</span>
+    </div>
+</nav>
+
+<script>
+    // فقط اتاق‌های ۵ و ۱۰ و ۲۰ + مسیر عکس هر اتاق
+    const roomsData = [
+        { value: "5",  text: "۵,۰۰۰ تومان",   img: "/img/room5.jpg",  bg: "linear-gradient(135deg, #f7d794, #e17055)" },
+        { value: "10", text: "۱۰,۰۰۰ تومان",  img: "/img/room10.jpg", bg: "linear-gradient(135deg, #badc58, #6ab04c)" },
+        { value: "20", text: "۲۰,۰۰۰ تومان",  img: "/img/room20.jpg", bg: "linear-gradient(135deg, #7ed6df, #22a6b3)" }
+    ];
+
+    const listContainer = document.getElementById('roomList');
+
+    roomsData.forEach(room => {
+        const card = document.createElement('div');
+        card.className = 'room-card';
+
+        card.innerHTML = `
+            <div class="bill-container">
+                <img src="${room.img}" alt="${room.text}" onerror="this.style.display='none'; this.parentElement.querySelector('.bill-fallback').style.display='flex';">
+                <div class="bill-fallback" style="display:none; background:${room.bg}; color:#fff;">
+                    ${room.text}
+                </div>
+            </div>
+            <div class="room-number">${room.value}</div>
+            <div class="room-meta">
+                <span class="title">اتاق بازی دبرنا</span>
+                <span class="online-count">
+                    <span>ورود به بازی</span>
+                    <span class="flame-icon">🔥</span>
+                </span>
+            </div>
+        `;
+
+        card.addEventListener('click', () => {
+            window.location.href = `/roomDaberna.html?room=${room.value}`;
+        });
+
+        listContainer.appendChild(card);
+    });
+
+    // خواندن موجودی از توکن
+    const token = localStorage.getItem('token');
+    if (token) {
+        try {
+            const base64Url = token.split('.')[1];
+            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            const payload = JSON.parse(window.atob(base64));
+            if (payload.balance !== undefined) {
+                document.getElementById('userBalance').innerText = Number(payload.balance).toLocaleString('fa-IR') + ' تومان';
+            }
+        } catch (e) {}
+    }
+</script>
+
+</body>
+</html>
