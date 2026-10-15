@@ -173,15 +173,23 @@
 
   <header>
     <div>کد اتاق: <span id="roomCode" style="color:#ffd700;">---</span></div>
+    <div class="badge" style="background:#e67e22; margin:0 5px;">🏆 جایزه برنده: <span id="prizePoolDisplay">۰</span> تومان</div>
     <div class="badge">موجودی: <span id="userBalance">۰</span> تومان</div>
+    <button id="muteBtn" onclick="toggleMute()" class="badge" style="cursor:pointer; background:#222; border:1px solid #d4af37;">🔊</button>
   </header>
-
   <div class="top-bar">
     <div class="barrel-current" id="currentBarrel">-</div>
     <div class="history-strip" id="historyStrip"></div>
   </div>
 
   <main id="cards-container"></main>
+
+  <main id="cards-container"></main>
+
+  <div style="margin: 20px 10px 10px; font-weight: bold; color: #ffd700; border-bottom: 1px solid #333; padding-bottom: 5px;">
+    کارت‌های سایر بازیکنان
+  </div>
+  <div id="opponents-container" style="display: flex; flex-direction: column; gap: 15px; margin: 10px; opacity: 0.85;"></div>
 
   <div id="endModal">
     <div class="modal-card">
@@ -191,7 +199,76 @@
     </div>
   </div>
 
-  <script src="/socket.io/socket.io.js"></script>
+<script src="/daberna/socket.io/socket.io.js"></script>
+
   <script src="/gameDaberna.js"></script>
+    <!-- Bottom Navigation Bar -->
+    <style>
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background-color: #1c1c1e;
+            display: flex;
+            justify-content: space-around;
+            padding: 10px 0;
+            border-top: 1px solid #2a2a2c;
+            z-index: 9999;
+            direction: rtl;
+        }
+        .nav-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-decoration: none;
+            color: #98989f;
+            flex: 1;
+            cursor: pointer;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            transition: color 0.2s;
+        }
+        .nav-btn:active {
+            color: #ffffff;
+        }
+        .nav-btn svg {
+            width: 28px;
+            height: 28px;
+            margin-bottom: 4px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .nav-btn span {
+            font-size: 11px;
+            font-weight: bold;
+        }
+        body {
+            padding-bottom: 75px !important;
+        }
+    </style>
+
+    <div class="bottom-nav">
+        <div class="nav-btn" onclick="location.href='/lobbyDaberna.html'">
+            <svg viewBox="0 0 24 24">
+                <path d="M20 9V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2"></path>
+                <rect x="2" y="9" width="20" height="8" rx="2"></rect>
+                <path d="M4 17v2"></path>
+                <path d="M20 17v2"></path>
+            </svg>
+            <span>بازگشت به لیست اتاق</span>
+        </div>
+        <div class="nav-btn" onclick="location.href='/dashboard.html'">
+            <svg viewBox="0 0 24 24">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                <polyline points="9 22 9 12 15 12 15 22"></polyline>
+            </svg>
+            <span>بازگشت به خانه</span>
+        </div>
+    </div>
+
 </body>
 </html>

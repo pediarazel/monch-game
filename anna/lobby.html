@@ -247,6 +247,7 @@ function showToast(message) {
     </div>
     <div style="height:10px;"></div>
     <div class="muted" style="text-align:center; width:100%; display:flex; align-items:center; justify-content:center; gap:8px;">
+      <span style="margin-left: 10px;">شناسه: <b id="userIdValue" style="color: #ffd700;">---</b></span>
       <span>موجودی: <b id="balanceValue">0 تومان</b></span>
 
       <button
@@ -325,6 +326,19 @@ function showToast(message) {
       const lobbyCountdownBoxEl = document.getElementById('lobbyCountdownBox');
 
       const balanceValueEl = document.getElementById('balanceValue');
+      const userIdValueEl = document.getElementById('userIdValue');
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        if (token && userIdValueEl) {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          const uid = payload.userId || payload.id || '---';
+          userIdValueEl.textContent = uid;
+        }
+      } catch (err) {
+        console.error('Error parsing token for userId:', err);
+      }
+
+
 const logoutBtn = document.getElementById('logoutBtn');
 const joinBtn = document.getElementById('joinBtn');
 const leaveQueueBtn = document.getElementById('leaveQueueBtn');

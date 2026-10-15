@@ -8,10 +8,20 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
+const dotenv = require('dotenv');
 const { PrismaClient } = require('@prisma/client');
+const { PrismaPg } = require('@prisma/adapter-pg');
 const path = require('path');
 
-const prisma = new PrismaClient();
+dotenv.config();
+
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL,
+  ssl: true
+});
+
+const prisma = new PrismaClient({ adapter });
+
 const app = express();
 const server = http.createServer(app);
 
@@ -21,9 +31,9 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-fallback-jwt-secret';
 // Schema auto-adaptation settings
 const USER_MODEL = process.env.DABERNA_USER_MODEL || 'user';
 const USER_ID_FIELD = process.env.DABERNA_USER_ID_FIELD || 'id';
-const BALANCE_FIELD = process.env.DABERNA_BALANCE_FIELD || 'balance';
-
+const BALANCE_FIELD = "coins";
 const io = new Server(server, {
+  path: '/daberna/socket.io',
   cors: {
     origin: '*',
     methods: ['GET', 'POST']
@@ -31,10 +41,57 @@ const io = new Server(server, {
 });
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use('/anna', express.static(path.join(__dirname, 'anna')));
+app.use(express.static(path.join(__dirname, 'anna')));
 
 // Health Check
 app.get('/health', (req, res) => res.json({ status: 'ok', port: PORT }));
+
+// دریافت تاریخچه برد و باخت دبرنا
+app.get('/daberna/history', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ error: 'توکن نامعتبر است' });
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const userId = Number(decoded.userId || decoded.id || decoded.sub);
+
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: 'کاربر نامعتبر' });
+
+    const history = await prisma.transaction.findMany({
+      where: {
+        userId,
+        type: { in: ['DABERNA_WIN', 'DABERNA_LOSS'] }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 30
+    });
+
+    res.json({ success: true, history });
+  } catch (err) {
+    res.status(500).json({ error: 'خطا در دریافت تاریخچه' });
+  }
+});
+
+async function createTx({ userId, matchId, amount, type, note }) {
+  const numericId = Number(userId);
+  if (!Number.isFinite(numericId)) return null;
+  try {
+    return await prisma.transaction.create({
+      data: {
+        userId: numericId,
+        matchId: matchId ? String(matchId) : null,
+        amount: Number(amount) || 0,
+        type: String(type),
+        note: note ? String(note) : null
+      }
+    });
+  } catch (e) {
+    console.error('[Daberna TX Error]', e);
+    return null;
+  }
+}
 
 // ----------------------------------------------------
 // ATOMIC WALLET ADAPTER (Shared with 21 & Ludo)
@@ -42,7 +99,7 @@ app.get('/health', (req, res) => res.json({ status: 'ok', port: PORT }));
 async function getUserRecord(userId) {
   const model = prisma[USER_MODEL] || prisma[USER_MODEL.charAt(0).toUpperCase() + USER_MODEL.slice(1)];
   if (!model) throw new Error(`Prisma model '${USER_MODEL}' not found`);
-  
+
   return await model.findUnique({
     where: { [USER_ID_FIELD]: Number(userId) }
   });
@@ -144,6 +201,16 @@ const ROOM_TIERS = {
   '100': { price: 100000, name: '۱۰۰ هزار تومانی' }
 };
 
+async function ensureTreasuryUser() {
+  const model = prisma[USER_MODEL] || prisma[USER_MODEL.charAt(0).toUpperCase() + USER_MODEL.slice(1)];
+  return model.upsert({
+    where: { username: "treasury" },
+    update: {},
+    create: { username: "treasury", password: "passwordHash", coins: 0, role: "TREASURY" }
+  });
+}
+
+
 class DabernaRoom {
   constructor(roomId, tierConfig) {
     this.id = roomId;
@@ -158,6 +225,10 @@ class DabernaRoom {
     this.drawPool = Array.from({ length: 90 }, (_, i) => i + 1).sort(() => Math.random() - 0.5);
     this.loopInterval = null;
     this.drawInterval = null;
+    this.loopInterval = null;
+    this.drawInterval = null;
+    this.retryCount = 1;
+
   }
 
   getTotalActiveCards() {
@@ -167,15 +238,37 @@ class DabernaRoom {
   }
 
   broadcastState() {
+    const totalPrizePool = this.getTotalActiveCards() * this.pricePerCard;
+    const houseFee = Math.floor(totalPrizePool * 0.10);
+    const winAmount = totalPrizePool - houseFee;
+
     for (const [uid, player] of this.players.entries()) {
+      if (!player.socketId) continue;
+
+      const opponentCards = [];
+      for (const [otherUid, otherPlayer] of this.players.entries()) {
+        if (Number(otherUid) !== Number(uid) && otherPlayer.cards) {
+          otherPlayer.cards.forEach((card, idx) => {
+            opponentCards.push({
+              username: otherPlayer.username,
+              cardIndex: idx + 1,
+              grid: card.grid
+            });
+          });
+        }
+      }
+
       io.to(player.socketId).emit('roomState', {
-        code: this.code,
+      roomId: String(this.id),
+      code: this.code,
         status: this.status,
         timer: this.timer,
         onlineCount: this.players.size,
         totalActiveCards: this.getTotalActiveCards(),
+        prizePool: winAmount,
         myCards: player.cards.length,
         myCardsData: player.cards,
+        opponentCards: opponentCards,
         drawnNumbers: this.drawnNumbers,
         players: Array.from(this.players.values()).map(p => ({
           userId: p.userId,
@@ -188,21 +281,62 @@ class DabernaRoom {
 
   startWaitingLoop() {
     if (this.loopInterval) return;
-    this.loopInterval = setInterval(() => {
+    this.loopInterval = setInterval(async () => {
       if (this.status === 'WAITING') {
         if (this.timer > 0) {
           this.timer--;
+          this.broadcastState(); // این خط باید دقیقاً اینجا باشد
         } else {
-          // در صورت داشتن کارت و حداقل ۲ بازیکن بازی آغاز می‌شود
-          if (this.getTotalActiveCards() >= 2 && this.players.size >= 2) {
-            this.startCountdown();
+          // اگر تایمر صفر شد، حتماً یک بار برادکست کن تا کلاینت صفر را ببیند
+            this.broadcastState();
+            const cardedPlayers = [...this.players.values()].filter(p => p && p.cards && p.cards.length > 0).length;
+            if (cardedPlayers >= 2 && this.getTotalActiveCards() >= 2) {
+
+              clearInterval(this.loopInterval);
+              this.loopInterval = null;
+              this.startCountdown();
+            } else if (cardedPlayers >= 2 && this.retryCount > 0) {
+
+
+            this.retryCount--;
+            this.timer = 150;
           } else {
-            this.timer = 60; // تمدید تایمر
+            clearInterval(this.loopInterval);
+            this.loopInterval = null;
+            await this.refundAndResetRoom();
           }
+
         }
-        this.broadcastState();
       }
     }, 1000);
+  }
+
+  async refundAndResetRoom() {
+    // ۱. واریز مبالغ
+    for (const [userId, player] of this.players) {
+      if (player && player.cards && player.cards.length > 0) {
+        const refundAmountToman = (player.cards.length * this.pricePerCard);
+        const refundCoins = Math.ceil(refundAmountToman / 1000);
+        try {
+          const newBalance = await atomicAddBalance(userId, refundCoins);
+          if (player.socketId) {
+            io.to(player.socketId).emit('balanceUpdated', { balance: newBalance });
+          }
+        } catch (e) {
+          console.error(`[Daberna Refund Error] User: ${userId}`, e);
+        }
+      }
+    }
+
+    // ۲. ریست کردن دقیق
+    this.players.clear();
+    this.timer = 150;
+    this.retryCount = 1; // اصلاح به ۱ (فقط یک بار تمدید)
+    this.status = 'WAITING';
+
+    io.to(this.id).emit('roomReset');
+    // ۳. مهم: استارت مجدد حلقه انتظار
+    this.startWaitingLoop();
   }
 
   startCountdown() {
@@ -233,7 +367,11 @@ class DabernaRoom {
       const drawn = this.drawPool.pop();
       this.drawnNumbers.push(drawn);
 
-      io.to(this.id).emit('numberDrawn', { number: drawn, history: this.drawnNumbers });
+io.to(this.id).emit('numberDrawn', {
+  roomId: String(this.id),
+  number: drawn,
+  history: this.drawnNumbers
+});
 
       // بررسی خودکار برنده فول‌کارت
       const winner = this.checkForWinner();
@@ -241,7 +379,7 @@ class DabernaRoom {
         clearInterval(this.drawInterval);
         await this.handleWin(winner);
       }
-    }, 4000);
+    }, 2000);
   }
 
   checkForWinner() {
@@ -269,14 +407,62 @@ class DabernaRoom {
 
   async handleWin(winnerData) {
     this.status = 'ENDED';
+
     const totalPrizePool = this.getTotalActiveCards() * this.pricePerCard;
     const houseFee = Math.floor(totalPrizePool * 0.10);
     const winAmount = totalPrizePool - houseFee;
+    const winCoins = Math.floor(winAmount / 1000);
+    const feeCoins = Math.floor(houseFee / 1000);
 
-    // واریز اتمیک به برنده
-    await atomicAddBalance(winnerData.player.userId, winAmount);
+    // واریز اتمیک به برنده به صورت کوین
+    await atomicAddBalance(winnerData.player.userId, winCoins);
+
+    // واریز ۱۰٪ کارمزد به خزانه سایت
+    try {
+      if (feeCoins > 0) {
+        const treasury = await ensureTreasuryUser();
+        await atomicAddBalance(treasury.id, feeCoins);
+        await prisma.transaction.create({
+          data: {
+            userId: treasury.id,
+            matchId: String(this.id),
+            amount: feeCoins,
+            type: "TREASURY_CUT",
+            note: `Daberna 10% fee room:${this.id}`
+          }
+        });
+      }
+    } catch (tErr) {
+      console.error(`[Daberna Treasury Error] Room: ${this.id}`, tErr);
+    }
+
+    // ثبت برد برنده
+    await createTx({
+      userId: winnerData.player.userId,
+      matchId: String(this.id),
+      amount: winCoins,
+      type: "DABERNA_WIN",
+      note: `برد دبرنا - اتاق ${this.id}`
+    });
+
+    // ثبت باخت سایر بازیکنان فعال
+    for (const [uid, p] of this.players.entries()) {
+      if (Number(uid) !== Number(winnerData.player.userId) && p.cards && p.cards.length > 0) {
+        const lossToman = (p.cards.length || 0) * this.pricePerCard;
+        const lossCoins = Math.ceil(lossToman / 1000);
+        await createTx({
+          userId: uid,
+          matchId: String(this.id),
+          amount: lossCoins,
+          type: "DABERNA_LOSS",
+          note: `باخت دبرنا - اتاق ${this.id} (${p.cards.length} کارت)`
+        });
+      }
+    }
+
 
     io.to(this.id).emit('gameEnded', {
+      roomId: String(this.id),
       winnerUsername: winnerData.player.username,
       winnerId: winnerData.player.userId,
       prize: winAmount,
@@ -288,41 +474,98 @@ class DabernaRoom {
 
   resetRoom() {
     if (this.drawInterval) clearInterval(this.drawInterval);
+    this.drawInterval = null;
     this.status = 'WAITING';
     this.timer = 150;
+    this.retryCount = 1;
+    this.code = 'BG-' + Math.random().toString(36).substring(2, 7).toUpperCase();
     this.drawnNumbers = [];
     this.drawPool = Array.from({ length: 90 }, (_, i) => i + 1).sort(() => Math.random() - 0.5);
     for (const p of this.players.values()) {
       p.cards = [];
     }
+    io.to(this.id).emit('roomReset');
+    this.startWaitingLoop();
     this.broadcastState();
   }
 
   endGame() {
     if (this.drawInterval) clearInterval(this.drawInterval);
     this.status = 'ENDED';
-    io.to(this.id).emit('gameEnded', { winnerUsername: null, message: 'گردونه به پایان رسید بدون برنده' });
+    io.to(this.id).emit('gameEnded', {
+      roomId: String(this.id),
+      winnerUsername: null
+    });
+
     setTimeout(() => this.resetRoom(), 8000);
   }
+
 }
 
-// ایجاد نمونه‌های اتاق‌ها
+// مدیریت چندنمونه‌ای اتاق‌های دبرنا
 const rooms = new Map();
-Object.keys(ROOM_TIERS).forEach(roomId => {
-  const room = new DabernaRoom(roomId, ROOM_TIERS[roomId]);
-  rooms.set(roomId, room);
+let roomCounter = 1;
+
+function getBaseTierKey(idStr) {
+  return String(idStr).split('#')[0];
+}
+
+function createRoomInstance(tierKey) {
+  const tierConfig = ROOM_TIERS[tierKey];
+  if (!tierConfig) return null;
+  const uniqueRoomId = `${tierKey}#${roomCounter++}`;
+  const room = new DabernaRoom(uniqueRoomId, tierConfig);
+  rooms.set(uniqueRoomId, room);
   room.startWaitingLoop();
+  return room;
+}
+
+// ساخت اتاق‌های پایه اولیه برای هر سطح
+Object.keys(ROOM_TIERS).forEach(tierKey => {
+  createRoomInstance(tierKey);
 });
+
+function resolveTargetRoom(requestedTierOrId, userId) {
+  const reqStr = String(requestedTierOrId);
+  const baseTier = getBaseTierKey(reqStr);
+  if (!ROOM_TIERS[baseTier]) return null;
+
+  // ۱. بررسی اتصال مجدد (اگر بازیکن در اتاقی از این سطح کارتی در بازی دارد)
+  for (const [rId, r] of rooms.entries()) {
+    if (getBaseTierKey(rId) === baseTier) {
+      const p = r.players.get(userId);
+      if (p && p.cards && p.cards.length > 0) {
+        return r;
+      }
+    }
+  }
+
+  // ۲. پیدا کردن اتاقی در این سطح که در انتظار بازیکن باشد و سقف ۳۰ کارت پر نشده باشد
+  for (const [rId, r] of rooms.entries()) {
+    if (getBaseTierKey(rId) === baseTier && r.status === 'WAITING' && r.getTotalActiveCards() < 30) {
+      return r;
+    }
+  }
+
+  // ۳. اگر همه اتاق‌ها در حال بازی یا پر بودند، یک اتاق نو برای این سطح بساز
+  return createRoomInstance(baseTier);
+}
 
 // ----------------------------------------------------
 // SOCKET.IO AUTH & EVENTS
 // ----------------------------------------------------
 io.use(async (socket, next) => {
   try {
-    const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
+    const headerToken = socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, '');
+    const token =
+      socket.handshake.auth?.token ||
+      socket.handshake.query?.token ||
+      headerToken;
+
     if (!token) return next(new Error('توکن احراز هویت الزامی است'));
 
     const decoded = jwt.verify(token, JWT_SECRET);
+
     const userId = Number(decoded.userId || decoded.id || decoded.sub);
     if (!userId) return next(new Error('شناسه کاربری عددی نامعتبر است'));
 
@@ -336,18 +579,58 @@ io.use(async (socket, next) => {
     };
     next();
   } catch (err) {
-    next(new Error('احراز هویت ناموفق: ' + err.message));
+    next(new Error('Authentication error'));
   }
 });
 
 io.on('connection', (socket) => {
   let currentRoomId = null;
+  // ارسال اطلاعات زنده لابی دبرنا (تعداد نفرات تجمیعی هر سطح)
+  socket.on('getLobbyState', async () => {
+    try {
+      const refreshedUser = await getUserRecord(socket.user.id);
+      const balance = Number(refreshedUser[BALANCE_FIELD]);
+      socket.emit('initSync', { balance, userId: socket.user.id });
+
+      const stats = {};
+      Object.keys(ROOM_TIERS).forEach(tierKey => {
+        stats[tierKey] = 0;
+      });
+
+      rooms.forEach((r, rId) => {
+        const baseKey = getBaseTierKey(rId);
+        if (stats[baseKey] !== undefined) {
+          stats[baseKey] += r.players.size;
+        }
+      });
+      socket.emit('lobbyRoomsState', stats);
+    } catch (err) {
+      console.error('getLobbyState error:', err.message);
+    }
+  });
 
   socket.on('joinDabernaRoom', async ({ roomId }) => {
-    const room = rooms.get(String(roomId));
-    if (!room) return socket.emit('errorMsg', 'اتاق یافت نشد');
+    const room = resolveTargetRoom(roomId, socket.user.id);
+    if (!room) return socket.emit('errorMsg', 'سطح اتاق یافت نشد');
 
-    currentRoomId = String(roomId);
+    const targetRoomId = String(room.id);
+
+    if (currentRoomId && currentRoomId !== targetRoomId) {
+      const previousRoom = rooms.get(currentRoomId);
+      const previousPlayer = previousRoom?.players.get(socket.user.id);
+
+      if (previousPlayer?.socketId === socket.id) {
+        previousPlayer.socketId = null;
+      }
+
+      socket.leave(currentRoomId);
+
+      if (previousRoom) {
+        previousRoom.broadcastState();
+      }
+    }
+
+    currentRoomId = targetRoomId;
     socket.join(currentRoomId);
 
     if (!room.players.has(socket.user.id)) {
@@ -358,7 +641,6 @@ io.on('connection', (socket) => {
         cards: []
       });
     } else {
-      // به‌روزرسانی socketId در صورت اتصال مجدد
       const p = room.players.get(socket.user.id);
       p.socketId = socket.id;
     }
@@ -371,7 +653,8 @@ io.on('connection', (socket) => {
     room.broadcastState();
   });
 
-  socket.on('buyCards', async ({ count }) => {
+socket.on('buyCards', async ({ count }) => {
+
     if (!currentRoomId) return;
     const room = rooms.get(currentRoomId);
     if (!room || room.status !== 'WAITING') {
@@ -390,11 +673,23 @@ io.on('connection', (socket) => {
       return socket.emit('errorMsg', 'حداکثر سقف مجاز کارت در هر بازی ۶ عدد است');
     }
 
+    if (room.getTotalActiveCards() + cardCount > 30) {
+      return socket.emit('errorMsg', 'سقف کارت این اتاق پر است (۳۰ کارت)');
+    }
+
     const totalCost = room.pricePerCard * cardCount;
 
     try {
       // کسر اتمیک وجه از دیتابیس
-      const updatedBalance = await atomicDeductBalance(socket.user.id, totalCost);
+      const updatedBalance = await atomicDeductBalance(socket.user.id, Math.ceil(totalCost / 1000));
+
+      // بررسی مجدد بعد از کسر پول برای جلوگیری از دور زدن هم‌زمان سقف ۳۰
+      if (room.getTotalActiveCards() + cardCount > 30) {
+        const refundedBalance = await atomicAddBalance(socket.user.id, Math.ceil(totalCost / 1000));
+        socket.emit('balanceUpdated', { balance: refundedBalance });
+
+        return socket.emit('errorMsg', 'سقف کارت این اتاق پر شد (۳۰ کارت)');
+      }
 
       for (let i = 0; i < cardCount; i++) {
         const card = generateDabernaCard(`${socket.user.id}-${Date.now()}-${i}`);
@@ -403,32 +698,39 @@ io.on('connection', (socket) => {
 
       socket.emit('purchaseSuccess', { balance: updatedBalance, newCardsCount: player.cards.length });
       room.broadcastState();
+
+      // استارت آنی در صورت تکمیل سقف ۳۰ کارت
+      if (room.status === 'WAITING' && room.getTotalActiveCards() >= 30) {
+        if (room.loopInterval) {
+          clearInterval(room.loopInterval);
+          room.loopInterval = null;
+        }
+        room.startCountdown();
+      }
     } catch (err) {
       socket.emit('errorMsg', err.message || 'خطا در کسر موجودی');
     }
   });
 
-  socket.on('disconnect', async () => {
-    if (!currentRoomId) return;
-    const room = rooms.get(currentRoomId);
-    if (!room) return;
+    socket.on('disconnect', async () => {
+      if (!currentRoomId) return;
+      const room = rooms.get(currentRoomId);
+      if (!room) return;
 
-    const player = room.players.get(socket.user.id);
-    if (player && room.status === 'WAITING' && player.cards.length > 0) {
-      // بازگرداندن اتمیک وجه کارت‌های خریداری‌شده در صورت خروج قبل از شروع مسابقه
-      const refundAmount = player.cards.length * room.pricePerCard;
-      try {
-        await atomicAddBalance(socket.user.id, refundAmount);
-      } catch (e) {
-        console.error('Refund failed:', e);
+      const player = room.players.get(socket.user.id);
+      // جلوگیری از اثرگذاری سوکت قدیمی قطع‌شده روی اتصال جدید کاربر
+      if (!player || player.socketId !== socket.id) return;
+
+      player.socketId = null;
+
+      // اگر کاربر هیچ کارتی نخریده بود، از لیست بازیکنان لابی خارج شود
+      if (room.status === 'WAITING' && (!player.cards || player.cards.length === 0)) {
+        room.players.delete(socket.user.id);
       }
-    }
 
-    if (room.status === 'WAITING') {
-      room.players.delete(socket.user.id);
-    }
-    room.broadcastState();
-  });
+      room.broadcastState();
+    });
+
 });
 
 server.listen(PORT, () => {

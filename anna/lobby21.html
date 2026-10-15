@@ -240,6 +240,7 @@ function showToast(message) {
     </div>
     <div style="height:10px;"></div>
     <div class="muted" style="text-align:center; width:100%; display:flex; align-items:center; justify-content:center; gap:8px;">
+      <span style="margin-left: 10px;">شناسه: <b id="userIdDisplay" style="color:#f1c40f; font-family:tahoma, monospace;">---</b></span>
       <span>موجودی: <b id="balanceValue">0 تومان</b></span>
 
       <button
@@ -313,6 +314,21 @@ function showToast(message) {
       const lobbyCountdownBoxEl = document.getElementById('lobbyCountdownBox');
 
       const balanceValueEl = document.getElementById('balanceValue');
+      try {
+        const token = localStorage.getItem('token') || (document.cookie.match(/(^|;\s*)token=([^;]+)/) || [])[2];
+        if (token) {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          const uid = payload.userId || payload.id;
+          const uidEl = document.getElementById('userIdDisplay');
+          if (uid && uidEl) {
+            uidEl.textContent = uid;
+          }
+        }
+      } catch (err) {
+        console.error("User ID decode error:", err);
+      }
+
+
       const logoutBtn = document.getElementById('logoutBtn');
       const joinBtn = document.getElementById('joinBtn');
       const leaveQueueBtn = document.getElementById('leaveQueueBtn');

@@ -312,7 +312,8 @@
     </div>
 
     <!-- Client-side Socket integration -->
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+   <script src="/daberna/socket.io/socket.io.js"></script>
+
     <script>
         let selectedCardCount = 1;
         const maxCardsAllowed = 6;
@@ -336,31 +337,44 @@
             }
         }
 
-        window.addEventListener('DOMContentLoaded', () => {
-            const token = localStorage.getItem('token');
-            const urlParams = new URLSearchParams(window.location.search);
-            const roomId = urlParams.get('room') || '5';
+window.addEventListener('DOMContentLoaded', () => {
+    const token =
+        localStorage.getItem('token') ||
+        sessionStorage.getItem('token');
 
-            // سرور دبرنا روی پورت ۳۰۰۳
-            const socketHost = window.location.hostname;
-            const socketPort = 3003;
-            window.dabernaSocket = io(`https://${socketHost}:${socketPort}`, {
-                auth: { token },
-                transports: ['websocket', 'polling']
-            });
+    if (!token) {
+        alert('لطفاً ابتدا وارد حساب کاربری شوید.');
+        window.location.href = '/lobbyDaberna.html';
+        return;
+    }
 
-            window.dabernaSocket.on('connect', () => {
-                window.dabernaSocket.emit('joinDabernaRoom', { roomId });
-            });
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomId = urlParams.get('room') || '5';
+
+    window.dabernaSocket = io({
+        path: '/daberna/socket.io',
+        auth: { token },
+        transports: ['websocket', 'polling']
+    });
+
+            function sendJoin() {
+                if (window.dabernaSocket && window.dabernaSocket.connected) {
+                    window.dabernaSocket.emit('joinDabernaRoom', { roomId });
+                }
+            }
+            window.dabernaSocket.on('connect', sendJoin);
+            if (window.dabernaSocket.connected) {
+                sendJoin();
+            }
 
             window.dabernaSocket.on('initSync', (data) => {
                 if (data.balance !== undefined) {
-                    document.getElementById('userBalanceDisplay').innerText = Number(data.balance).toLocaleString('fa-IR') + ' تومان';
+                    document.getElementById('userBalanceDisplay').innerText =  (Number(data.balance) * 1000) .toLocaleString('fa-IR') + ' تومان';
                 }
             });
 
             window.dabernaSocket.on('purchaseSuccess', (data) => {
-                document.getElementById('userBalanceDisplay').innerText = Number(data.balance).toLocaleString('fa-IR') + ' تومان';
+                document.getElementById('userBalanceDisplay').innerText =  (Number(data.balance) * 1000) .toLocaleString('fa-IR') + ' تومان';
                 document.getElementById('myCardCount').innerText = data.newCardsCount;
             });
 
@@ -368,7 +382,18 @@
                 alert(msg);
             });
 
+            window.dabernaSocket.on('balanceUpdated', (data) => {
+                if (data.balance !== undefined) {
+                    document.getElementById('userBalanceDisplay').innerText = (Number(data.balance) * 1000).toLocaleString('fa-IR') + ' تومان';
+                }
+            });
+
+            window.dabernaSocket.on('roomReset', () => {
+                window.location.reload();
+            });
+
             window.dabernaSocket.on('roomState', (data) => {
+
                 if (data.code) document.getElementById('roomCodeDisplay').innerText = data.code;
                 if (data.timer !== undefined) document.getElementById('gameTimer').innerText = data.timer;
                 if (data.onlineCount !== undefined) document.getElementById('onlinePlayersCount').innerText = data.onlineCount;
@@ -392,5 +417,73 @@
             });
         });
     </script>
+    <!-- Bottom Navigation Bar -->
+    <style>
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background-color: #1c1c1e;
+            display: flex;
+            justify-content: space-around;
+            padding: 10px 0;
+            border-top: 1px solid #2a2a2c;
+            z-index: 1000;
+            direction: rtl;
+        }
+        .nav-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-decoration: none;
+            color: #98989f;
+            flex: 1;
+            cursor: pointer;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            transition: color 0.2s;
+        }
+        .nav-btn:active {
+            color: #ffffff;
+        }
+        .nav-btn svg {
+            width: 28px;
+            height: 28px;
+            margin-bottom: 4px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .nav-btn span {
+            font-size: 11px;
+            font-weight: bold;
+        }
+        body {
+            padding-bottom: 75px !important;
+        }
+    </style>
+
+    <div class="bottom-nav">
+        <div class="nav-btn" onclick="location.href='/lobbyDaberna.html'">
+            <svg viewBox="0 0 24 24">
+                <path d="M20 9V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2"></path>
+                <rect x="2" y="9" width="20" height="8" rx="2"></rect>
+                <path d="M4 17v2"></path>
+                <path d="M20 17v2"></path>
+            </svg>
+            <span>بازگشت به لیست اتاق</span>
+        </div>
+        <div class="nav-btn" onclick="location.href='/dashboard.html'">
+            <svg viewBox="0 0 24 24">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                <polyline points="9 22 9 12 15 12 15 22"></polyline>
+            </svg>
+            <span>بازگشت به خانه</span>
+        </div>
+    </div>
+
 </body>
 </html>

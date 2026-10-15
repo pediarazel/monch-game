@@ -645,10 +645,15 @@
         balToman = Number(data.coins) * 1000;
       }
 
+      const uidDisplay = (data.userId !== undefined && data.userId !== null) ? data.userId : "نامشخص";
+
       balanceResultBox.innerHTML = `
+        <div class="res-row"><span class="res-label">🆔 شناسه کاربر:</span> <span class="res-val" style="color: var(--blue); font-weight: bold;">${uidDisplay}</span></div>
         <div class="res-row"><span class="res-label">👤 نام کاربری:</span> <span class="res-val">${data.username || username}</span></div>
         <div class="res-row"><span class="res-label">موجودی فعلی:</span> <span class="res-val" style="color: var(--accent); font-size: 15px;">${toComma(balToman)} تومان</span></div>
       `;
+
+
     } catch {
       balanceResultBox.innerHTML = '<span style="color:var(--red);">خطا در ارتباط با سرور</span>';
     }

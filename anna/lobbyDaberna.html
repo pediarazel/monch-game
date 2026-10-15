@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
+<script src="/daberna/socket.io/socket.io.js"></script>
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>لابی دبرنا - اتاق‌ها</title>
@@ -204,11 +206,20 @@
     </style>
 </head>
 <body>
+<div style="text-align: center; margin-top: 10px; margin-bottom: 15px; font-size: 22px; font-weight: bold; color: #ffd700; text-shadow: 0 0 10px rgba(255, 215, 0, 0.4), 0 2px 4px rgba(0,0,0,0.8); letter-spacing: 1px;">
+    👑🎲 تاج تاس 🎲👑
+</div>
 
 <div class="container">
-    <div class="top-bar">
-        <span class="top-bar-title">موجودی کیف پول:</span>
-        <div class="balance-value" id="userBalance">در حال بارگذاری...</div>
+    <div class="top-bar" style="display:flex; flex-direction:column; gap:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; width:100%; font-size:13px; color:#aaa;">
+            <span>شناسه کاربری:</span>
+            <span id="userIdDisplay" style="font-weight:bold; color:#f1c40f; font-family:tahoma, monospace; font-size:14px;">---</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+            <span class="top-bar-title">موجودی کیف پول:</span>
+            <div class="balance-value" id="userBalance">در حال بارگذاری...</div>
+        </div>
     </div>
 
     <div class="room-list" id="roomList"></div>
@@ -220,10 +231,11 @@
         <span>خانه</span>
         <div class="nav-indicator"></div>
     </div>
-    <div class="nav-item">
+    <div class="nav-item" id="historyBtn" style="cursor:pointer;">
         <svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
         <span>لیست بردها</span>
     </div>
+
     <div class="nav-item">
         <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"></rect><line x1="2" y1="10" x2="22" y2="10"></line></svg>
         <span>برداشت وجه</span>
@@ -235,7 +247,7 @@
 </nav>
 
 <script>
-    // فقط اتاق‌های ۵ و ۱۰ و ۲۰ + مسیر عکس هر اتاق
+    // تنظیمات اتاق‌ها
     const roomsData = [
         { value: "5",  text: "۵,۰۰۰ تومان",   img: "/img/room5.jpg",  bg: "linear-gradient(135deg, #f7d794, #e17055)" },
         { value: "10", text: "۱۰,۰۰۰ تومان",  img: "/img/room10.jpg", bg: "linear-gradient(135deg, #badc58, #6ab04c)" },
@@ -244,6 +256,7 @@
 
     const listContainer = document.getElementById('roomList');
 
+    // ایجاد کارت‌های اتاق‌ها
     roomsData.forEach(room => {
         const card = document.createElement('div');
         card.className = 'room-card';
@@ -261,6 +274,7 @@
                 <span class="online-count">
                     <span>ورود به بازی</span>
                     <span class="flame-icon">🔥</span>
+                    <span id="onlineCount-${room.value}" style="font-weight: bold; margin-right: 4px;">۰</span>
                 </span>
             </div>
         `;
@@ -272,18 +286,203 @@
         listContainer.appendChild(card);
     });
 
-    // خواندن موجودی از توکن
-    const token = localStorage.getItem('token');
+    // خواندن توکن به صورت ایمن
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+
+    // نمایش موجودی اولیه از توکن JWT
     if (token) {
         try {
             const base64Url = token.split('.')[1];
             const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
             const payload = JSON.parse(window.atob(base64));
-            if (payload.balance !== undefined) {
-                document.getElementById('userBalance').innerText = Number(payload.balance).toLocaleString('fa-IR') + ' تومان';
+
+            const uid = payload.userId || payload.id;
+            if (uid && document.getElementById('userIdDisplay')) {
+                document.getElementById('userIdDisplay').innerText = uid;
             }
-        } catch (e) {}
+
+            if (payload.balance !== undefined) {
+                document.getElementById('userBalance').innerText =
+                    (Number(payload.balance) * 1000).toLocaleString('fa-IR') + ' تومان';
+            }
+
+        } catch (e) {
+            console.error("خطای پارس توکن:", e.message);
+        }
+
+        // برقراری اتصال سوکت به سرور دبرنا جهت به‌روزرسانی موجودی زنده
+        const socket = io({
+            path: '/daberna/socket.io',
+            auth: { token },
+            transports: ['websocket', 'polling']
+        });
+
+        socket.on('connect', () => {
+            // درخواست همگام‌سازی موجودی و آمار لابی
+            socket.emit('getLobbyState');
+        });
+
+        socket.on('initSync', (data) => {
+            if (data && data.balance !== undefined) {
+                document.getElementById('userBalance').innerText =
+                    (Number(data.balance) * 1000).toLocaleString('fa-IR') + ' تومان';
+            }
+        });
+
+        socket.on('lobbyRoomsState', (stats) => {
+            // دریافت تعداد افراد آنلاین هر اتاق
+            if (stats && typeof stats === 'object') {
+                Object.keys(stats).forEach(roomId => {
+                    const el = document.getElementById(`onlineCount-${roomId}`);
+                    if (el) {
+                        el.innerText = Number(stats[roomId]).toLocaleString('fa-IR');
+                    }
+                });
+            }
+        });
+
+        socket.on('connect_error', (err) => {
+            console.error("خطای اتصال سوکت لابی:", err.message);
+        });
+    } else {
+        document.getElementById('userBalance').innerText = '۰ تومان';
+        console.warn("توکن احراز هویت یافت نشد.");
     }
+</script>
+<!-- مودال نمایش تاریخچه نتایج دبرنا -->
+<div id="historyModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:99999; justify-content:center; align-items:center; direction:rtl; font-family:tahoma, sans-serif;">
+  <div style="background:#1e272e; width:90%; max-width:420px; max-height:80vh; border-radius:14px; padding:18px; color:#fff; display:flex; flex-direction:column; border:1px solid #334;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #334; padding-bottom:8px;">
+      <h3 style="margin:0; font-size:16px; color:#f1c40f;">🏆 تاریخچه نتایج دبرنا</h3>
+      <button onclick="document.getElementById('historyModal').style.display='none'" style="background:none; border:none; color:#aaa; font-size:20px; cursor:pointer;">✕</button>
+    </div>
+    <div id="historyListContent" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px;">
+      در حال بارگذاری...
+    </div>
+  </div>
+</div>
+
+<script>
+document.getElementById('historyBtn').addEventListener('click', async () => {
+  const modal = document.getElementById('historyModal');
+  const container = document.getElementById('historyListContent');
+  modal.style.display = 'flex';
+  container.innerHTML = '<div style="text-align:center; padding:20px; color:#aaa;">در حال دریافت اطلاعات...</div>';
+
+  const tkn = localStorage.getItem('token') || sessionStorage.getItem('token');
+  if (!tkn) {
+    container.innerHTML = '<div style="color:#e74c3c; text-align:center;">ابتدا وارد حساب شوید</div>';
+    return;
+  }
+
+  try {
+    const res = await fetch('/daberna/history', {
+      headers: { 'Authorization': 'Bearer ' + tkn }
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      container.innerHTML = '<div style="color:#e74c3c; text-align:center;">' + (data.error || 'خطا در دریافت نتایج') + '</div>';
+      return;
+    }
+
+    if (!data.history || data.history.length === 0) {
+      container.innerHTML = '<div style="text-align:center; padding:20px; color:#888;">هنوز بازی ثبت‌شده‌ای ندارید</div>';
+      return;
+    }
+
+    container.innerHTML = data.history.map(item => {
+      const isWin = item.type === 'DABERNA_WIN';
+      const color = isWin ? '#2ecc71' : '#e74c3c';
+      const label = isWin ? 'برد' : 'باخت';
+      const amountToman = (Number(item.amount) || 0) * 1000;
+      const amountText = (isWin ? '+ ' : '- ') + amountToman.toLocaleString('fa-IR') + ' تومان';
+      const dateText = new Date(item.createdAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+
+      return `
+        <div style="background:#2d3436; padding:10px 12px; border-radius:8px; display:flex; justify-content:space-between; align-items:center; border-right:4px solid ${color};">
+          <div>
+            <span style="font-weight:bold; color:${color}; font-size:14px;">${label}</span>
+            <div style="font-size:11px; color:#888; margin-top:2px;">${item.note || ''}</div>
+          </div>
+          <div style="text-align:left;">
+            <div style="font-size:13px; font-weight:bold; color:${color}; direction:ltr;">${amountText}</div>
+            <div style="font-size:10px; color:#aaa; margin-top:2px;">${dateText}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+  } catch (err) {
+    container.innerHTML = '<div style="color:#e74c3c; text-align:center;">خطای اتصال به سرور</div>';
+  }
+});
+</script>
+<!-- مودال شارژ و برداشت دبرنا -->
+<div id="walletModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:99999; justify-content:center; align-items:center; padding:15px; direction:rtl; font-family:tahoma, sans-serif;">
+  <div style="background:#1b222d; color:#fff; padding:24px 20px; border-radius:18px; max-width:360px; width:100%; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.6); border:1px solid #2a3547;">
+    <h3 id="walletModalTitle" style="margin:0 0 14px; font-size:18px; color:#ffd54a;">شارژ حساب</h3>
+    <div id="walletModalText" style="line-height:2; font-size:14px; color:#d1d5db; margin-bottom:18px;">
+      حداقل مبلغ شارژ حساب <b style="color:#2ecc71;">۱۰۰,۰۰۰ تومان</b> می‌باشد.<br>
+      جهت واریز یا تسویه حساب، لطفاً به پیوی پشتیبانی پیام دهید:
+    </div>
+    <a href="https://t.me/TajTasAdmin" target="_blank"
+       style="display:flex; align-items:center; justify-content:center; margin-bottom:10px; padding:11px; background:#229ED9; color:#fff; border-radius:12px; text-decoration:none; font-size:14px; font-weight:bold;">
+      📩 پیام به ادمین (@TajTasAdmin)
+    </a>
+    <a href="https://t.me/TajTasGame" target="_blank"
+       style="display:flex; align-items:center; justify-content:center; margin-bottom:16px; padding:11px; background:#2a3b5c; color:#7dd3fc; border-radius:12px; text-decoration:none; font-size:14px; border:1px solid #38bdf844;">
+      📢 کانال اطلاع‌رسانی (@TajTasGame)
+    </a>
+    <button type="button" onclick="document.getElementById('walletModal').style.display='none'"
+            style="width:100%; padding:10px; background:#374151; color:#9ca3af; border:none; border-radius:10px; cursor:pointer; font-size:13px;">
+      بستن پنجره
+    </button>
+  </div>
+</div>
+
+<script>
+(function () {
+  function openWalletModal(isDeposit) {
+    var modal = document.getElementById('walletModal');
+    if (!modal) return;
+    var titleEl = document.getElementById('walletModalTitle');
+    var textEl = document.getElementById('walletModalText');
+    if (isDeposit) {
+      titleEl.textContent = '💳 شارژ حساب';
+      textEl.innerHTML = 'حداقل مبلغ واریز <b style="color:#2ecc71;">۱۰۰,۰۰۰ تومان</b> می‌باشد.<br>' +
+                         'جهت دریافت شماره کارت و شارژ حساب، به ادمین پیام دهید:';
+} else {
+  titleEl.textContent = '💸 برداشت وجه';
+  textEl.innerHTML = 'حداقل مبلغ برداشت <b style="color:#2ecc71;">۱۰۰,۰۰۰ تومان</b> می‌باشد.<br>' +
+                     'برای ثبت درخواست تسویه، نام کاربری خود را به همراه شماره کارت به پیوی ادمین ارسال کنید:';
+}
+
+    modal.style.display = 'flex';
+  }
+  function activateButton(el, isDeposit) {
+    if (!el || el.dataset.walletActive) return;
+    el.dataset.walletActive = '1';
+    el.style.pointerEvents = 'auto';
+    el.disabled = false;
+    el.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      openWalletModal(isDeposit);
+    });
+  }
+  activateButton(document.getElementById('depositBtn') || document.getElementById('chargeBtn'), true);
+  activateButton(document.getElementById('withdrawBtn'), false);
+  document.querySelectorAll('button, a, div, span').forEach(function (el) {
+    var text = (el.textContent || '').trim();
+    if (text === 'شارژ حساب' || text === 'شارژ' || text.indexOf('شارژ حساب') !== -1) {
+      if (el.children.length === 0 || el.tagName === 'BUTTON' || el.tagName === 'A') activateButton(el, true);
+    }
+    if (text === 'برداشت وجه' || text === 'برداشت' || text.indexOf('برداشت وجه') !== -1) {
+      if (el.children.length === 0 || el.tagName === 'BUTTON' || el.tagName === 'A') activateButton(el, false);
+    }
+  });
+})();
 </script>
 
 </body>
