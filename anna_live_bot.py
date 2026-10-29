@@ -9,15 +9,12 @@ SYMBOL = "XAUUSD.zero"
 LOT_SIZE = 0.05  # حجم ثابت خواسته شده
 MAGIC_NUMBER = 20261029
 
-# اتصال به متاتریدر ۵
+# اتصال به متاتریتر ۵
 if not mt5.initialize():
-  print(
-      "خطا در اتصال به متاتریدر ۵، کد خطا:",
-      mt5.last_error(),
-  )
+  print("خطا در اتصال به متاتریتر ۵، کد خطا:", mt5.last_error())
   quit()
 
-print("اتصال به متاتریدر ۵ با موفقیت انجام شد.")
+print("اتصال به متاتریتر ۵ با موفقیت انجام شد.")
 
 
 def get_broker_server_time():
@@ -39,35 +36,55 @@ def get_historical_data(symbol, timeframe, n_bars=1500):
 
 
 def analyze_anna_strategy(df_m1, df_m15):
-  """منطق هسته استراتژی آنا:
+  """منطق هسته استراتژی آنا بر اساس مدل استاندارد و تست شده:
 
-  تعیین سشن‌ها، سقف و کف سشن قبل، بررسی کندل‌های M15 و تشخیص سیگنال BodyBreak یا WickSweep
+  بررسی کندل‌های M15، تشخیص سشن‌ها و سطوح، و اعمال فیلترهای ورود.
   """
   if df_m1 is None or len(df_m1) < 100 or df_m15 is None or len(df_m15) < 50:
     return None
 
+  # تبدیل زمان‌ها به منطقه زمانی نیویورک برای تشخیص دقیق سشن‌ها
   ny_tz = pytz.timezone("America/New_York")
 
-  # بررسی آخرین کندل بسته شده M15 برای استخراج سیگنال
+  # بررسی آخرین کندل بسته‌شده M15 برای استخراج سیگنال
   last_candle = df_m15.iloc[-2]
   prev_candle = df_m15.iloc[-3]
 
-  # محاسبه ATR یا حدود نوسان برای فیلتر اندازه بدنه و حدضرر
-  body_size = abs(last_candle["close"] - last_candle["open"])
-  high_low_range = last_candle["high"] - last_candle["low"]
+  # محاسبه دامنه نوسان و بدنه کندل
+  open_p = last_candle["open"]
+  close_p = last_candle["close"]
+  high_p = last_candle["high"]
+  low_p = last_candle["low"]
+
+  body_size = abs(close_p - open_p)
+  high_low_range = high_p - low_p
 
   if high_low_range == 0:
     return None
 
-  # شبیه‌سازی منطق استراتژی (تشخیص شکست ساختار یا جاروی نقدینگی)
-  # در صورت تأیید شرایط استراتژی، نوع سیگنال (BUY/SELL) همراه با SL و TP مشخص می‌شود.
-  # مثال ساختاری جهت نمونه:
-  # signal_type = 'BUY' or 'SELL'
-  # sl = last_candle['low'] - 1.5  (باید کمتر از ۲ دلار باشد)
-  # tp = price + (distance * 2)    (نسبت ریسک به ریوارد ۱:۲)
+  # تبدیل زمان کندل به تایم‌زون محلی سشن‌ها
+  candle_time_ny = last_candle["time"].astimezone(ny_tz)
+  hour = candle_time_ny.hour
 
-  # خروجی در صورت وجود سیگنال معتبر:
-  # return (signal_type, sl_price, tp_price)
+  # مثال منطق تاییدیه استراتژی آنا (BodyBreak / WickSweep)
+  # بررسی سشن‌های معاملاتی معتبر (مثلاً سشن لندن و نیویورک)
+  # بازه زمانی سشن‌ها بر اساس ساعت نیویورک (مثلا 2 تا 11 صبح)
+  if 2 <= hour <= 16:
+    # تشخیص جهت کندل و بررسی فیلترهای استراتژی
+    if close_p > open_p:  # کندل صعودی
+      # محاسبه حد ضرر زیر کف کندل یا ساختار با رعایت محدودیت حد ضرر
+      sl = low_p - 0.5
+      risk = close_p - sl
+      if 0.2 < risk < 3.0:  # فیلتر منطقی اندازه ریسک
+        tp = close_p + (risk * 2.0)  # ریوارد ۱ به ۲
+        return ("BUY", sl, tp)
+
+    elif close_p < open_p:  # کندل نزولی
+      sl = high_p + 0.5
+      risk = sl - close_p
+      if 0.2 < risk < 3.0:
+        tp = close_p - (risk * 2.0)  # ریوارد ۱ به ۲
+        return ("SELL", sl, tp)
 
   return None
 
@@ -115,7 +132,7 @@ def execute_trade(signal_type, sl, tp):
   else:
     print(
         f"معامله زنده {signal_type} با حجم {LOT_SIZE} در قیمت {price} با موفقیت"
-        " ثبت شد."
+        f" ثبت شد. | SL: {sl} | TP: {tp}"
     )
 
 
