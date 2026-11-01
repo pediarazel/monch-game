@@ -1,31 +1,38 @@
 //+------------------------------------------------------------------+
-//|                                                    AnnaBot.mq5   |
-//|                                  Copyright 2026, Pedram Strategy |
+//|                                           AnnaBot_Sessions.mq5 |
+//|                                  Copyright 2026, Pedram & AI     |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026"
 #property link      "https://www.mql5.com"
-#property version   "1.00"
+#property version   "3.00"
 
-//--- کتابخانه‌های استاندارد معامله‌گری
 #include <Trade\Trade.mqh>
-CTrade trade;
 
-//--- پارامترهای ورودی ربات
-input double   InpLotSize     = 0.05;     // حجم ثابت معامله
-input int      InpStopLoss    = 300;      // حد ضرر (پوینت)
-input int      InpTakeProfit  = 600;      // حد سود (پوینت)
-input ulong    InpMagicNumber = 20261029; // جادویی ربات
+//--- Inputs
+input group "--- مدیریت سرمایه و ریسک ---"
+input double   InpLotSize     = 0.05;    // حجم ثابت لات (Fixed Lot 0.05)
+input double   InpMaxSLDist   = 2.0;     // حداکثر فاصله SL (کمتر از ۲ دلار)
+input double   InpRiskReward  = 2.0;     // ضریب حد سود (RR = 2.0)
+
+input group "--- تنظیمات زمان‌بندی و جلسات ---"
+input int      InpServerOffset = -7;     // اختلاف ساعت سرور با نیویورک/UTC
+
+input group "--- تنظیمات ربات ---"
+input ulong    InpMagicNumber = 20261102; // مجیک نامبر منحصر به فرد
+
+//--- Global Objects
+CTrade         trade;
+datetime       lastBarTimeM15 = 0;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // تنظیم مژیک نامبر برای تریدها
    trade.SetExpertMagicNumber(InpMagicNumber);
-   
-   Print("ربات استراتژی آنا (AnnaBot) با موفقیت بارگذاری شد.");
+   trade.SetDeviationInPoints(20);
+   Print("AnnaBot Sessions Initialized. Lot: ", InpLotSize, " | Sessions: Asia, London, NewYork");
    return(INIT_SUCCEEDED);
 }
 
@@ -34,7 +41,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   Print("ربات متوقف شد.");
+   Print("AnnaBot Sessions Stopped.");
 }
 
 //+------------------------------------------------------------------+
@@ -42,45 +49,81 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // بررسی اینکه آیا از قبل پوزیشن بازی داریم یا خیر (قانون تک پوزیشن)
+   // تا زمانی که پوزیشن باز داریم، معامله جدیدی باز نمی‌شود
    if(PositionsTotal() > 0) return;
 
-   // بررسی تشکیل کندل جدید یا بررسی سیگنال ساده روی نماد XAUUSD.zero
-   // در اینجا نمونه منطق اجرای بر اساس کندل‌ها قرار می‌گیرد
+   // بررسی کندل جدید M15
+   datetime currentM15Time = iTime(_Symbol, PERIOD_M15, 0);
+   if(currentM15Time == lastBarTimeM15) return;
+   lastBarTimeM15 = currentM15Time;
+
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
-   
-   if(CopyRates(_Symbol, PERIOD_M15, 0, 3, rates) < 3)
-      return;
+   if(CopyRates(_Symbol, PERIOD_M15, 0, 10, rates) < 10) return;
 
-   // بررسی ساده روند (مثلا کندل صعودی یا نزولی قدرتمند در M15)
-   bool is_bullish = (rates[1].close > rates[1].open);
-   bool is_bearish = (rates[1].close < rates[1].open);
+   // ۱. تبدیل ساعت سرور به ساعت محلی جلسات (نیویورک/مرجع)
+   MqlDateTime dt;
+   TimeToStruct(rates[1].time, dt);
+   int sessionHour = (dt.hour + InpServerOffset + 24) % 24;
+
+   // تعیین بازه جلسات معاملاتی: آسیا، لندن، نیویورک
+   bool isAsiaSession     = (sessionHour >= 0  && sessionHour < 8);   // سشن آسیا
+   bool isLondonSession   = (sessionHour >= 8  && sessionHour < 13);  // سشن لندن
+   bool isNewYorkSession  = (sessionHour >= 13 && sessionHour < 20);  // سشن نیویورک
+
+   // اگر خارج از این سه سشن بودیم، معامله‌ای انجام نشود
+   if(!isAsiaSession && !isLondonSession && !isNewYorkSession) return;
+
+   // ۲. تشخیص الگوهای شکست بدنه (BodyBreak) و سایه (WickSweep)
+   bool isBullishBodyBreak = (rates[1].close > rates[2].high && rates[1].close > rates[1].open);
+   bool isBearishBodyBreak = (rates[1].close < rates[2].low && rates[1].close < rates[1].open);
+   
+   bool isBullishWickSweep = (rates[1].low < rates[2].low && rates[1].close > rates[1].open);
+   bool isBearishWickSweep = (rates[1].high > rates[2].high && rates[1].close < rates[1].open);
+
+   bool buySignal  = isBullishBodyBreak || isBullishWickSweep;
+   bool sellSignal = isBearishBodyBreak || isBearishWickSweep;
+
+   if(!buySignal && !sellSignal) return;
 
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double point = _Point;
+   double entryPrice, slPrice, tpPrice, slDist;
 
-   // مثال ورود Buy (اگر کندل قبلی صعودی بود)
-   if(is_bullish)
+   if(buySignal)
    {
-      double sl = ask - (InpStopLoss * point);
-      double tp = ask + (InpTakeProfit * point);
+      entryPrice = ask;
+      slPrice = rates[1].low - 0.02;
+      slDist = entryPrice - slPrice;
       
-      if(trade.Buy(InpLotSize, _Symbol, ask, sl, tp, "Anna Bot BUY"))
+      // ۳. فیلتر فاصله حد ضرر کمتر از ۲ دلار
+      if(slDist < InpMaxSLDist && slDist > 0.1)
       {
-         Print("پوزیشن خرید با موفقیت ثبت شد.");
+         tpPrice = entryPrice + (slDist * InpRiskReward);
+         
+         // ۴. اجرای پوزیشن خرید با حجم ثابت 0.05
+         if(trade.Buy(InpLotSize, _Symbol, entryPrice, slPrice, tpPrice, "Anna Sessions Buy"))
+         {
+            Print("Session BUY Opened! Price: ", entryPrice, " | SL: ", slPrice, " | TP: ", tpPrice, " | Dist: ", slDist);
+         }
       }
    }
-   // مثال ورود Sell (اگر کندل قبلی نزولی بود)
-   else if(is_bearish)
+   else if(sellSignal)
    {
-      double sl = bid + (InpStopLoss * point);
-      double tp = bid - (InpTakeProfit * point);
+      entryPrice = bid;
+      slPrice = rates[1].high + 0.02;
+      slDist = slPrice - entryPrice;
       
-      if(trade.Sell(InpLotSize, _Symbol, bid, sl, tp, "Anna Bot SELL"))
+      // ۳. فیلتر فاصله حد ضرر کمتر از ۲ دلار
+      if(slDist < InpMaxSLDist && slDist > 0.1)
       {
-         Print("پوزیشن فروش با موفقیت ثبت شد.");
+         tpPrice = entryPrice - (slDist * InpRiskReward);
+         
+         // ۴. اجرای پوزیشن فروش با حجم ثابت 0.05
+         if(trade.Sell(InpLotSize, _Symbol, entryPrice, slPrice, tpPrice, "Anna Sessions Sell"))
+         {
+            Print("Session SELL Opened! Price: ", entryPrice, " | SL: ", slPrice, " | TP: ", tpPrice, " | Dist: ", slDist);
+         }
       }
    }
 }
