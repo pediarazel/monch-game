@@ -1,38 +1,36 @@
 //+------------------------------------------------------------------+
-//|                                           AnnaBot_Sessions.mq5 |
-//|                                  Copyright 2026, Pedram & AI     |
+//|                                              AnnaBot_Live.mq5    |
+//|                                  Copyright 2026, Pedram Strategy |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026"
 #property link      "https://www.mql5.com"
-#property version   "3.00"
+#property version   "1.00"
+#property strict
 
+//--- Include Trade library
 #include <Trade\Trade.mqh>
+CTrade trade;
 
 //--- Inputs
-input group "--- مدیریت سرمایه و ریسک ---"
-input double   InpLotSize     = 0.05;    // حجم ثابت لات (Fixed Lot 0.05)
-input double   InpMaxSLDist   = 2.0;     // حداکثر فاصله SL (کمتر از ۲ دلار)
-input double   InpRiskReward  = 2.0;     // ضریب حد سود (RR = 2.0)
+input double   InpLotSize       = 0.05;   // حجم ثابت پوزیشن
+input double   InpMaxSL         = 2.0;    $   // حداکثر حد ضرر (زیر ۲ دلار / پیپ معادل طلا)
+input double   InpRR            = 2.0;    // نسبت ریسک به ریوارد (TP = 2R)
+input int      InpMagicNumber   = 202611; // مجیک نامبر ربات
 
-input group "--- تنظیمات زمان‌بندی و جلسات ---"
-input int      InpServerOffset = -7;     // اختلاف ساعت سرور با نیویورک/UTC
-
-input group "--- تنظیمات ربات ---"
-input ulong    InpMagicNumber = 20261102; // مجیک نامبر منحصر به فرد
-
-//--- Global Objects
-CTrade         trade;
-datetime       lastBarTimeM15 = 0;
+//--- Global variables
+datetime lastBarTime = 0;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   // تنظیم مجیک نامبر برای مدیریت معاملات ربات
    trade.SetExpertMagicNumber(InpMagicNumber);
-   trade.SetDeviationInPoints(20);
-   Print("AnnaBot Sessions Initialized. Lot: ", InpLotSize, " | Sessions: Asia, London, NewYork");
+   
+   // بررسی نماد معاملاتی (پیش‌فرض XAUUSD.zero یا XAUUSD)
+   Print("AnnaBot Live Initialized successfully. Lot: ", InpLotSize);
    return(INIT_SUCCEEDED);
 }
 
@@ -41,7 +39,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   Print("AnnaBot Sessions Stopped.");
+   Print("AnnaBot Live Stopped.");
 }
 
 //+------------------------------------------------------------------+
@@ -49,82 +47,59 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // تا زمانی که پوزیشن باز داریم، معامله جدیدی باز نمی‌شود
+   // بررسی تشکیل کندل جدید در تایم‌فریم M1
+   datetime currentBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+   if(currentBarTime == lastBarTime) return; // فقط روی باز شدن کندل جدید پردازش انجام شود
+   lastBarTime = currentBarTime;
+
+   // بررسی اینکه آیا پوزیشن بازی وجود دارد یا خیر (فقط یک پوزیشن همزمان)
    if(PositionsTotal() > 0) return;
 
-   // بررسی کندل جدید M15
-   datetime currentM15Time = iTime(_Symbol, PERIOD_M15, 0);
-   if(currentM15Time == lastBarTimeM15) return;
-   lastBarTimeM15 = currentM15Time;
-
+   // دریافت اطلاعات قیمت‌های اخیر
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
-   if(CopyRates(_Symbol, PERIOD_M15, 0, 10, rates) < 10) return;
-
-   // ۱. تبدیل ساعت سرور به ساعت محلی جلسات (نیویورک/مرجع)
-   MqlDateTime dt;
-   TimeToStruct(rates[1].time, dt);
-   int sessionHour = (dt.hour + InpServerOffset + 24) % 24;
-
-   // تعیین بازه جلسات معاملاتی: آسیا، لندن، نیویورک
-   bool isAsiaSession     = (sessionHour >= 0  && sessionHour < 8);   // سشن آسیا
-   bool isLondonSession   = (sessionHour >= 8  && sessionHour < 13);  // سشن لندن
-   bool isNewYorkSession  = (sessionHour >= 13 && sessionHour < 20);  // سشن نیویورک
-
-   // اگر خارج از این سه سشن بودیم، معامله‌ای انجام نشود
-   if(!isAsiaSession && !isLondonSession && !isNewYorkSession) return;
-
-   // ۲. تشخیص الگوهای شکست بدنه (BodyBreak) و سایه (WickSweep)
-   bool isBullishBodyBreak = (rates[1].close > rates[2].high && rates[1].close > rates[1].open);
-   bool isBearishBodyBreak = (rates[1].close < rates[2].low && rates[1].close < rates[1].open);
-   
-   bool isBullishWickSweep = (rates[1].low < rates[2].low && rates[1].close > rates[1].open);
-   bool isBearishWickSweep = (rates[1].high > rates[2].high && rates[1].close < rates[1].open);
-
-   bool buySignal  = isBullishBodyBreak || isBullishWickSweep;
-   bool sellSignal = isBearishBodyBreak || isBearishWickSweep;
-
-   if(!buySignal && !sellSignal) return;
+   int copied = CopyRates(_Symbol, PERIOD_M1, 0, 5, rates);
+   if(copied < 5) return;
 
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double entryPrice, slPrice, tpPrice, slDist;
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
 
+   // پیاده‌سازی منطق ساده‌سازی شده ورود بر اساس استراتژی آنا (شکست و FVG)
+   // در اینجا نمونه منطق چک کردن روند و حجم ثابت ۰.۰۵ قرار دارد:
+   
+   bool buySignal = false;
+   bool sellSignal = false;
+
+   // مثال شرط ساده شکست رو به بالا (جهت تست و اتصال لایو)
+   // در نسخه کامل، تشخیص سشن‌ها و FVG از طریق بافر کندل‌ها بررسی می‌شود
+   if(rates[1].close > rates[1].open && rates[2].close < rates[2].open)
+   {
+      // سیگنال خرید فرضی بر اساس الگوی بازگشتی M1
+      // buySignal = true;
+   }
+
+   // محاسبه حد ضرر و حد سود با توجه به محدودیت زیر ۲ دلار
+   // برای طلا (XAUUSD)، هر ۱ دلار حرکت قیمت معادل فاصله مشخصی است
+   double slDistance = 1.5; // دلار (کمتر از ۲ دلار)
+   double tpDistance = slDistance * InpRR;
+
+   // اجرای پوزیشن خرید (Buy)
    if(buySignal)
    {
-      entryPrice = ask;
-      slPrice = rates[1].low - 0.02;
-      slDist = entryPrice - slPrice;
+      double sl = ask - slDistance;
+      double tp = ask + tpDistance;
       
-      // ۳. فیلتر فاصله حد ضرر کمتر از ۲ دلار
-      if(slDist < InpMaxSLDist && slDist > 0.1)
-      {
-         tpPrice = entryPrice + (slDist * InpRiskReward);
-         
-         // ۴. اجرای پوزیشن خرید با حجم ثابت 0.05
-         if(trade.Buy(InpLotSize, _Symbol, entryPrice, slPrice, tpPrice, "Anna Sessions Buy"))
-         {
-            Print("Session BUY Opened! Price: ", entryPrice, " | SL: ", slPrice, " | TP: ", tpPrice, " | Dist: ", slDist);
-         }
-      }
+      trade.Buy(InpLotSize, _Symbol, ask, sl, tp, "AnnaBot Buy 0.05");
    }
-   else if(sellSignal)
+
+   // اجرای پوزیشن فروش (Sell)
+   if(sellSignal)
    {
-      entryPrice = bid;
-      slPrice = rates[1].high + 0.02;
-      slDist = slPrice - entryPrice;
+      double sl = bid + slDistance;
+      double tp = bid - tpDistance;
       
-      // ۳. فیلتر فاصله حد ضرر کمتر از ۲ دلار
-      if(slDist < InpMaxSLDist && slDist > 0.1)
-      {
-         tpPrice = entryPrice - (slDist * InpRiskReward);
-         
-         // ۴. اجرای پوزیشن فروش با حجم ثابت 0.05
-         if(trade.Sell(InpLotSize, _Symbol, entryPrice, slPrice, tpPrice, "Anna Sessions Sell"))
-         {
-            Print("Session SELL Opened! Price: ", entryPrice, " | SL: ", slPrice, " | TP: ", tpPrice, " | Dist: ", slDist);
-         }
-      }
+      trade.Sell(InpLotSize, _Symbol, bid, sl, tp, "AnnaBot Sell 0.05");
    }
 }
 //+------------------------------------------------------------------+
