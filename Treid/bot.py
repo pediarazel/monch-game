@@ -5,16 +5,15 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Pedram Strategy"
 #property link      "https://www.mql5.com"
-#property version   "1.01"
-#property strict
+#property version   "1.02"
 
 #include <Trade\Trade.mqh>
 
 //--- Inputs
-input double   InpLotSize        = 0.05;      // Lot Size
+input double   InpLotSize        = 0.05;      // Lot Size (حجم ثابت)
 input double   InpRiskReward     = 2.0;       // Risk to Reward Ratio
-input int      InpNYHour         = 10;       // New York Hour (Broker Time)
-input int      InpSlippage       = 3;        // Slippage
+input int      InpNYHour         = 10;        // New York Hour (ساعت مرجع ۱۰)
+input int      InpSlippage       = 3;         // Slippage
 
 CTrade trade;
 datetime lastProcessedDay = 0;
@@ -41,16 +40,14 @@ void OnDeinit(const int reason)
 void OnTick()
 {
    MqlDateTime dt;
-   TimeCurrent(dt); // اصلاح شده: استفاده از MqlDateTime استاندارد
+   TimeToStruct(TimeCurrent(), dt);
    
-   // محاسبه تاریخ به صورت عددی برای چک کردن روز جدید
-   datetime currentDay = (datetime)dt.year * 86400 + (datetime)dt.mon * 2629746 + (datetime)dt.day * 86400; 
-   // روش ساده‌تر برای تشخیص روز جدید:
+   // استفاده از تابع استاندارد برای گرفتن تاریخ روز جاری به عنوان عدد
    datetime today = iTime(_Symbol, PERIOD_D1, 0);
 
    if(today == lastProcessedDay) return;
    
-   // بررسی ساعت ۱۰:۰۰ (دقیقاً در شروع ساعت ۱۰)
+   // بررسی ساعت ۱۰:۰۰ دقیق
    if(dt.hour != InpNYHour || dt.min != 0) return;
 
    // اگر پوزیشن باز داریم در این روز معامله نکنیم
@@ -69,11 +66,11 @@ void RunAnnaStrategy()
 {
    MqlRates h1_rates[];
    ArraySetAsSeries(h1_rates, true);
-   if(CopyRates(_Symbol, PERIOD_H1, 0, 5, h1_rates) < 5) return;
+   if(CopyRates(_Symbol, PERIOD_H1, 0, 10, h1_rates) < 10) return;
 
-   // پیدا کردن کندل مرجع (کندل ساعت 10)
+   // پیدا کردن کندل مرجع (ساعت 10)
    int refIndex = -1;
-   for(int i=0; i<5; i++)
+   for(int i = 0; i < 8; i++)
    {
       MqlDateTime checkDt;
       TimeToStruct(h1_rates[i].time, checkDt);
@@ -86,8 +83,8 @@ void RunAnnaStrategy()
 
    if(refIndex == -1) return;
 
-   // قانون Inside Bar برای پیدا کردن کندل مادر
-   if(refIndex < 4 && h1_rates[refIndex].high < h1_rates[refIndex+1].high && h1_rates[refIndex].low > h1_rates[refIndex+1].low)
+   // قانون Inside Bar: اگر کندل 10 داخل کندل ماقبل باشد، کندل مادر ملاک است
+   if(refIndex < 9 && h1_rates[refIndex].high < h1_rates[refIndex+1].high && h1_rates[refIndex].low > h1_rates[refIndex+1].low)
    {
       refIndex = refIndex + 1; 
    }
@@ -104,7 +101,7 @@ void RunAnnaStrategy()
    double currentHigh  = current_h1[0].high;
    double currentLow   = current_h1[0].low;
 
-   // الف) شکست بدنه (Body Breakout)
+   // الف) شکست بدنه (Body Breakout) در H1
    if(currentClose > refHigh)
    {
       double entryPrice = refMid;
@@ -119,22 +116,22 @@ void RunAnnaStrategy()
       double tp = entryPrice - (sl - entryPrice) * InpRiskReward;
       trade.Sell(InpLotSize, _Symbol, SymbolInfoDouble(_Symbol, BID), sl, tp, "Anna Body Sell");
    }
-   // ب) شکست سایه (Wick Breakout) -> ورود به M5
+   // ب) شکست سایه (Wick Breakout) -> ارجاع به بررسی M5 و FVG
    else if(currentHigh > refHigh || currentLow < refLow)
    {
       bool isBullishWick = (currentHigh > refHigh);
-      CheckM5FvgAndPinbar(isBullishWick, refHigh, refLow);
+      CheckM5FvgAndPinbar(isBullishWick);
    }
 }
 
 //+------------------------------------------------------------------+
 //| M5 FVG, Pinbar and Confirmation Logic                            |
 //+------------------------------------------------------------------+
-void CheckM5FvgAndPinbar(bool isBullish, double refHigh, double refLow)
+void CheckM5FvgAndPinbar(bool isBullish)
 {
    MqlRates m5_rates[];
    ArraySetAsSeries(m5_rates, true);
-   if(CopyRates(_Symbol, PERIOD_M5, 0, 25, m5_rates) < 25) return;
+   if(CopyRates(_Symbol, PERIOD_M5, 0, 30, m5_rates) < 30) return;
 
    bool fvgPassedAndReturned = false;
    bool pinbarFound = false;
@@ -144,17 +141,15 @@ void CheckM5FvgAndPinbar(bool isBullish, double refHigh, double refLow)
    {
       if(isBullish)
       {
-         // شناسایی FVG صعودی و بازگشت قیمت (Mitigation)
-         if(m5_rates[i+2].low > m5_rates[i].high) // وجود FVG
+         // بررسی وجود FVG صعودی و تست مجدد
+         if(m5_rates[i+2].low > m5_rates[i].high)
          {
-            // بررسی اینکه آیا قیمت از FVG عبور کرده و دوباره به آن بازگشته است
             if(m5_rates[i].low <= m5_rates[i+2].low) 
             {
                fvgPassedAndReturned = true;
-               // بررسی پین‌بار و تاییدیه بدنه
                double bodySize = MathAbs(m5_rates[i].close - m5_rates[i].open);
                double candleRange = m5_rates[i].high - m5_rates[i].low;
-               if(candleRange > 0 && (bodySize/candleRange) < 0.3 && (m5_rates[i].close - m5_rates[i].low) > (candleRange*0.6))
+               if(candleRange > 0 && (bodySize / candleRange) < 0.3 && (m5_rates[i].close - m5_rates[i].low) > (candleRange * 0.6))
                {
                   if(m5_rates[i-1].close > m5_rates[i].high)
                   {
@@ -166,16 +161,16 @@ void CheckM5FvgAndPinbar(bool isBullish, double refHigh, double refLow)
             }
          }
       }
-      else // حالت نزولی
+      else // نزولی
       {
-         if(m5_rates[i+2].high < m5_rates[i].low) // وجود FVG نزولی
+         if(m5_rates[i+2].high < m5_rates[i].low)
          {
             if(m5_rates[i].high >= m5_rates[i+2].high)
             {
                fvgPassedAndReturned = true;
                double bodySize = MathAbs(m5_rates[i].close - m5_rates[i].open);
                double candleRange = m5_rates[i].high - m5_rates[i].low;
-               if(candleRange > 0 && (bodySize/candleRange) < 0.3 && (m5_rates[i].high - m5_rates[i].close) > (candleRange*0.6))
+               if(candleRange > 0 && (bodySize / candleRange) < 0.3 && (m5_rates[i].high - m5_rates[i].close) > (candleRange * 0.6))
                {
                   if(m5_rates[i-1].close < m5_rates[i].low)
                   {
@@ -205,3 +200,4 @@ void CheckM5FvgAndPinbar(bool isBullish, double refHigh, double refLow)
       }
    }
 }
+//+------------------------------------------------------------------+
