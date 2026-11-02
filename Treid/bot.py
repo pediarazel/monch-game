@@ -14,7 +14,7 @@ CTrade trade;
 
 //--- Inputs
 input double   InpLotSize       = 0.05;   // حجم ثابت پوزیشن
-input double   InpMaxSL         = 2.0;    $   // حداکثر حد ضرر (زیر ۲ دلار / پیپ معادل طلا)
+input double   InpMaxSL         = 2.0;    // حداکثر حد ضرر (زیر ۲ دلار)
 input double   InpRR            = 2.0;    // نسبت ریسک به ریوارد (TP = 2R)
 input int      InpMagicNumber   = 202611; // مجیک نامبر ربات
 
@@ -29,7 +29,6 @@ int OnInit()
    // تنظیم مجیک نامبر برای مدیریت معاملات ربات
    trade.SetExpertMagicNumber(InpMagicNumber);
    
-   // بررسی نماد معاملاتی (پیش‌فرض XAUUSD.zero یا XAUUSD)
    Print("AnnaBot Live Initialized successfully. Lot: ", InpLotSize);
    return(INIT_SUCCEEDED);
 }
@@ -63,25 +62,23 @@ void OnTick()
 
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
 
-   // پیاده‌سازی منطق ساده‌سازی شده ورود بر اساس استراتژی آنا (شکست و FVG)
-   // در اینجا نمونه منطق چک کردن روند و حجم ثابت ۰.۰۵ قرار دارد:
-   
+   // سیگنال‌های معاملاتی (فعال‌سازی برای تست و اجرای زنده)
    bool buySignal = false;
    bool sellSignal = false;
 
-   // مثال شرط ساده شکست رو به بالا (جهت تست و اتصال لایو)
-   // در نسخه کامل، تشخیص سشن‌ها و FVG از طریق بافر کندل‌ها بررسی می‌شود
+   // شرط نمونه فعال بر اساس الگوی کندلستیک M1 (برای تست فوری در Strategy Tester)
    if(rates[1].close > rates[1].open && rates[2].close < rates[2].open)
    {
-      // سیگنال خرید فرضی بر اساس الگوی بازگشتی M1
-      // buySignal = true;
+      buySignal = true; // سیگنال خرید فعال شد
+   }
+   else if(rates[1].close < rates[1].open && rates[2].close > rates[2].open)
+   {
+      sellSignal = true; // سیگنال فروش فعال شد
    }
 
-   // محاسبه حد ضرر و حد سود با توجه به محدودیت زیر ۲ دلار
-   // برای طلا (XAUUSD)، هر ۱ دلار حرکت قیمت معادل فاصله مشخصی است
-   double slDistance = 1.5; // دلار (کمتر از ۲ دلار)
+   // محاسبه حد ضرر و حد سود (کمتر از ۲ دلار برای طلا)
+   double slDistance = 1.5; // دلار
    double tpDistance = slDistance * InpRR;
 
    // اجرای پوزیشن خرید (Buy)
@@ -90,7 +87,10 @@ void OnTick()
       double sl = ask - slDistance;
       double tp = ask + tpDistance;
       
-      trade.Buy(InpLotSize, _Symbol, ask, sl, tp, "AnnaBot Buy 0.05");
+      if(!trade.Buy(InpLotSize, _Symbol, ask, sl, tp, "AnnaBot Buy 0.05"))
+      {
+         Print("Error opening BUY order: ", trade.ResultRetcode());
+      }
    }
 
    // اجرای پوزیشن فروش (Sell)
@@ -99,7 +99,10 @@ void OnTick()
       double sl = bid + slDistance;
       double tp = bid - tpDistance;
       
-      trade.Sell(InpLotSize, _Symbol, bid, sl, tp, "AnnaBot Sell 0.05");
+      if(!trade.Sell(InpLotSize, _Symbol, bid, sl, tp, "AnnaBot Sell 0.05"))
+      {
+         Print("Error opening SELL order: ", trade.ResultRetcode());
+      }
    }
 }
 //+------------------------------------------------------------------+
