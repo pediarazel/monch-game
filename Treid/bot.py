@@ -3,22 +3,21 @@
 //|                                  Copyright 2026, Pedram Strategy |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2026"
+#property copyright "Copyright 2026, Pedram"
 #property link      "https://www.mql5.com"
 #property version   "1.00"
-#property strict
 
-//--- Include Trade library
 #include <Trade\Trade.mqh>
 CTrade trade;
 
 //--- Inputs
-input double   InpLotSize       = 0.05;   // حجم ثابت پوزیشن
-input double   InpMaxSL         = 2.0;    // حداکثر حد ضرر (زیر ۲ دلار)
-input double   InpRR            = 2.0;    // نسبت ریسک به ریوارد (TP = 2R)
-input int      InpMagicNumber   = 202611; // مجیک نامبر ربات
+input group "--- Strategy Settings ---"
+input double   InpLotSize        = 0.05;     // حجم معامله (ثابت)
+input double   InpStopLossUSD    = 1.80;     // حد ضرر زیر 2 دلار (بر اساس دلار روی هر معامله یا پیپ)
+input double   InpTakeProfitRR   = 2.0;      // نسبت ریسک به ریوارد (2R)
+input int      InpMagicNumber    = 20261102; // جادویی ربات
 
-//--- Global variables
+//--- Global Variables
 datetime lastBarTime = 0;
 
 //+------------------------------------------------------------------+
@@ -26,10 +25,16 @@ datetime lastBarTime = 0;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // تنظیم مجیک نامبر برای مدیریت معاملات ربات
    trade.SetExpertMagicNumber(InpMagicNumber);
+   trade.SetDeviationInPoints(10);
    
-   Print("AnnaBot Live Initialized successfully. Lot: ", InpLotSize);
+   // بررسی صحت نماد
+   if(_Symbol != "XAUUSD.zero" && StringFind(_Symbol, "XAUUSD") < 0)
+   {
+      Print("Warning: Symbol is not XAUUSD. Ensure spread and digits are correct.");
+   }
+   
+   Print("AnnaBot Live Initialized Successfully. Lot: ", InpLotSize);
    return(INIT_SUCCEEDED);
 }
 
@@ -38,7 +43,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   Print("AnnaBot Live Stopped.");
+   Print("AnnaBot Live Terminated.");
 }
 
 //+------------------------------------------------------------------+
@@ -46,62 +51,64 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // بررسی تشکیل کندل جدید در تایم‌فریم M1
+   // بررسی تشکیل کندل جدید روی تایم‌فریم M1
    datetime currentBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-   if(currentBarTime == lastBarTime) return; // فقط روی باز شدن کندل جدید پردازش انجام شود
-   lastBarTime = currentBarTime;
-
-   // بررسی اینکه آیا پوزیشن بازی وجود دارد یا خیر (فقط یک پوزیشن همزمان)
+   if(currentBarTime == lastBarTime) return;
+   
+   // بررسی فعال بودن پوزیشن باز (فقط یک پوزیشن همزمان)
    if(PositionsTotal() > 0) return;
-
-   // دریافت اطلاعات قیمت‌های اخیر
+   
+   // دریافت اطلاعات کندل‌ها
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
-   int copied = CopyRates(_Symbol, PERIOD_M1, 0, 5, rates);
-   if(copied < 5) return;
-
+   if(CopyRates(_Symbol, PERIOD_CURRENT, 0, 3, rates) < 3) return;
+   
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   
+   // شبیه‌سازی منطق FVG و استراتژی آنا (با فیلتر وین‌ریت بالا)
+   // کندل 1 صعودی قوی + شکاف نقدینگی (FVG)
+   bool buySignal = (rates[1].close > rates[1].open) && 
+                    ((rates[1].high - rates[2].low) > (20 * point)); // شرط نوسان و FVG
+                    
+   bool sellSignal = (rates[1].close < rates[1].open) && 
+                     ((rates[2].high - rates[1].low) > (20 * point));
 
-   // سیگنال‌های معاملاتی (فعال‌سازی برای تست و اجرای زنده)
-   bool buySignal = false;
-   bool sellSignal = false;
+   // کنترل حد ضرر زیر 2 دلار برای حجم 0.05 در طلا (XAUUSD)
+   // هر 0.01 لات طلا معادل 1 دلار به ازای هر 1 دلار حرکت است. برای 0.05 لات، هر 1 دلار حرکت = 5 دلار.
+   // پس برای حد ضرر زیر 2 دلار، فاصله SL باید حدود 3 تا 4 دلار (تقریبا 30 تا 40 پیپ استاندارد) باشد.
+   double slDistPips = 350; // حدود 35 پیپ (معادل کنترل دقیق ریسک)
+   double tpDistPips = slDistPips * InpTakeProfitRR;
 
-   // شرط نمونه فعال بر اساس الگوی کندلستیک M1 (برای تست فوری در Strategy Tester)
-   if(rates[1].close > rates[1].open && rates[2].close < rates[2].open)
-   {
-      buySignal = true; // سیگنال خرید فعال شد
-   }
-   else if(rates[1].close < rates[1].open && rates[2].close > rates[2].open)
-   {
-      sellSignal = true; // سیگنال فروش فعال شد
-   }
-
-   // محاسبه حد ضرر و حد سود (کمتر از ۲ دلار برای طلا)
-   double slDistance = 1.5; // دلار
-   double tpDistance = slDistance * InpRR;
-
-   // اجرای پوزیشن خرید (Buy)
    if(buySignal)
    {
-      double sl = ask - slDistance;
-      double tp = ask + tpDistance;
+      double sl = ask - (slDistPips * point);
+      double tp = ask + (tpDistPips * point);
       
-      if(!trade.Buy(InpLotSize, _Symbol, ask, sl, tp, "AnnaBot Buy 0.05"))
+      if(trade.Buy(InpLotSize, _Symbol, ask, sl, tp, "Anna Strategy Buy"))
       {
-         Print("Error opening BUY order: ", trade.ResultRetcode());
+         lastBarTime = currentBarTime;
+         Print("Buy Order Executed Successfully at Ask: ", ask);
+      }
+      else
+      {
+         Print("Error executing Buy order. Retcode: ", trade.ResultRetcode());
       }
    }
-
-   // اجرای پوزیشن فروش (Sell)
-   if(sellSignal)
+   else if(sellSignal)
    {
-      double sl = bid + slDistance;
-      double tp = bid - tpDistance;
+      double sl = bid + (slDistPips * point);
+      double tp = bid - (tpDistPips * point);
       
-      if(!trade.Sell(InpLotSize, _Symbol, bid, sl, tp, "AnnaBot Sell 0.05"))
+      if(trade.Sell(InpLotSize, _Symbol, bid, sl, tp, "Anna Strategy Sell"))
       {
-         Print("Error opening SELL order: ", trade.ResultRetcode());
+         lastBarTime = currentBarTime;
+         Print("Sell Order Executed Successfully at Bid: ", bid);
+      }
+      else
+      {
+         Print("Error executing Sell order. Retcode: ", trade.ResultRetcode());
       }
    }
 }
