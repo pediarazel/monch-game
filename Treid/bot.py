@@ -1,23 +1,33 @@
 //+------------------------------------------------------------------+
-//|                                              AnnaBot_Live.mq5    |
+//|                                          Anna_Strategy_Expert.mq5|
 //|                                  Copyright 2026, Pedram Strategy |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2026, Pedram"
+#property copyright "Copyright 2026"
 #property link      "https://www.mql5.com"
 #property version   "1.00"
 
 #include <Trade\Trade.mqh>
 CTrade trade;
 
-//--- Inputs
-input group "--- Strategy Settings ---"
-input double   InpLotSize        = 0.05;     // حجم معامله (ثابت)
-input double   InpStopLossUSD    = 1.80;     // حد ضرر زیر 2 دلار (بر اساس دلار روی هر معامله یا پیپ)
-input double   InpTakeProfitRR   = 2.0;      // نسبت ریسک به ریوارد (2R)
-input int      InpMagicNumber    = 20261102; // جادویی ربات
+//--- Input parameters
+input group "--- Risk & Money Management ---"
+input double   InpLotSize       = 0.05;      // ثابت لات سیز
+input double   InpStopLossUSD   = 1.80;      // حد ضرر زیر ۲ دلار (بر مبنای ارزش دلاری معامله یا پیپ معادل)
+input double   InpTakeProfitRR  = 2.0;       // نسبت ریسک به ریوارد (TP = 2 * SL)
 
-//--- Global Variables
+input group "--- Strategy Filters ---"
+input int      InpFastEMA       = 9;         // میانگین متحرک سریع
+input int      InpSlowEMA       = 21;        // میانگین متحرک کند
+input int      InpRSI_Period    = 14;        // دوره RSI
+input double   InpRSI_BuyLevel  = 45.0;      // سطح خرید RSI
+input double   InpRSI_SellLevel = 55.0;      // سطح فروش RSI
+
+input group "--- Trading Sessions ---"
+input int      InpStartHour     = 8;         // ساعت شروع (به وقت سرور/لندن)
+input int      InpEndHour       = 19;        // ساعت پایان
+
+//--- Global variables
 datetime lastBarTime = 0;
 
 //+------------------------------------------------------------------+
@@ -25,16 +35,8 @@ datetime lastBarTime = 0;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   trade.SetExpertMagicNumber(InpMagicNumber);
-   trade.SetDeviationInPoints(10);
-   
-   // بررسی صحت نماد
-   if(_Symbol != "XAUUSD.zero" && StringFind(_Symbol, "XAUUSD") < 0)
-   {
-      Print("Warning: Symbol is not XAUUSD. Ensure spread and digits are correct.");
-   }
-   
-   Print("AnnaBot Live Initialized Successfully. Lot: ", InpLotSize);
+   // تنظیم جادویی برای شناسایی معاملات ربات
+   trade.SetExpertMagicNumber(123456);
    return(INIT_SUCCEEDED);
 }
 
@@ -43,7 +45,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   Print("AnnaBot Live Terminated.");
+   // پاکسازی در صورت نیاز
 }
 
 //+------------------------------------------------------------------+
@@ -51,65 +53,64 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // بررسی تشکیل کندل جدید روی تایم‌فریم M1
+   // بررسی تشکیل کندل جدید
    datetime currentBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
    if(currentBarTime == lastBarTime) return;
    
-   // بررسی فعال بودن پوزیشن باز (فقط یک پوزیشن همزمان)
+   // بررسی بازه زمانی (جلسات معاملاتی)
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   if(dt.hour < InpStartHour || dt.hour > InpEndHour) return;
+   
+   // بررسی اینکه آیا پوزیشن بازی داریم یا خیر (تک معامله همزمان)
    if(PositionsTotal() > 0) return;
-   
-   // دریافت اطلاعات کندل‌ها
-   MqlRates rates[];
-   ArraySetAsSeries(rates, true);
-   if(CopyRates(_Symbol, PERIOD_CURRENT, 0, 3, rates) < 3) return;
-   
-   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+
+   // محاسبه اندیکاتورها (EMA و RSI)
+   double fastEMA[], slowEMA[], rsiValues[];
+   ArraySetAsSeries(fastEMA, true);
+   ArraySetAsSeries(slowEMA, true);
+   ArraySetAsSeries(rsiValues, true);
+
+   int emaFastHandle = iMA(_Symbol, PERIOD_CURRENT, InpFastEMA, 0, MODE_EMA, PRICE_CLOSE);
+   int emaSlowHandle = iMA(_Symbol, PERIOD_CURRENT, InpSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
+   int rsiHandle     = iRSI(_Symbol, PERIOD_CURRENT, InpRSI_Period, PRICE_CLOSE);
+
+   if(emaFastHandle == INVALID_HANDLE || emaSlowHandle == INVALID_HANDLE || rsiHandle == INVALID_HANDLE)
+      return;
+
+   CopyBuffer(emaFastHandle, 0, 0, 2, fastEMA);
+   CopyBuffer(emaSlowHandle, 0, 0, 2, slowEMA);
+   CopyBuffer(rsiHandle, 0, 0, 2, rsiValues);
+
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   
-   // شبیه‌سازی منطق FVG و استراتژی آنا (با فیلتر وین‌ریت بالا)
-   // کندل 1 صعودی قوی + شکاف نقدینگی (FVG)
-   bool buySignal = (rates[1].close > rates[1].open) && 
-                    ((rates[1].high - rates[2].low) > (20 * point)); // شرط نوسان و FVG
-                    
-   bool sellSignal = (rates[1].close < rates[1].open) && 
-                     ((rates[2].high - rates[1].low) > (20 * point));
+   double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
 
-   // کنترل حد ضرر زیر 2 دلار برای حجم 0.05 در طلا (XAUUSD)
-   // هر 0.01 لات طلا معادل 1 دلار به ازای هر 1 دلار حرکت است. برای 0.05 لات، هر 1 دلار حرکت = 5 دلار.
-   // پس برای حد ضرر زیر 2 دلار، فاصله SL باید حدود 3 تا 4 دلار (تقریبا 30 تا 40 پیپ استاندارد) باشد.
-   double slDistPips = 350; // حدود 35 پیپ (معادل کنترل دقیق ریسک)
-   double tpDistPips = slDistPips * InpTakeProfitRR;
+   // محاسبه حد ضرر و حد سود بر اساس دلار ($2 > SL)
+   // برای لات 0.05 روی طلا، هر دلار حرکت مساوی است با ارزش تیک
+   double slPoints = (InpStopLossUSD / (InpLotSize * tickValue)) * tickSize;
+   if(slPoints < 50) slPoints = 150; // حداقل پوینت محافظتی برای طلا XAUUSD
 
-   if(buySignal)
+   // شرط خرید (Buy)
+   bool buyCondition = (fastEMA[1] > slowEMA[1]) && (fastEMA[2] <= slowEMA[2]) && (rsiValues[1] > InpRSI_BuyLevel);
+   // شرط فروش (Sell)
+   bool sellCondition = (fastEMA[1] < slowEMA[1]) && (fastEMA[2] >= slowEMA[2]) && (rsiValues[1] < InpRSI_SellLevel);
+
+   if(buyCondition)
    {
-      double sl = ask - (slDistPips * point);
-      double tp = ask + (tpDistPips * point);
-      
-      if(trade.Buy(InpLotSize, _Symbol, ask, sl, tp, "Anna Strategy Buy"))
-      {
-         lastBarTime = currentBarTime;
-         Print("Buy Order Executed Successfully at Ask: ", ask);
-      }
-      else
-      {
-         Print("Error executing Buy order. Retcode: ", trade.ResultRetcode());
-      }
+      double sl = ask - slPoints * point;
+      double tp = ask + (slPoints * InpTakeProfitRR) * point;
+      trade.Buy(InpLotSize, _Symbol, ask, sl, tp, "Anna Strategy Buy");
+      lastBarTime = currentBarTime;
    }
-   else if(sellSignal)
+   else if(sellCondition)
    {
-      double sl = bid + (slDistPips * point);
-      double tp = bid - (tpDistPips * point);
-      
-      if(trade.Sell(InpLotSize, _Symbol, bid, sl, tp, "Anna Strategy Sell"))
-      {
-         lastBarTime = currentBarTime;
-         Print("Sell Order Executed Successfully at Bid: ", bid);
-      }
-      else
-      {
-         Print("Error executing Sell order. Retcode: ", trade.ResultRetcode());
-      }
+      double sl = bid + slPoints * point;
+      double tp = bid - (slPoints * InpTakeProfitRR) * point;
+      trade.Sell(InpLotSize, _Symbol, bid, sl, tp, "Anna Strategy Sell");
+      lastBarTime = currentBarTime;
    }
 }
 //+------------------------------------------------------------------+
