@@ -5,22 +5,18 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Pedram Strategy"
 #property link      "https://www.mql5.com"
-#property version   "1.05"
+#property version   "1.06"
 
 #include <Trade\Trade.mqh>
 
-//--- Inputs
-input double   InpLotSize        = 0.05;      // Lot Size (حجم ثابت)
+input double   InpLotSize        = 0.05;      // Lot Size
 input double   InpRiskReward     = 2.0;       // Risk to Reward Ratio
-input int      InpNYHour         = 10;        // New York Hour (ساعت مرجع ۱۰)
+input int      InpNYHour         = 10;        // New York Hour
 input int      InpSlippage       = 3;         // Slippage
 
 CTrade trade;
 datetime lastProcessedBarTime = 0;
 
-//+------------------------------------------------------------------+
-//| Expert initialization function                                   |
-//+------------------------------------------------------------------+
 int OnInit()
 {
    trade.SetExpertMagicNumber(123456);
@@ -28,16 +24,8 @@ int OnInit()
    return(INIT_SUCCEEDED);
 }
 
-//+------------------------------------------------------------------+
-//| Expert deinitialization function                                 |
-//+------------------------------------------------------------------+
-void OnDeinit(const int reason)
-{
-}
+void OnDeinit(const int reason) {}
 
-//+------------------------------------------------------------------+
-//| Expert tick function                                             |
-//+------------------------------------------------------------------+
 void OnTick()
 {
    datetime currentBarTime = iTime(_Symbol, PERIOD_H1, 0);
@@ -50,13 +38,9 @@ void OnTick()
    if(PositionsTotal() > 0) return;
 
    RunAnnaStrategy();
-   
    lastProcessedBarTime = currentBarTime;
 }
 
-//+------------------------------------------------------------------+
-//| Anna Strategy Main Logic                                         |
-//+------------------------------------------------------------------+
 void RunAnnaStrategy()
 {
    MqlRates h1_rates[];
@@ -90,7 +74,6 @@ void RunAnnaStrategy()
    double currentHigh  = h1_rates[1].high;
    double currentLow   = h1_rates[1].low;
 
-   // الف) شکست بدنه (Body Breakout) در H1
    if(currentClose > refHigh)
    {
       double entryPrice = refMid;
@@ -107,7 +90,6 @@ void RunAnnaStrategy()
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       trade.Sell(InpLotSize, _Symbol, bid, sl, tp, "Anna Body Sell");
    }
-   // ب) شکست سایه (Wick Breakout)
    else if(currentHigh > refHigh || currentLow < refLow)
    {
       bool isBullishWick = (currentHigh > refHigh);
@@ -115,9 +97,6 @@ void RunAnnaStrategy()
    }
 }
 
-//+------------------------------------------------------------------+
-//| M5 FVG, Pinbar and Confirmation Logic                            |
-//+------------------------------------------------------------------+
 void CheckM5FvgAndPinbar(bool isBullish)
 {
    MqlRates m5_rates[];
@@ -137,8 +116,10 @@ void CheckM5FvgAndPinbar(bool isBullish)
             if(m5_rates[i].low <= m5_rates[i+2].low) 
             {
                fvgPassedAndReturned = true;
-               double bodySize = MathAbs(m5_rates[i].close - m5_rates[i].open);
+               double diff = m5_rates[i].close - m5_rates[i].open;
+               double bodySize = (diff >= 0) ? diff : -diff;
                double candleRange = m5_rates[i].high - m5_rates[i].low;
+               
                if(candleRange > 0 && (bodySize / candleRange) < 0.3 && (m5_rates[i].close - m5_rates[i].low) > (candleRange * 0.6))
                {
                   if(m5_rates[i-1].close > m5_rates[i].high)
@@ -158,8 +139,10 @@ void CheckM5FvgAndPinbar(bool isBullish)
             if(m5_rates[i].high >= m5_rates[i+2].high)
             {
                fvgPassedAndReturned = true;
-               double bodySize = MathAbs(m5_rates[i].close - m5_rates[i].open);
+               double diff = m5_rates[i].close - m5_rates[i].open;
+               double bodySize = (diff >= 0) ? diff : -diff;
                double candleRange = m5_rates[i].high - m5_rates[i].low;
+               
                if(candleRange > 0 && (bodySize / candleRange) < 0.3 && (m5_rates[i].high - m5_rates[i].close) > (candleRange * 0.6))
                {
                   if(m5_rates[i-1].close < m5_rates[i].low)
@@ -190,4 +173,3 @@ void CheckM5FvgAndPinbar(bool isBullish)
       }
    }
 }
-//+------------------------------------------------------------------+
