@@ -1,13 +1,16 @@
 //+------------------------------------------------------------------+
 //|                                                     AnnaBot.mq5  |
-//|  Anna Strategy: NY 10:00 H1 reference candle + Inside Bar        |
+//|  Anna Strategy v1.12                                             |
+//|  NY 10:00 H1 reference candle + Inside Bar mother bar            |
 //|  Scenario A: body breakout -> entry @ 50% of reference candle    |
 //|  Scenario B: wick breakout -> M5 FVG break-through + retest      |
 //|              + pin bar + body close -> entry on M5               |
 //|  TP = 2R measured from the REAL entry price. Fixed lot.          |
+//|  v1.12: spread filter OFF by default (zero-spread account),      |
+//|         auto server->NY offset (DST aware), daily reset.         |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.10"
+#property version   "1.12"
 #property description "Anna Strategy EA - NY 10:00 H1 reference, Inside Bar, M5 FVG retest"
 
 //=========================== INPUTS ================================
@@ -19,7 +22,7 @@ input int      InpDeviationPoints   = 30;             // Max deviation (points)
 
 input group "=== Reference Candle (New York) ==="
 input int      InpNyOpenHour        = 10;             // NY reference hour (New York time)
-input int      InpServerToNyOffset  = 7;              // Server hour + offset = NY hour
+input int      InpServerToNyOffset  = -1;             // -1 = auto-detect (DST aware). Else manual: server + offset = NY
 input bool     InpUseInsideBar      = true;           // Apply Inside Bar / mother bar rule
 
 input group "=== Risk / Targets ==="
@@ -27,6 +30,10 @@ input double   InpRewardRisk        = 2.00;           // TP = R multiple of entr
 input double   InpMaxStopPriceUnits = 4.00;           // Max SL distance in price units (0 = off)
 input double   InpMinStopPriceUnits = 0.20;           // Min SL distance in price units
 input double   InpBufferPriceUnits  = 0.05;           // Extra buffer beyond swing / candle
+
+input group "=== Spread (0 = disabled) ==="
+input int      InpMaxSpreadPoints   = 0;              // 0 = no spread filter at all
+input bool     InpLogSpread         = false;          // Log spread at entry (debug only)
 
 input group "=== Scenario Switches ==="
 input bool     InpEnableScenarioA   = true;           // Body breakout @ 50% midline
@@ -45,15 +52,14 @@ input bool     InpOneTradePerDay    = true;           // One position per day
 input int      InpTradeEndHourNy    = 18;             // No new entries after this NY hour
 
 //=========================== GLOBALS ===============================
-int      g_atrHandle   = INVALID_HANDLE;
 string   g_sym         = "";
 datetime g_lastH1Bar   = 0;
 datetime g_lastM5Bar   = 0;
 
 // Reference candle state
 bool     g_refValid    = false;
-datetime g_refTime     = 0;      // start time of reference candle
-datetime g_dayStamp    = 0;      // date of the reference candle
+datetime g_refTime     = 0;
+datetime g_dayStamp    = 0;
 double   g_refHigh     = 0.0;
 double   g_refLow      = 0.0;
 double   g_refOpen     = 0.0;
@@ -61,15 +67,14 @@ double   g_refClose    = 0.0;
 double   g_refMid      = 0.0;
 
 // Scenario state
-bool     g_scenAActive = false;  // waiting for body breakout
-bool     g_scenBActive = false;  // waiting for FVG retest setup
-int      g_biasA       = 0;      // +1 long / -1 short once triggered
-int      g_scenBDir    = 0;      // direction of the wick breakout
-bool     g_fvgBroken   = false;  // price crossed through the FVG
-bool     g_fvgRetested = false;  // price came back to the broken FVG
-double   g_fvgHigh     = 0.0;    // active FVG boundaries
+bool     g_scenAActive = false;
+bool     g_scenBActive = false;
+int      g_biasA       = 0;
+int      g_scenBDir    = 0;
+bool     g_fvgBroken   = false;
+bool     g_fvgRetested = false;
+double   g_fvgHigh     = 0.0;
 double   g_fvgLow      = 0.0;
-double   g_extreme     = 0.0;    // extreme beyond the FVG (for invalidation)
 int      g_attempts    = 0;
 datetime g_lastTradeDay = 0;
 
@@ -124,12 +129,55 @@ bool HasOurPosition()
    return false;
 }
 
-// New York hour from server time.
+//--- Is DST active in New York at the given time?
+//    Rule: 2nd Sunday of March 02:00  ->  1st Sunday of November 02:00
+bool NyIsDst(const datetime t)
+{
+   MqlDateTime d;
+   TimeToStruct(t, d);
+   int m = d.mon, day = d.day;
+
+   if(m > 3 && m < 11) return true;
+   if(m < 3 || m > 11) return false;
+
+   MqlDateTime first;
+   TimeToStruct(t, first);
+   first.day = 1; first.hour = 0; first.min = 0; first.sec = 0;
+   int dowFirst = first.day_of_week;
+
+   if(m == 3)
+   {
+      int firstSunday  = 1 + ((7 - dowFirst) % 7);
+      int secondSunday = firstSunday + 7;
+      if(day > secondSunday) return true;
+      if(day == secondSunday) return (d.hour >= 2);
+      return false;
+   }
+   // m == 11
+   int firstSundayNov = 1 + ((7 - dowFirst) % 7);
+   if(day < firstSundayNov) return true;
+   if(day == firstSundayNov) return (d.hour < 2);
+   return false;
+}
+
+//--- Server GMT offset in hours (from terminal).
+int ServerGmtOffset() { return (int)TimeGMTOffset(); }
+
+//--- NY GMT offset in hours at time t.
+int NyGmtOffset(const datetime t) { return (NyIsDst(t) ? -4 : -5); }
+
+//--- Server hour + offset = NY hour.  Offset = NYgmt - ServerGmt.
+int ServerToNyOffset(const datetime t)
+{
+   if(InpServerToNyOffset >= 0) return InpServerToNyOffset;
+   return NyGmtOffset(t) - ServerGmtOffset();
+}
+
 int NyHour(const datetime t)
 {
    MqlDateTime s;
    TimeToStruct(t, s);
-   int h = s.hour + InpServerToNyOffset;
+   int h = s.hour + ServerToNyOffset(t);
    h %= 24;
    if(h < 0) h += 24;
    return h;
@@ -141,6 +189,17 @@ datetime DayStart(const datetime t)
    TimeToStruct(t, s);
    s.hour = 0; s.min = 0; s.sec = 0;
    return StructToTime(s);
+}
+
+//--- Current spread in points (informational only).
+double CurrentSpreadPoints()
+{
+   double ask = 0.0, bid = 0.0, point = 0.0;
+   if(!SymbolInfoDouble(g_sym, SYMBOL_ASK, ask)) return -1.0;
+   if(!SymbolInfoDouble(g_sym, SYMBOL_BID, bid)) return -1.0;
+   if(!SymbolInfoDouble(g_sym, SYMBOL_POINT, point)) return -1.0;
+   if(point <= 0.0) return -1.0;
+   return (ask - bid) / point;
 }
 
 //=========================== ORDER =================================
@@ -159,6 +218,18 @@ bool OpenTrade(const int direction, const double slPrice, const string tag)
    if(!SymbolInfoDouble(g_sym, SYMBOL_POINT, point)) return false;
    if(ask <= 0.0 || bid <= 0.0 || point <= 0.0) return false;
 
+   //--- spread filter: only when user explicitly enables it
+   if(InpMaxSpreadPoints > 0)
+   {
+      double sp = (ask - bid) / point;
+      if(sp > (double)InpMaxSpreadPoints)
+      {
+         PrintFormat("Entry blocked: spread %.0f pts > limit %d pts.",
+                     sp, InpMaxSpreadPoints);
+         return false;
+      }
+   }
+
    double entry = (direction > 0 ? ask : bid);
    double sl    = NormPrice(slPrice);
    double dist  = AbsV(entry - sl);
@@ -175,7 +246,7 @@ bool OpenTrade(const int direction, const double slPrice, const string tag)
       return false;
    }
 
-   // TP measured from the REAL entry price, not from refMid.
+   //--- TP measured from the REAL entry price
    double tp = (direction > 0 ? entry + InpRewardRisk * dist
                               : entry - InpRewardRisk * dist);
    tp = NormPrice(tp);
@@ -224,13 +295,35 @@ bool OpenTrade(const int direction, const double slPrice, const string tag)
       return false;
    }
 
-   PrintFormat("Anna %s opened. lots=%.2f entry=%.2f SL=%.2f TP=%.2f (risk=%.2f price units, %.2fR)",
-               tag, lots, req.price, sl, tp, dist, InpRewardRisk);
+   double realEntry = (res.price > 0.0 ? res.price : req.price);
+   double realDist  = AbsV(realEntry - sl);
+
+   PrintFormat("Anna %s | lots=%.2f entry=%.2f SL=%.2f TP=%.2f | risk=%.2f units (%.2fR) | server=%s NY=%s",
+               tag, lots, realEntry, sl, tp, realDist, InpRewardRisk,
+               TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES),
+               TimeToString(TimeCurrent() + ServerToNyOffset(TimeCurrent()) * 3600,
+                            TIME_DATE|TIME_MINUTES));
+
+   if(InpLogSpread)
+      PrintFormat("Anna %s spread at entry: %.0f points.", tag, CurrentSpreadPoints());
+
    return true;
 }
 
 //=========================== REFERENCE CANDLE ======================
-// Build H1 reference candle for the NY 10:00 bar of the current day.
+void ResetScenarioState()
+{
+   g_scenAActive = InpEnableScenarioA;
+   g_scenBActive = InpEnableScenarioB;
+   g_biasA       = 0;
+   g_scenBDir    = 0;
+   g_fvgBroken   = false;
+   g_fvgRetested = false;
+   g_fvgHigh     = 0.0;
+   g_fvgLow      = 0.0;
+   g_attempts    = 0;
+}
+
 bool BuildReference()
 {
    MqlRates h1[];
@@ -249,20 +342,18 @@ bool BuildReference()
    if(idx < 0) return false;
 
    datetime refTime = h1[idx].time;
-   if(refTime == g_refTime) return true;   // already built
+   if(refTime == g_refTime) return true;
 
-   // Reset state for the new reference candle.
-   g_refTime     = refTime;
-   g_dayStamp    = DayStart(refTime);
-   g_refHigh     = h1[idx].high;
-   g_refLow      = h1[idx].low;
-   g_refOpen     = h1[idx].open;
-   g_refClose    = h1[idx].close;
-   g_refMid      = (g_refHigh + g_refLow) / 2.0;
-   g_refValid    = true;
+   g_refTime  = refTime;
+   g_dayStamp = DayStart(refTime);
+   g_refHigh  = h1[idx].high;
+   g_refLow   = h1[idx].low;
+   g_refOpen  = h1[idx].open;
+   g_refClose = h1[idx].close;
+   g_refMid   = (g_refHigh + g_refLow) / 2.0;
+   g_refValid = true;
 
-   // Inside Bar: if the 10:00 candle is inside the previous H1 candle,
-   // the mother bar becomes the reference.
+   // Inside Bar mother bar rule
    if(InpUseInsideBar && idx + 1 < ArraySize(h1))
    {
       MqlRates prev = h1[idx + 1];
@@ -274,21 +365,17 @@ bool BuildReference()
          g_refOpen  = prev.open;
          g_refClose = prev.close;
          g_refMid   = (g_refHigh + g_refLow) / 2.0;
-         PrintFormat("Inside Bar detected at %s -> mother bar used as reference (H=%.2f L=%.2f)",
+         PrintFormat("Inside Bar at %s -> mother bar used (H=%.2f L=%.2f)",
                      TimeToString(refTime, TIME_DATE|TIME_MINUTES), g_refHigh, g_refLow);
       }
    }
 
-   g_scenAActive = InpEnableScenarioA;
-   g_scenBActive = InpEnableScenarioB;
-   g_biasA       = 0;
-   g_scenBDir    = 0;
-   g_fvgBroken   = false;
-   g_fvgRetested = false;
-   g_fvgHigh     = 0.0;
-   g_fvgLow      = 0.0;
-   g_extreme     = 0.0;
-   g_attempts    = 0;
+   ResetScenarioState();
+
+   PrintFormat("Reference candle %s | O=%.2f H=%.2f L=%.2f C=%.2f Mid=%.2f | server->NY offset=%+d",
+               TimeToString(refTime, TIME_DATE|TIME_MINUTES),
+               g_refOpen, g_refHigh, g_refLow, g_refClose, g_refMid,
+               ServerToNyOffset(refTime));
    return true;
 }
 
@@ -301,7 +388,6 @@ bool SetupExpired(const datetime now)
 }
 
 //=========================== SCENARIO A ============================
-// Body breakout beyond the reference candle -> entry at 50% midline.
 void CheckScenarioA()
 {
    if(!g_scenAActive || !g_refValid) return;
@@ -310,8 +396,8 @@ void CheckScenarioA()
    ArraySetAsSeries(h1, true);
    if(CopyRates(g_sym, PERIOD_H1, 0, 3, h1) < 3) return;
 
-   MqlRates c = h1[1];                    // last closed H1 bar
-   if(c.time <= g_refTime) return;        // must be after the reference candle
+   MqlRates c = h1[1];
+   if(c.time <= g_refTime) return;
 
    double tick = TickSize();
    if(tick <= 0.0) return;
@@ -321,15 +407,13 @@ void CheckScenarioA()
    else if(c.close < g_refLow && c.close < c.open)  dir = -1;
    if(dir == 0) return;
 
-   g_scenAActive = false;                 // one attempt for scenario A
+   g_scenAActive = false;
    g_biasA       = dir;
 
-   // Entry at the 50% midpoint of the reference candle.
    double entry = g_refMid;
    double sl    = (dir > 0 ? g_refLow - tick - InpBufferPriceUnits
                            : g_refHigh + tick + InpBufferPriceUnits);
 
-   // Sanity: price must actually be on the breakout side of the midline.
    double bid = 0.0, ask = 0.0;
    if(!SymbolInfoDouble(g_sym, SYMBOL_BID, bid)) return;
    if(!SymbolInfoDouble(g_sym, SYMBOL_ASK, ask)) return;
@@ -343,7 +427,6 @@ void CheckScenarioA()
 }
 
 //=========================== SCENARIO B ============================
-// Detect the newest M5 FVG in the breakout direction.
 bool FindFvg(const int dir, double &fvgHigh, double &fvgLow)
 {
    MqlRates m5[];
@@ -351,12 +434,8 @@ bool FindFvg(const int dir, double &fvgHigh, double &fvgLow)
    int need = InpFvgLookbackBars + 3;
    if(CopyRates(g_sym, PERIOD_M5, 0, need, m5) < need) return false;
 
-   // FVG: bar[i] and bar[i+2] gap; middle bar i+1 is the displacement candle.
    for(int i = 1; i < InpFvgLookbackBars; i++)
    {
-      double lo = m5[i + 2].low;
-      double hi = m5[i + 2].high;
-      // Bullish FVG: low of newer bar above high of older bar
       if(dir > 0)
       {
          if(m5[i].low > m5[i + 2].high)
@@ -381,14 +460,13 @@ bool FindFvg(const int dir, double &fvgHigh, double &fvgLow)
             return true;
          }
       }
-      if(lo == 0.0 && hi == 0.0) break;
    }
    return false;
 }
 
 bool IsPinBar(const MqlRates &b, const int dir)
 {
-   double body = AbsV(b.close - b.open);
+   double body  = AbsV(b.close - b.open);
    double range = b.high - b.low;
    if(range <= 0.0) return false;
 
@@ -398,7 +476,6 @@ bool IsPinBar(const MqlRates &b, const int dir)
 
    if(dir > 0)
    {
-      // Bullish pin: long lower wick, small body near the top.
       if(body < minBody) body = minBody;
       if(lowerWick < InpPinBarWickRatio * body) return false;
       if(upperWick > lowerWick) return false;
@@ -444,16 +521,15 @@ void CheckScenarioB()
    int need = InpFvgLookbackBars + 10;
    if(CopyRates(g_sym, PERIOD_M5, 0, need, m5) < need) return;
 
-   MqlRates last = m5[1];                 // last closed M5 bar
+   MqlRates last = m5[1];
    if(last.time <= g_refTime) return;
 
    double tick = TickSize();
    if(tick <= 0.0) return;
 
-   // --- Phase 1: wick breakout of the reference candle ---
+   //--- Phase 1: wick breakout
    if(g_scenBDir == 0)
    {
-      // Only a wick-based breakout (body breakout belongs to scenario A).
       if(last.high > g_refHigh && last.close <= g_refHigh && last.close < last.open)
          g_scenBDir = -1;
       else if(last.low < g_refLow && last.close >= g_refLow && last.close > last.open)
@@ -471,25 +547,20 @@ void CheckScenarioB()
 
       g_fvgBroken   = false;
       g_fvgRetested = false;
-      g_extreme     = (g_scenBDir > 0 ? g_fvgLow : g_fvgHigh);
-      PrintFormat("Scenario B armed: dir=%d FVG %.2f-%.2f",
-                  g_scenBDir, g_fvgLow, g_fvgHigh);
+      PrintFormat("Scenario B armed: dir=%d FVG %.2f-%.2f", g_scenBDir, g_fvgLow, g_fvgHigh);
       return;
    }
 
-   // --- Phase 2: price must cross THROUGH the FVG ---
+   //--- Phase 2: cross through the FVG
    if(!g_fvgBroken)
    {
       if(g_scenBDir > 0)
       {
-         // Close fully above the FVG = crossed through it.
          if(last.close > g_fvgHigh + InpBufferPriceUnits)
          {
             g_fvgBroken = true;
-            g_extreme   = last.high;
             Print("Scenario B: bullish FVG crossed, waiting for retest.");
          }
-         // Invalidation: price closes back below the FVG.
          else if(last.close < g_fvgLow - InpBufferPriceUnits)
          {
             Print("Scenario B invalidated: price closed back below the FVG.");
@@ -502,7 +573,6 @@ void CheckScenarioB()
          if(last.close < g_fvgLow - InpBufferPriceUnits)
          {
             g_fvgBroken = true;
-            g_extreme   = last.low;
             Print("Scenario B: bearish FVG crossed, waiting for retest.");
          }
          else if(last.close > g_fvgHigh + InpBufferPriceUnits)
@@ -515,7 +585,7 @@ void CheckScenarioB()
       return;
    }
 
-   // --- Phase 3: return to the broken FVG (retest) ---
+   //--- Phase 3: retest
    if(!g_fvgRetested)
    {
       bool touched = (last.low <= g_fvgHigh && last.high >= g_fvgLow);
@@ -524,13 +594,10 @@ void CheckScenarioB()
          g_fvgRetested = true;
          Print("Scenario B: price returned to the broken FVG - awaiting pin bar.");
       }
-      // Track the extreme for invalidation.
-      if(g_scenBDir > 0 && last.high > g_extreme) g_extreme = last.high;
-      if(g_scenBDir < 0 && last.low  < g_extreme) g_extreme = last.low;
       return;
    }
 
-   // --- Phase 4: pin bar + body close confirmation ---
+   //--- Phase 4: pin bar + body close
    if(!IsPinBar(last, g_scenBDir)) return;
 
    bool bodyConfirm = (g_scenBDir > 0 ? last.close > last.open
@@ -543,7 +610,6 @@ void CheckScenarioB()
    else
       sl = LocalSwingHigh(m5, 1) + InpBufferPriceUnits + tick;
 
-   // Entry price must be on the correct side of the FVG retest.
    double bid = 0.0, ask = 0.0;
    if(!SymbolInfoDouble(g_sym, SYMBOL_BID, bid)) return;
    if(!SymbolInfoDouble(g_sym, SYMBOL_ASK, ask)) return;
@@ -579,30 +645,35 @@ int OnInit()
       return INIT_FAILED;
    }
 
-   g_atrHandle = iATR(g_sym, PERIOD_H1, 14);
-   if(g_atrHandle == INVALID_HANDLE)
-   {
-      Print("Could not create ATR handle.");
-      return INIT_FAILED;
-   }
-
    g_lastH1Bar = iTime(g_sym, PERIOD_H1, 0);
    g_lastM5Bar = iTime(g_sym, PERIOD_M5, 0);
 
-   PrintFormat("AnnaBot v1.10 started on %s. NY ref hour=%d, server->NY offset=%d, lots=%.2f",
-               g_sym, InpNyOpenHour, InpServerToNyOffset, InpLots);
-   Print("Attach to any chart; logic runs on H1 + M5 data of the configured symbol.");
+   datetime now = TimeCurrent();
+   PrintFormat("AnnaBot v1.12 started | %s | NY ref hour=%d | server GMT=%+d | NY GMT=%+d | server->NY offset=%+d | lots=%.2f | spread filter=%s",
+               g_sym, InpNyOpenHour,
+               ServerGmtOffset(), NyGmtOffset(now), ServerToNyOffset(now),
+               InpLots,
+               (InpMaxSpreadPoints > 0 ? "ON" : "OFF"));
    return INIT_SUCCEEDED;
 }
 
-void OnDeinit(const int reason)
-{
-   if(g_atrHandle != INVALID_HANDLE) IndicatorRelease(g_atrHandle);
-}
+void OnDeinit(const int reason) { }
 
 void OnTick()
 {
-   // ---- H1 layer: reference candle ----
+   datetime now = TimeCurrent();
+
+   //--- explicit daily reset: new server day -> invalidate old reference
+   datetime today = DayStart(now);
+   if(g_dayStamp != 0 && today != g_dayStamp && g_refValid)
+   {
+      g_refValid = false;
+      ResetScenarioState();
+      g_scenAActive = false;
+      g_scenBActive = false;
+   }
+
+   //--- H1 layer: reference candle
    datetime h1Time = iTime(g_sym, PERIOD_H1, 0);
    if(h1Time > 0 && h1Time != g_lastH1Bar)
    {
@@ -616,7 +687,6 @@ void OnTick()
 
    if(!g_refValid) return;
 
-   datetime now = TimeCurrent();
    if(SetupExpired(now))
    {
       if(g_scenAActive || g_scenBActive)
@@ -629,10 +699,10 @@ void OnTick()
    if(HasOurPosition()) return;
    if(InpOneTradePerDay && g_lastTradeDay == g_dayStamp) return;
 
-   // ---- H1 layer: scenario A (body breakout) ----
+   //--- scenario A (H1 body breakout)
    CheckScenarioA();
 
-   // ---- M5 layer: scenario B (FVG retest + pin bar) ----
+   //--- scenario B (M5 FVG retest + pin bar)
    datetime m5Time = iTime(g_sym, PERIOD_M5, 0);
    if(m5Time > 0 && m5Time != g_lastM5Bar)
    {
