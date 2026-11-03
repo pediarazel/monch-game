@@ -5,49 +5,49 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Pedram Strategy"
 #property link      "https://www.mql5.com"
-#property version   "3.00"
+#property version   "4.00"
 #property strict
 
 #include <Trade\Trade.mqh>
 CTrade trade;
 
-//--- تنظیمات ورودی
+//--- ورودی‌های کاربر
 input group "=== تنظیمات عمومی معامله ==="
 input string   InpSymbol           = "XAUUSD";      // نماد معاملاتی
-input double   InpLotSize          = 0.05;          // حجم ثابت ورود (Lot)
-input double   InpRiskReward       = 2.0;           // ریسک به ریوارد (RR)
-input ulong    InpMagicNumber      = 140503;        // مجیک نامبر ربات
+input double   InpLotSize          = 0.05;          // حجم ثابت ورود
+input double   InpRiskReward       = 2.0;           // ریسک به ریوارد
+input ulong    InpMagicNumber      = 140503;        // مجیک نامبر
 input int      InpMaxSpread        = 60;            // حداکثر اسپرد مجاز (پوینت)
 
-input group "=== تنظیمات ساعت نیویورک ==="
-input int      InpNY_Hour          = 10;            // ساعت ۱۰ صبح نیویورک
-input int      InpServerGMTOffset  = 2;             // ساعت اختلاف بروکر با GMT (مثلاً +2 یا +3)
-input int      InpNYGMTOffset      = -5;            // اختلاف نیویورک با GMT (زمستان -5 و تابستان -4)
+input group "=== تنظیمات ساعت سرور و نیویورک ==="
+input int      InpNY_Hour          = 10;            // ساعت ۱۰ نیویورک
+input int      InpServerGMTOffset  = 2;             // ساعت بروکر به GMT
+input int      InpNYGMTOffset      = -5;            // اختلاف نیویورک با GMT
 
-//--- استیت‌های استراتژی
-enum ENUM_SETUP_STATE
+//--- استیت‌های چرخه استراتژی
+enum ENUM_STRATEGY_STATE
 {
-   STATE_WAITING_FOR_10AM,
-   STATE_MONITORING_H1_BREAK,
-   STATE_M5_WAIT_FVG_TEST,
-   STATE_M5_WAIT_PINBAR,
+   STATE_IDLE,
+   STATE_WAIT_FOR_H1_BREAK,
+   STATE_M5_WAIT_FVG_BREAK,
+   STATE_M5_WAIT_PULLBACK,
+   STATE_M5_WAIT_DOJI,
    STATE_M5_WAIT_CONFIRMATION,
-   STATE_DONE_FOR_DAY
+   STATE_DONE_TODAY
 };
 
-ENUM_SETUP_STATE currentState = STATE_WAITING_FOR_10AM;
+ENUM_STRATEGY_STATE currentState = STATE_IDLE;
 
-//--- متغیرهای پایش روزانه
-datetime currentDayTime      = 0;
+//--- متغیرهای پایش
+datetime currentDayStart     = 0;
 double   refHigh             = 0.0;
 double   refLow              = 0.0;
 double   ref50               = 0.0;
-int      sweepDirection      = 0;   // +1 یعنی کف زده شده (منتظر بای)، -1 یعنی سقف زده شده (منتظر سل)
-double   sweepExtremeLevel   = 0.0; // سقف یا کف قبل بازگشت
-double   fvgHigh             = 0.0;
-double   fvgLow              = 0.0;
-datetime pinbarTime          = 0;
-double   pinbarExtreme       = 0.0;
+int      sweepDirection      = 0;     // +1: شکست سایه از کف (بای) | -1: شکست سایه از سقف (سل)
+double   sweepExtremeLevel   = 0.0;   // سقف یا کفی که با سایه شکسته شد (محل استاپ)
+double   fvgTop              = 0.0;
+double   fvgBottom           = 0.0;
+datetime dojiCandleTime      = 0;
 
 //+------------------------------------------------------------------+
 //| Init                                                             |
@@ -55,21 +55,13 @@ double   pinbarExtreme       = 0.0;
 int OnInit()
 {
    trade.SetExpertMagicNumber(InpMagicNumber);
-   trade.SetDeviationInPoints(25);
-   Print("Pedram Strategy Final EA loaded successfully.");
+   trade.SetDeviationInPoints(20);
+   Print("ربات استراتژی پدرام با موفقیت فعال شد.");
    return(INIT_SUCCEEDED);
 }
 
 //+------------------------------------------------------------------+
-//| Deinit                                                           |
-//+------------------------------------------------------------------+
-void OnDeinit(const int reason)
-{
-   Print("Pedram Strategy EA stopped.");
-}
-
-//+------------------------------------------------------------------+
-//| تابع تبدیل ساعت ۱۰ نیویورک به ساعت سرور                         |
+//| تبدیل ساعت نیویورک به ساعت سرور متاتریدر                         |
 //+------------------------------------------------------------------+
 int GetServerTargetHour()
 {
@@ -86,95 +78,89 @@ int GetServerTargetHour()
 void OnTick()
 {
    // بررسی اسپرد
-   long spread = SymbolInfoInteger(InpSymbol, SYMBOL_SPREAD);
-   if(spread > InpMaxSpread) return;
+   if(SymbolInfoInteger(InpSymbol, SYMBOL_SPREAD) > InpMaxSpread) return;
 
    MqlDateTime dt;
    TimeCurrent(dt);
 
-   // ریست روزانه (ساعت 00:00 سرور)
-   datetime todayStart = iTime(InpSymbol, PERIOD_D1, 0);
-   if(todayStart != currentDayTime)
+   // ریست در آغاز هر روز معاملاتی
+   datetime today = iTime(InpSymbol, PERIOD_D1, 0);
+   if(today != currentDayStart)
    {
-      currentDayTime = todayStart;
-      currentState = STATE_WAITING_FOR_10AM;
-      CancelAllPendingOrders(); // لغو اردرهای لیمیت روز قبل که تاچ نشدند
+      currentDayStart = today;
+      currentState = STATE_IDLE;
+      CancelAllPendingOrders(); // پاکسازی سفارشات روز قبل
    }
 
-   int targetServerHour = GetServerTargetHour();
+   int serverHour = GetServerTargetHour();
 
-   // ۱. وقتی کندل ۱۰ نیویورک بسته شد، مشخصات کندل را استخراج کن
-   if(currentState == STATE_WAITING_FOR_10AM)
+   // ۱. بعد از بسته شدن کندل ۱۰ نیویورک، سقف، کف و ۵۰٪ را ثبت کن
+   if(currentState == STATE_IDLE)
    {
-      // کندل ساعت ۱۰ نیویورک دقیقاً در انتهای آن ساعت یعنی راس (targetServerHour + 1) بسته می‌شود
-      int closeHour = (targetServerHour + 1) % 24;
+      int closeHour = (serverHour + 1) % 24;
       if(dt.hour == closeHour && dt.min >= 1)
       {
-         CaptureReferenceCandle(targetServerHour);
-         currentState = STATE_MONITORING_H1_BREAK;
+         CaptureReferenceCandle(serverHour);
+         currentState = STATE_WAIT_FOR_H1_BREAK;
       }
    }
 
-   // ۲. مانیتورینگ شکست در H1 (با بدنه یا با شدو)
-   if(currentState == STATE_MONITORING_H1_BREAK)
+   // ۲. بررسی شکست در H1 (بدنه یا شدو)
+   if(currentState == STATE_WAIT_FOR_H1_BREAK)
    {
       CheckH1Breakout();
    }
 
-   // ۳. در صورتی که با شدو رد شده بود: پیگیری سناریوی M5 (FVG + پین‌بار + تاییدیه)
-   if(currentState == STATE_M5_WAIT_FVG_TEST || 
-      currentState == STATE_M5_WAIT_PINBAR   || 
-      currentState == STATE_M5_WAIT_CONFIRMATION)
+   // ۳. مراحل تایم‌فریم ۵ دقیقه
+   if(currentState >= STATE_M5_WAIT_FVG_BREAK && currentState <= STATE_M5_WAIT_CONFIRMATION)
    {
-      ProcessM5Strategy();
+      ProcessM5Flow();
    }
 }
 
 //+------------------------------------------------------------------+
-//| دریافت و فیلتر کندل ساعت ۱۰ (با احتساب کندل مادر Inside Bar)     |
+//| تعیین کندل مرجع و بررسی کندل مادر (Inside Bar)                    |
 //+------------------------------------------------------------------+
 void CaptureReferenceCandle(int serverHour)
 {
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
-   int copied = CopyRates(InpSymbol, PERIOD_H1, 0, 10, rates);
-   if(copied < 5) return;
+   if(CopyRates(InpSymbol, PERIOD_H1, 0, 8, rates) < 4) return;
 
-   // پیدا کردن کندل ساعت ۱۰ در میان کندل‌های اخیر
-   int targetIndex = -1;
-   for(int i = 1; i < 5; i++)
+   int targetIdx = -1;
+   for(int i = 1; i < 6; i++)
    {
-      MqlDateTime candleDt;
-      TimeToStruct(rates[i].time, candleDt);
-      if(candleDt.hour == serverHour)
+      MqlDateTime cdt;
+      TimeToStruct(rates[i].time, cdt);
+      if(cdt.hour == serverHour)
       {
-         targetIndex = i;
+         targetIdx = i;
          break;
       }
    }
 
-   if(targetIndex == -1) targetIndex = 1; // فال‌بک امن
+   if(targetIdx == -1) targetIdx = 1;
 
-   // نکته مهم: بررسی اینکه آیا کندل ۱۰ در دل کندل قبل از خود قرار دارد؟ (Inside Bar)
-   int motherIndex = targetIndex + 1;
-   if(rates[targetIndex].high < rates[motherIndex].high && rates[targetIndex].low > rates[motherIndex].low)
+   // بررسی اینساید بار (Inside Bar)
+   int motherIdx = targetIdx + 1;
+   if(rates[targetIdx].high < rates[motherIdx].high && rates[targetIdx].low > rates[motherIdx].low)
    {
-      refHigh = rates[motherIndex].high;
-      refLow  = rates[motherIndex].low;
-      Print("کندل ۱۰ در دل کندل مادر بود. کندل مادر به عنوان مرجع انتخاب شد.");
+      refHigh = rates[motherIdx].high;
+      refLow  = rates[motherIdx].low;
+      Print("کندل ۱۰ در دل کندل قبل بود (Inside Bar). کندل مادر مبنا قرار گرفت.");
    }
    else
    {
-      refHigh = rates[targetIndex].high;
-      refLow  = rates[targetIndex].low;
+      refHigh = rates[targetIdx].high;
+      refLow  = rates[targetIdx].low;
    }
 
-   ref50 = (refHigh + refLow) / 2.0; // تراز ۵۰ درصد تعادل
-   PrintFormat("کندل مبنا ثبت شد -> سقف: %.2f | کف: %.2f | تراز ۵۰٪: %.2f", refHigh, refLow, ref50);
+   ref50 = (refHigh + refLow) / 2.0;
+   PrintFormat("کندل مبنا مشخص شد -> سقف: %.2f | کف: %.2f | تراز ۵۰٪: %.2f", refHigh, refLow, ref50);
 }
 
 //+------------------------------------------------------------------+
-//| بررسی کندل‌های بعدی برای شکست بدنه یا شکست سایه                  |
+//| بررسی شکست در H1                                                  |
 //+------------------------------------------------------------------+
 void CheckH1Breakout()
 {
@@ -184,191 +170,197 @@ void CheckH1Breakout()
    ArraySetAsSeries(rH1, true);
    if(CopyRates(InpSymbol, PERIOD_H1, 0, 3, rH1) < 3) return;
 
-   // کندل [1] آخرین کندل بسته شده ساعتی بعد از کندل ۱۰ است
-   double closePrice = rH1[1].close;
-   double highPrice  = rH1[1].high;
-   double lowPrice   = rH1[1].low;
-   double point      = SymbolInfoDouble(InpSymbol, SYMBOL_POINT);
+   double close = rH1[1].close;
+   double high  = rH1[1].high;
+   double low   = rH1[1].low;
+   double point = SymbolInfoDouble(InpSymbol, SYMBOL_POINT);
 
    // سناریو ۱: شکست با بدنه (Body Breakout)
-   if(closePrice > refHigh) // شکست سقف با بدنه -> خرید
+   if(close > refHigh) // شکست صعودی با بدنه
    {
-      double sl = refLow - (20 * point); // استاپ پشت کندل ۱۰
+      double sl = refLow - (20 * point); // استاپ زیر کندل ۱۰
       double risk = ref50 - sl;
       double tp = ref50 + (risk * InpRiskReward);
 
-      // ثبت Buy Limit روی تراز ۵۰٪
       trade.BuyLimit(InpLotSize, ref50, InpSymbol, sl, tp, ORDER_TIME_DAY, 0, "Pedram BuyLimit 50%");
-      currentState = STATE_DONE_FOR_DAY;
-      Print("شکست صعودی با بدنه تایید شد. اوردر Buy Limit در تراز ۵۰٪ قرار گرفت.");
+      currentState = STATE_DONE_TODAY;
+      Print("شکست صعودی با بدنه رخ داد. اوردر Buy Limit در تراز ۵۰٪ ثبت شد.");
       return;
    }
-   else if(closePrice < refLow) // شکست کف با بدنه -> فروش
+   else if(close < refLow) // شکست نزولی با بدنه
    {
-      double sl = refHigh + (20 * point); // استاپ پشت کندل ۱۰
+      double sl = refHigh + (20 * point); // استاپ بالای کندل ۱۰
       double risk = sl - ref50;
       double tp = ref50 - (risk * InpRiskReward);
 
-      // ثبت Sell Limit روی تراز ۵۰٪
       trade.SellLimit(InpLotSize, ref50, InpSymbol, sl, tp, ORDER_TIME_DAY, 0, "Pedram SellLimit 50%");
-      currentState = STATE_DONE_FOR_DAY;
-      Print("شکست نزولی با بدنه تایید شد. اوردر Sell Limit در تراز ۵۰٪ قرار گرفت.");
+      currentState = STATE_DONE_TODAY;
+      Print("شکست نزولی با بدنه رخ داد. اوردر Sell Limit در تراز ۵۰٪ ثبت شد.");
       return;
    }
 
    // سناریو ۲: شکست فقط با سایه (Wick Sweep)
-   if(highPrice > refHigh && closePrice <= refHigh)
+   if(high > refHigh && close <= refHigh)
    {
-      // سقف رد شد ولی با سایه -> ورود به سناریوی سل در M5
+      // سقف فقط با سایه زده شد -> سناریوی فروش در ۵ دقیقه
       sweepDirection = -1;
-      sweepExtremeLevel = highPrice;
-      FindLeftFVG(sweepDirection);
-      currentState = STATE_M5_WAIT_FVG_TEST;
-      Print("سقف فقط با سایه رد شد (Sweep). جستجو برای FVG و ورود به تایم ۵ دقیقه...");
+      sweepExtremeLevel = high; // استاپ پشت این سقف خواهد بود
+      if(FindPreBreakFVG(sweepDirection))
+      {
+         currentState = STATE_M5_WAIT_FVG_BREAK;
+         Print("سقف با سایه رد شد. FVG پیدا شد، منتظر شکست FVG در ۵ دقیقه...");
+      }
    }
-   else if(lowPrice < refLow && closePrice >= refLow)
+   else if(low < refLow && close >= refLow)
    {
-      // کف رد شد ولی با سایه -> ورود به سناریوی بای در M5
+      // کف فقط با سایه زده شد -> سناریوی خرید در ۵ دقیقه
       sweepDirection = +1;
-      sweepExtremeLevel = lowPrice;
-      FindLeftFVG(sweepDirection);
-      currentState = STATE_M5_WAIT_FVG_TEST;
-      Print("کف فقط با سایه رد شد (Sweep). جستجو برای FVG و ورود به تایم ۵ دقیقه...");
+      sweepExtremeLevel = low; // استاپ پشت این کف خواهد بود
+      if(FindPreBreakFVG(sweepDirection))
+      {
+         currentState = STATE_M5_WAIT_FVG_BREAK;
+         Print("کف با سایه رد شد. FVG پیدا شد، منتظر شکست FVG در ۵ دقیقه...");
+      }
    }
 }
 
 //+------------------------------------------------------------------+
-//| پیدا کردن FVG در سمت چپ چارت تایم ۵ دقیقه                       |
+//| پیدا کردن FVG در تایم‌فریم ۵ دقیقه قبل از شکست                     |
 //+------------------------------------------------------------------+
-void FindLeftFVG(int dir)
+bool FindPreBreakFVG(int dir)
 {
    MqlRates m5[];
    ArraySetAsSeries(m5, true);
    int copied = CopyRates(InpSymbol, PERIOD_M5, 0, 50, m5);
-   if(copied < 30) return;
+   if(copied < 20) return false;
 
-   // الگوی گپ سه کندلی (Fair Value Gap):
-   // نزولی: کف کندل i+2 بالاتر از سقف کندل i باشد -> گپ بین Low(i+2) و High(i)
-   // صعودی: سقف کندل i+2 پایین‌تر از کف کندل i باشد -> گپ بین High(i+2) و Low(i)
-   for(int i = 2; i < 40; i++)
+   // جستجوی FVG قبل از کندل سوئیپ
+   for(int i = 2; i < 35; i++)
    {
-      if(dir == -1) // دنبال FVG نزولی در سمت چپ
+      if(dir == -1) // سناریوی سل: FVG صعودی قبلی که قیمت باید بشکند و بریزد
+      {
+         if(m5[i].low > m5[i+2].high)
+         {
+            fvgTop = m5[i].low;
+            fvgBottom = m5[i+2].high;
+            PrintFormat("FVG قبل از شکست پیدا شد: از %.2f تا %.2f", fvgBottom, fvgTop);
+            return true;
+         }
+      }
+      else if(dir == +1) // سناریوی بای: FVG نزولی قبلی که قیمت باید بشکند و بالا رود
       {
          if(m5[i+2].low > m5[i].high)
          {
-            fvgHigh = m5[i+2].low;
-            fvgLow  = m5[i].high;
-            PrintFormat("FVG نزولی سمت چپ پیدا شد: محدوده %.2f تا %.2f", fvgLow, fvgHigh);
-            return;
-         }
-      }
-      else if(dir == +1) // دنبال FVG صعودی در سمت چپ
-      {
-         if(m5[i+2].high < m5[i].low)
-         {
-            fvgHigh = m5[i].low;
-            fvgLow  = m5[i+2].high;
-            PrintFormat("FVG صعودی سمت چپ پیدا شد: محدوده %.2f تا %.2f", fvgLow, fvgHigh);
-            return;
+            fvgTop = m5[i+2].low;
+            fvgBottom = m5[i].high;
+            PrintFormat("FVG قبل از شکست پیدا شد: از %.2f تا %.2f", fvgBottom, fvgTop);
+            return true;
          }
       }
    }
+   return false;
 }
 
 //+------------------------------------------------------------------+
-//| پردازش مراحل M5: تست FVG -> پین بار -> تاییدیه با بدنه            |
+//| پردازش کامل سناریو ۲ در تایم ۵ دقیقه                             |
 //+------------------------------------------------------------------+
-void ProcessM5Strategy()
+void ProcessM5Flow()
 {
    if(PositionsTotal() > 0) return;
 
    MqlRates m5[];
    ArraySetAsSeries(m5, true);
-   if(CopyRates(InpSymbol, PERIOD_M5, 0, 5, m5) < 5) return;
+   if(CopyRates(InpSymbol, PERIOD_M5, 0, 5, m5) < 4) return;
 
-   double currentBid = SymbolInfoDouble(InpSymbol, SYMBOL_BID);
-   double currentAsk = SymbolInfoDouble(InpSymbol, SYMBOL_ASK);
-   double point      = SymbolInfoDouble(InpSymbol, SYMBOL_POINT);
+   double bid   = SymbolInfoDouble(InpSymbol, SYMBOL_BID);
+   double ask   = SymbolInfoDouble(InpSymbol, SYMBOL_ASK);
+   double point = SymbolInfoDouble(InpSymbol, SYMBOL_POINT);
 
-   // مرحله ۱: آیا قیمت برگشته و وارد زون FVG شده است؟
-   if(currentState == STATE_M5_WAIT_FVG_TEST)
+   // مرحله الف: قیمت FVG را با سایه یا بدنه بشکند
+   if(currentState == STATE_M5_WAIT_FVG_BREAK)
    {
-      bool isInsideFVG = (m5[0].high >= fvgLow && m5[0].low <= fvgHigh);
-      if(isInsideFVG)
+      if(sweepDirection == -1) // سل: کف FVG شکسته شود به سمت پایین
       {
-         currentState = STATE_M5_WAIT_PINBAR;
-         Print("قیمت به ناحیه FVG برگشت. منتظر تشکیل پین‌بار...");
+         if(m5[1].low < fvgBottom)
+         {
+            currentState = STATE_M5_WAIT_PULLBACK;
+            Print("ناحیه FVG به سمت پایین شکسته شد. منتظر پولبک به FVG...");
+         }
+      }
+      else if(sweepDirection == +1) // بای: سقف FVG شکسته شود به سمت بالا
+      {
+         if(m5[1].high > fvgTop)
+         {
+            currentState = STATE_M5_WAIT_PULLBACK;
+            Print("ناحیه FVG به سمت بالا شکسته شد. منتظر پولبک به FVG...");
+         }
       }
    }
 
-   // مرحله ۲: بررسی تشکیل پین بار در کندل بسته شده [1]
-   if(currentState == STATE_M5_WAIT_PINBAR)
+   // مرحله ب: پولبک به FVG شکسته شده
+   if(currentState == STATE_M5_WAIT_PULLBACK)
    {
+      // آیا قیمت دوباره وارد باکس FVG شده است؟
+      bool insideFVG = (m5[0].high >= fvgBottom && m5[0].low <= fvgTop);
+      if(insideFVG)
+      {
+         currentState = STATE_M5_WAIT_DOJI;
+         Print("قیمت به FVG پولبک زد. منتظر تشکیل کندل دوجی (Doji)...");
+      }
+   }
+
+   // مرحله ج: کندل دوجی در پولبک تشکیل شود
+   if(currentState == STATE_M5_WAIT_DOJI)
+   {
+      // مشخصات کندل بسته شده [1]
       double body = MathAbs(m5[1].close - m5[1].open);
-      double total = m5[1].high - m5[1].low;
-      if(total <= 0) return;
+      double totalRange = m5[1].high - m5[1].low;
 
-      bool pinFound = false;
-
-      // شرط پین‌بار: بدنه حداکثر ۳۰٪ کل رنج کندل باشد و شدو بلند در جهت عکس
-      if((body / total) <= 0.30)
+      if(totalRange > 0)
       {
-         if(sweepDirection == -1) // شوتینگ استار / پین‌بار نزولی
+         // تعریف استاندارد دوجی: بدنه کندل بسیار کوچک و کمتر از ۲۰٪ کل رنج کندل باشد
+         if((body / totalRange) <= 0.20)
          {
-            double upperWick = m5[1].high - MathMax(m5[1].open, m5[1].close);
-            if(upperWick >= (total * 0.55)) pinFound = true;
+            dojiCandleTime = m5[1].time;
+            currentState = STATE_M5_WAIT_CONFIRMATION;
+            Print("کندل دوجی تایید شد! در انتظار کندل تاییدیه بعد از دوجی...");
          }
-         else if(sweepDirection == +1) // چکش / پین‌بار صعودی
-         {
-            double lowerWick = MathMin(m5[1].open, m5[1].close) - m5[1].low;
-            if(lowerWick >= (total * 0.55)) pinFound = true;
-         }
-      }
-
-      if(pinFound)
-      {
-         pinbarTime = m5[1].time;
-         pinbarExtreme = (sweepDirection == -1) ? m5[1].low : m5[1].high;
-         currentState = STATE_M5_WAIT_CONFIRMATION;
-         Print("پین‌بار تایید شد. در انتظار کندل تاییدیه بدنه...");
       }
    }
 
-   // مرحله ۳: کندل تاییدیه با بدنه، کلوز پین‌بار را رد کند -> ورود مارکت
+   // مرحله د: کندل تایید بعد از دوجی بسته شود و ورود مارکت
    if(currentState == STATE_M5_WAIT_CONFIRMATION)
    {
-      // کندل تاییدیه [1] باید بعد از کندل پین بار بسته شده باشد
-      if(m5[1].time > pinbarTime)
+      // بررسی اینکه آیا کندل جدیدی بعد از دوجی بسته شده است
+      if(m5[1].time > dojiCandleTime)
       {
-         if(sweepDirection == -1) // فروش
+         if(sweepDirection == -1) // سناریوی سل: کندل تایید باید نزولی باشد و کلوز زیر اوپن داشته باشد
          {
-            // کلوز کندل تاییدیه زیر کف پین بار باشد (شکست با بدنه)
-            if(m5[1].close < pinbarExtreme)
+            if(m5[1].close < m5[1].open)
             {
-               double sl = sweepExtremeLevel + (20 * point); // استاپ سقف ثبت شده
-               double risk = sl - currentBid;
+               double sl = sweepExtremeLevel + (20 * point); // استاپ پشت سقف شکسته شده با سایه
+               double risk = sl - bid;
                if(risk > 0)
                {
-                  double tp = currentBid - (risk * InpRiskReward);
-                  trade.Sell(InpLotSize, InpSymbol, currentBid, sl, tp, "Pedram M5 FVG+Pinbar Sell");
-                  currentState = STATE_DONE_FOR_DAY;
-                  Print("معامله SELL با تاییدیه بدنه باز شد.");
+                  double tp = bid - (risk * InpRiskReward); // تارگت ۲ برابر استاپ
+                  trade.Sell(InpLotSize, InpSymbol, bid, sl, tp, "Pedram M5 FVG+Doji Sell");
+                  currentState = STATE_DONE_TODAY;
+                  Print("کندل تاییدیه نزولی بسته شد. معامله SELL باز شد.");
                }
             }
          }
-         else if(sweepDirection == +1) // خرید
+         else if(sweepDirection == +1) // سناریوی بای: کندل تایید باید صعودی باشد و کلوز بالای اوپن داشته باشد
          {
-            // کلوز کندل تاییدیه بالای سقف پین بار باشد (شکست با بدنه)
-            if(m5[1].close > pinbarExtreme)
+            if(m5[1].close > m5[1].open)
             {
-               double sl = sweepExtremeLevel - (20 * point); // استاپ کف ثبت شده
-               double risk = currentAsk - sl;
+               double sl = sweepExtremeLevel - (20 * point); // استاپ پشت کف شکسته شده با سایه
+               double risk = ask - sl;
                if(risk > 0)
                {
-                  double tp = currentAsk + (risk * InpRiskReward);
-                  trade.Buy(InpLotSize, InpSymbol, currentAsk, sl, tp, "Pedram M5 FVG+Pinbar Buy");
-                  currentState = STATE_DONE_FOR_DAY;
-                  Print("معامله BUY با تاییدیه بدنه باز شد.");
+                  double tp = ask + (risk * InpRiskReward); // تارگت ۲ برابر استاپ
+                  trade.Buy(InpLotSize, InpSymbol, ask, sl, tp, "Pedram M5 FVG+Doji Buy");
+                  currentState = STATE_DONE_TODAY;
+                  Print("کندل تاییدیه صعودی بسته شد. معامله BUY باز شد.");
                }
             }
          }
@@ -377,7 +369,7 @@ void ProcessM5Strategy()
 }
 
 //+------------------------------------------------------------------+
-//| لغو کلیه اردرهای لیمیت بازمانده روز قبل                          |
+//| لغو اردرهای لیمیت معلق روز قبل                                  |
 //+------------------------------------------------------------------+
 void CancelAllPendingOrders()
 {
