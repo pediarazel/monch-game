@@ -5,10 +5,9 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Pedram Strategy"
 #property link      "https://www.mql5.com"
-#property version   "1.04"
+#property version   "1.05"
 
 #include <Trade\Trade.mqh>
-#include <Math\Math.mqh>
 
 //--- Inputs
 input double   InpLotSize        = 0.05;      // Lot Size (حجم ثابت)
@@ -138,7 +137,7 @@ void CheckM5FvgAndPinbar(bool isBullish)
             if(m5_rates[i].low <= m5_rates[i+2].low) 
             {
                fvgPassedAndReturned = true;
-               double bodySize = fabs(m5_rates[i].close - m5_rates[i].open);
+               double bodySize = MathAbs(m5_rates[i].close - m5_rates[i].open);
                double candleRange = m5_rates[i].high - m5_rates[i].low;
                if(candleRange > 0 && (bodySize / candleRange) < 0.3 && (m5_rates[i].close - m5_rates[i].low) > (candleRange * 0.6))
                {
@@ -159,7 +158,7 @@ void CheckM5FvgAndPinbar(bool isBullish)
             if(m5_rates[i].high >= m5_rates[i+2].high)
             {
                fvgPassedAndReturned = true;
-               double bodySize = fabs(m5_rates[i].close - m5_rates[i].open);
+               double bodySize = MathAbs(m5_rates[i].close - m5_rates[i].open);
                double candleRange = m5_rates[i].high - m5_rates[i].low;
                if(candleRange > 0 && (bodySize / candleRange) < 0.3 && (m5_rates[i].high - m5_rates[i].close) > (candleRange * 0.6))
                {
