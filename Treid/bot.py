@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Pedram Strategy"
 #property link      "https://www.mql5.com"
-#property version   "5.00"
+#property version   "5.20"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -37,12 +37,14 @@ ENUM_SETUP_STATE currentState = STATE_WAITING_FOR_10AM;
 
 //--- متغیرهای پایش روزانه
 datetime currentDayTime      = 0;
+datetime refCandleTime       = 0;
 double   refHigh             = 0.0;
 double   refLow              = 0.0;
 double   ref50               = 0.0;
-int      sweepDirection      = 0;   // +1 یعنی کف زده شده (سایه کف -> بای)، -1 یعنی سقف زده شده (سایه سقف -> سل)
+int      sweepDirection      = 0;   // +1 یعنی کف زده شده (بای)، -1 یعنی سقف زده شده (سل)
 double   sweepExtremeLevel   = 0.0; 
-datetime fvgBreakTime        = 0;
+datetime lastM5BarTime       = 0;
+datetime lastH1BarTime       = 0;
 
 //+------------------------------------------------------------------+
 //| Init                                                             |
@@ -50,8 +52,8 @@ datetime fvgBreakTime        = 0;
 int OnInit()
 {
    trade.SetExpertMagicNumber(InpMagicNumber);
-   trade.SetDeviationInPoints(25);
-   Print("Pedram Strategy EA v5.00 loaded successfully.");
+   trade.SetDeviationInPoints(30);
+   Print("Pedram Strategy EA v5.20 loaded successfully. Pending orders will persist across days (GTC).");
    return(INIT_SUCCEEDED);
 }
 
@@ -70,40 +72,23 @@ int GetServerTargetHour()
 {
    int hourDiff = InpNYGMTOffset - InpServerGMTOffset;
    int target = InpNY_Hour - hourDiff;
-   if(target < 0)  target += 24;
+   if(target < 0)   target += 24;
    if(target >= 24) target -= 24;
    return target;
 }
 
 //+------------------------------------------------------------------+
-//| تابع لغو اردرهای معلق با مجیک نامبر اختصاصی                     |
+//| استخراج کندل مرجع ساعت ۱۰ نیویورک و بررسی Inside Bar             |
 //+------------------------------------------------------------------+
-void CancelAllPendingOrders()
-{
-   for(int i = OrdersTotal() - 1; i >= 0; i--)
-   {
-      ulong ticket = OrderGetTicket(i);
-      if(ticket > 0)
-      {
-         if(OrderGetString(ORDER_SYMBOL) == InpSymbol && OrderGetInteger(ORDER_MAGIC) == InpMagicNumber)
-         {
-            trade.OrderDelete(ticket);
-         }
-      }
-   }
-}
-
-//+------------------------------------------------------------------+
-//| استخراج کندل مرجع و بررسی Inside Bar                             |
-//+------------------------------------------------------------------+
-void CaptureReferenceCandle(int serverHour)
+bool CaptureReferenceCandle(int serverHour)
 {
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
-   if(CopyRates(InpSymbol, PERIOD_H1, 0, 10, rates) < 5) return;
+   int copied = CopyRates(InpSymbol, PERIOD_H1, 0, 24, rates);
+   if(copied < 10) return false;
 
    int targetIndex = -1;
-   for(int i = 1; i < 5; i++)
+   for(int i = 1; i < copied - 1; i++)
    {
       MqlDateTime candleDt;
       TimeToStruct(rates[i].time, candleDt);
@@ -113,107 +98,120 @@ void CaptureReferenceCandle(int serverHour)
          break;
       }
    }
-   if(targetIndex == -1) targetIndex = 1;
+   
+   if(targetIndex == -1) return false;
 
-   // بررسی Inside Bar (کندل ۱۰ در دل کندل قبل باشد)
+   refCandleTime = rates[targetIndex].time;
+
+   // بررسی اینساید بار (Inside Bar): آیا کندل ۱۰ داخل کندل قبلی بوده؟
    int motherIndex = targetIndex + 1;
-   if(rates[targetIndex].high < rates[motherIndex].high && rates[targetIndex].low > rates[motherIndex].low)
+   if(rates[targetIndex].high <= rates[motherIndex].high && rates[targetIndex].low >= rates[motherIndex].low)
    {
       refHigh = rates[motherIndex].high;
       refLow  = rates[motherIndex].low;
-      Print("Inside Bar detected! Mother candle used as reference.");
+      PrintFormat("Inside Bar detected! Using mother candle (High: %.2f, Low: %.2f)", refHigh, refLow);
    }
    else
    {
       refHigh = rates[targetIndex].high;
       refLow  = rates[targetIndex].low;
+      PrintFormat("Standard Reference Candle (High: %.2f, Low: %.2f)", refHigh, refLow);
    }
 
-   ref50 = (refHigh + refLow) / 2.0;
-   PrintFormat("Reference Captured -> High: %.2f | Low: %.2f | 50%%: %.2f", refHigh, refLow, ref50);
+   ref50 = NormalizeDouble((refHigh + refLow) / 2.0, _Digits);
+   return true;
 }
 
 //+------------------------------------------------------------------+
-//| سناریو ۱: مانیتورینگ شکست H1 (بدنه یا سایه)                     |
+//| سناریو ۱: شکست H1 با بدنه یا سناریو ۲: هانت با سایه              |
 //+------------------------------------------------------------------+
 void CheckH1Breakout()
 {
+   datetime currentH1Time = iTime(InpSymbol, PERIOD_H1, 0);
+   if(currentH1Time == lastH1BarTime) return;
+
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
-   if(CopyRates(InpSymbol, PERIOD_H1, 1, 1, rates) < 1) return;
+   if(CopyRates(InpSymbol, PERIOD_H1, 1, 5, rates) < 2) return;
 
    MqlRates last = rates[0];
 
-   // ۱. شکست سقف با بدنه -> Buy Limit روی 50 درصد
+   if(last.time <= refCandleTime) return;
+
+   lastH1BarTime = currentH1Time;
+
+   // ۱. شکست سقف با بدنه -> خرید روی 50 درصد (اردر دائمی GTC بدون انقضای روزانه)
    if(last.close > refHigh)
    {
       double sl = refLow;
       double risk = ref50 - sl;
       if(risk > 0)
       {
-         double tp = ref50 + (risk * InpRiskReward);
-         trade.BuyLimit(InpLotSize, ref50, InpSymbol, sl, tp, ORDER_TIME_DAY, 0, "Body Breakout 50% Buy");
-         Print("Body Breakout UP! Buy Limit placed at 50%.");
+         double tp = NormalizeDouble(ref50 + (risk * InpRiskReward), _Digits);
+         trade.BuyLimit(InpLotSize, ref50, InpSymbol, sl, tp, ORDER_TIME_GTC, 0, "Pedram Breakout 50% BUY");
+         PrintFormat("H1 Body Breakout UP -> Buy Limit GTC placed at %.2f | SL: %.2f | TP: %.2f", ref50, sl, tp);
          currentState = STATE_DONE_FOR_DAY;
          return;
       }
    }
 
-   // ۲. شکست کف با بدنه -> Sell Limit روی 50 درصد
+   // ۲. شکست کف با بدنه -> فروش روی 50 درصد (اردر دائمی GTC بدون انقضای روزانه)
    if(last.close < refLow)
    {
       double sl = refHigh;
       double risk = sl - ref50;
       if(risk > 0)
       {
-         double tp = ref50 - (risk * InpRiskReward);
-         trade.SellLimit(InpLotSize, ref50, InpSymbol, sl, tp, ORDER_TIME_DAY, 0, "Body Breakout 50% Sell");
-         Print("Body Breakout DOWN! Sell Limit placed at 50%.");
+         double tp = NormalizeDouble(ref50 - (risk * InpRiskReward), _Digits);
+         trade.SellLimit(InpLotSize, ref50, InpSymbol, sl, tp, ORDER_TIME_GTC, 0, "Pedram Breakout 50% SELL");
+         PrintFormat("H1 Body Breakout DOWN -> Sell Limit GTC placed at %.2f | SL: %.2f | TP: %.2f", ref50, sl, tp);
          currentState = STATE_DONE_FOR_DAY;
          return;
       }
    }
 
-   // ۳. سویپ سقف با سایه (بدنه زیر سقف، سایه بالای سقف) -> سناریو ۲ نزولی
+   // ۳. سویپ سقف با سایه
    if(last.high > refHigh && last.close <= refHigh)
    {
       sweepDirection = -1; // سل
       sweepExtremeLevel = last.high;
-      fvgBreakTime = 0;
       currentState = STATE_M5_WAIT_SETUP;
-      Print("Wick Sweep UP detected! Switching to M5 setup for SELL.");
+      PrintFormat("Wick Sweep UP at %.2f -> Switching to M5 Setup for SELL", sweepExtremeLevel);
       return;
    }
 
-   // ۴. سویپ کف با سایه (بدنه بالای کف، سایه زیر کف) -> سناریو ۲ صعودی
+   // ۴. سویپ کف با سایه
    if(last.low < refLow && last.close >= refLow)
    {
       sweepDirection = 1; // بای
       sweepExtremeLevel = last.low;
-      fvgBreakTime = 0;
       currentState = STATE_M5_WAIT_SETUP;
-      Print("Wick Sweep DOWN detected! Switching to M5 setup for BUY.");
+      PrintFormat("Wick Sweep DOWN at %.2f -> Switching to M5 Setup for BUY", sweepExtremeLevel);
       return;
    }
 }
 
 //+------------------------------------------------------------------+
-//| سناریو ۲: منطق تایم‌فریم M5 (یافتن FVG، پولبک، دوجی و تاییدیه)  |
+//| سناریو ۲: منطق ۵ دقیقه (FVG + پولبک + دوجی + تاییدیه)           |
 //+------------------------------------------------------------------+
 void ProcessM5Strategy()
 {
+   datetime currentM5Time = iTime(InpSymbol, PERIOD_M5, 0);
+   if(currentM5Time == lastM5BarTime) return;
+   lastM5BarTime = currentM5Time;
+
    MqlRates m5[];
    ArraySetAsSeries(m5, true);
-   if(CopyRates(InpSymbol, PERIOD_M5, 0, 40, m5) < 30) return;
+   int count = CopyRates(InpSymbol, PERIOD_M5, 1, 50, m5);
+   if(count < 20) return;
 
-   // مرحله ۱: پیدا کردن نزدیک‌ترین FVG قبل از سویپ
-   // برای بای دنبال FVG نزولی قبلی و برای سل دنبال FVG صعودی قبلی می‌گردیم
+   // پیدا کردن FVG قبل از سویپ
    double fvgTop = 0.0, fvgBottom = 0.0;
    bool fvgFound = false;
 
-   for(int i = 5; i < 35; i++)
+   for(int i = 3; i < count - 2; i++)
    {
-      if(sweepDirection == 1) // حالت بای: گپ نزولی بین High کندل i و Low کندل i+2
+      if(sweepDirection == 1) // برای بای: گپ نزولی
       {
          if(m5[i+2].low > m5[i].high)
          {
@@ -223,7 +221,7 @@ void ProcessM5Strategy()
             break;
          }
       }
-      else if(sweepDirection == -1) // حالت سل: گپ صعودی بین Low کندل i و High کندل i+2
+      else if(sweepDirection == -1) // برای سل: گپ صعودی
       {
          if(m5[i].low > m5[i+2].high)
          {
@@ -237,78 +235,48 @@ void ProcessM5Strategy()
 
    if(!fvgFound) return;
 
-   // مرحله ۲: شکست FVG (چه با سایه چه با بدنه)
-   bool fvgBroken = false;
-   int breakIdx = -1;
-   for(int i = 1; i <= 10; i++)
-   {
-      if(sweepDirection == 1 && m5[i].high > fvgTop)
-      {
-         fvgBroken = true;
-         breakIdx = i;
-         break;
-      }
-      if(sweepDirection == -1 && m5[i].low < fvgBottom)
-      {
-         fvgBroken = true;
-         breakIdx = i;
-         break;
-      }
-   }
-
-   if(!fvgBroken || breakIdx <= 1) return;
-
-   // مرحله ۳: بررسی پولبک، دوجی و کندل تایید
-   // کندل [2] باید دوجی باشد و به محدوده FVG پولبک زده باشد
-   MqlRates doji = m5[2];
-   MqlRates conf = m5[1]; // کندل تایید که بسته شده است
+   MqlRates doji = m5[1]; // کندل دوجی
+   MqlRates conf = m5[0]; // کندل تایید بسته شده
 
    double dojiRange = doji.high - doji.low;
    if(dojiRange <= 0) return;
    double dojiBody = MathAbs(doji.close - doji.open);
 
-   // شرط دوجی: بدنه کمتر یا مساوی ۲۰٪ کل رنج
-   bool isDoji = (dojiBody / dojiRange) <= 0.20;
-   if(!isDoji) return;
+   if((dojiBody / dojiRange) > 0.25) return; 
 
-   // شرط پولبک به محدوده FVG
-   bool touchedFVG = (doji.low <= fvgTop && doji.high >= fvgBottom);
-   if(!touchedFVG) return;
-
-   // مرحله ۴: تاییدیه و ورود به معامله
-   if(sweepDirection == 1) // ورود به BUY
+   // ورود بای (BUY)
+   if(sweepDirection == 1)
    {
-      // کندل تایید بالای سقف دوجی بسته شود
       if(conf.close > doji.high)
       {
          double ask = SymbolInfoDouble(InpSymbol, SYMBOL_ASK);
-         double sl = sweepExtremeLevel; // پشت کفی که شکسته بود
+         double sl = sweepExtremeLevel;
          double risk = ask - sl;
          if(risk > 0)
          {
-            double tp = ask + (risk * InpRiskReward);
-            if(trade.Buy(InpLotSize, InpSymbol, ask, sl, tp, "M5 Doji Confirmed Buy"))
+            double tp = NormalizeDouble(ask + (risk * InpRiskReward), _Digits);
+            if(trade.Buy(InpLotSize, InpSymbol, ask, sl, tp, "Pedram M5 Buy"))
             {
-               Print("M5 BUY Order executed successfully!");
+               Print("M5 Buy Executed successfully.");
                currentState = STATE_DONE_FOR_DAY;
             }
          }
       }
    }
-   else if(sweepDirection == -1) // ورود به SELL
+   // ورود سل (SELL)
+   else if(sweepDirection == -1)
    {
-      // کندل تایید زیر کف دوجی بسته شود
       if(conf.close < doji.low)
       {
          double bid = SymbolInfoDouble(InpSymbol, SYMBOL_BID);
-         double sl = sweepExtremeLevel; // پشت سقفی که شکسته بود
+         double sl = sweepExtremeLevel;
          double risk = sl - bid;
          if(risk > 0)
          {
-            double tp = bid - (risk * InpRiskReward);
-            if(trade.Sell(InpLotSize, InpSymbol, bid, sl, tp, "M5 Doji Confirmed Sell"))
+            double tp = NormalizeDouble(bid - (risk * InpRiskReward), _Digits);
+            if(trade.Sell(InpLotSize, InpSymbol, bid, sl, tp, "Pedram M5 Sell"))
             {
-               Print("M5 SELL Order executed successfully!");
+               Print("M5 Sell Executed successfully.");
                currentState = STATE_DONE_FOR_DAY;
             }
          }
@@ -327,35 +295,40 @@ void OnTick()
    MqlDateTime dt;
    TimeCurrent(dt);
 
-   // ریست روزانه (ساعت 00:00 سرور) و لغو لیمیت‌اردرهای معلق قبلی
+   // شروع روز جدید: فقط استیت ربات برای ستاپ امروز آماده می‌شود و هیچ اردری حذف نمی‌شود
    datetime todayStart = iTime(InpSymbol, PERIOD_D1, 0);
    if(todayStart != currentDayTime)
    {
       currentDayTime = todayStart;
       currentState = STATE_WAITING_FOR_10AM;
-      CancelAllPendingOrders();
+      refHigh = 0;
+      refLow = 0;
+      ref50 = 0;
+      sweepDirection = 0;
    }
 
    int targetServerHour = GetServerTargetHour();
 
-   // ۱. ثبت کندل ساعت ۱۰ نیویورک
+   // ثبت کندل ۱۰ نیویورک
    if(currentState == STATE_WAITING_FOR_10AM)
    {
       int closeHour = (targetServerHour + 1) % 24;
       if(dt.hour == closeHour && dt.min >= 1)
       {
-         CaptureReferenceCandle(targetServerHour);
-         currentState = STATE_MONITORING_H1_BREAK;
+         if(CaptureReferenceCandle(targetServerHour))
+         {
+            currentState = STATE_MONITORING_H1_BREAK;
+         }
       }
    }
 
-   // ۲. مانیتورینگ شکست H1 (سناریوی ۱ یا ۲)
+   // بررسی شکست H1
    if(currentState == STATE_MONITORING_H1_BREAK)
    {
       CheckH1Breakout();
    }
 
-   // ۳. اجرای ستاپ در M5 در صورت وقوع سویپ با سایه
+   // اجرای ستاپ ۵ دقیقه در صورت سویپ با سایه
    if(currentState == STATE_M5_WAIT_SETUP)
    {
       ProcessM5Strategy();
