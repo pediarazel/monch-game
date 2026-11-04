@@ -294,6 +294,25 @@ bool HasOpenPosition()
    return false;
 }
 
+// Find this EA's position ticket; symbol-only modification can target another hedging position.
+bool FindOwnPositionTicket(ulong &ticket)
+{
+   ticket = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; --i)
+   {
+      ulong current = PositionGetTicket(i);
+      if(current == 0)
+         continue;
+      if(PositionGetString(POSITION_SYMBOL) == _Symbol &&
+         (long)PositionGetInteger(POSITION_MAGIC) == InpMagic)
+      {
+         ticket = current;
+         return true;
+      }
+   }
+   return false;
+}
+
 //+------------------------------------------------------------------+
 //| ارسال سفارش خرید با حدضرر و حدسود مبتنی بر ریسک                 |
 //+------------------------------------------------------------------+
@@ -319,10 +338,42 @@ bool OpenBuy(const double stopLoss)
    trade.SetDeviationInPoints(InpSlippage);
    bool sent = trade.Buy(lots, _Symbol, 0.0, sl, tp, "AnnaBot fixed risk buy");
    if(!sent)
+   {
       LogMessage("ارسال خرید ناموفق: " + trade.ResultRetcodeDescription());
-   else
-      LogMessage(StringFormat("خرید باز شد؛ حجم=%.8f SL=%.*f TP=%.*f", lots, digits, sl, digits, tp));
-   return sent;
+      return false;
+   }
+
+   ulong positionTicket = 0;
+   double fill = trade.ResultPrice();
+   if(FindOwnPositionTicket(positionTicket))
+   {
+      if(fill <= 0.0)
+      {
+         PositionSelectByTicket(positionTicket);
+         fill = PositionGetDouble(POSITION_PRICE_OPEN);
+      }
+   }
+   if(fill <= 0.0 || sl >= fill)
+   {
+      LogMessage("خرید ارسال شد اما قیمت پرشدن/SL برای اصلاح RR معتبر نیست؛ " + trade.ResultRetcodeDescription());
+      return true;
+   }
+   double actualRisk = fill - sl;
+   double correctedTP = NormalizeDouble(fill + actualRisk * InpRiskReward, digits);
+   double rr = MathAbs(correctedTP - fill) / actualRisk;
+   if(MathAbs(rr - InpRiskReward) > 1e-8)
+   {
+      if(positionTicket == 0 || !trade.PositionModify(positionTicket, sl, correctedTP) ||
+         (trade.ResultRetcode() != TRADE_RETCODE_DONE && trade.ResultRetcode() != TRADE_RETCODE_NO_CHANGES))
+         LogMessage("اصلاح TP خرید ناموفق؛ " + trade.ResultRetcodeDescription());
+      else
+         tp = correctedTP;
+   }
+   LogMessage(StringFormat("BUY fill=%.*f SL=%.*f TP=%.*f | SLdist=%.*f TPdist=%.*f RR=%.5f | retcode=%s",
+                           digits, fill, digits, sl, digits, tp,
+                           digits, MathAbs(fill-sl), digits, MathAbs(tp-fill),
+                           MathAbs(tp-fill)/MathAbs(fill-sl), trade.ResultRetcodeDescription()));
+   return true;
 }
 
 //+------------------------------------------------------------------+
@@ -350,10 +401,42 @@ bool OpenSell(const double stopLoss)
    trade.SetDeviationInPoints(InpSlippage);
    bool sent = trade.Sell(lots, _Symbol, 0.0, sl, tp, "AnnaBot fixed risk sell");
    if(!sent)
+   {
       LogMessage("ارسال فروش ناموفق: " + trade.ResultRetcodeDescription());
-   else
-      LogMessage(StringFormat("فروش باز شد؛ حجم=%.8f SL=%.*f TP=%.*f", lots, digits, sl, digits, tp));
-   return sent;
+      return false;
+   }
+
+   ulong positionTicket = 0;
+   double fill = trade.ResultPrice();
+   if(FindOwnPositionTicket(positionTicket))
+   {
+      if(fill <= 0.0)
+      {
+         PositionSelectByTicket(positionTicket);
+         fill = PositionGetDouble(POSITION_PRICE_OPEN);
+      }
+   }
+   if(fill <= 0.0 || sl <= fill)
+   {
+      LogMessage("فروش ارسال شد اما قیمت پرشدن/SL برای اصلاح RR معتبر نیست؛ " + trade.ResultRetcodeDescription());
+      return true;
+   }
+   double actualRisk = sl - fill;
+   double correctedTP = NormalizeDouble(fill - actualRisk * InpRiskReward, digits);
+   double rr = MathAbs(fill - correctedTP) / actualRisk;
+   if(MathAbs(rr - InpRiskReward) > 1e-8)
+   {
+      if(positionTicket == 0 || !trade.PositionModify(positionTicket, sl, correctedTP) ||
+         (trade.ResultRetcode() != TRADE_RETCODE_DONE && trade.ResultRetcode() != TRADE_RETCODE_NO_CHANGES))
+         LogMessage("اصلاح TP فروش ناموفق؛ " + trade.ResultRetcodeDescription());
+      else
+         tp = correctedTP;
+   }
+   LogMessage(StringFormat("SELL fill=%.*f SL=%.*f TP=%.*f | SLdist=%.*f TPdist=%.*f RR=%.5f | retcode=%s",
+                           digits, fill, digits, sl, digits, tp,
+                           digits, MathAbs(fill-sl), digits, MathAbs(tp-fill),
+                           MathAbs(tp-fill)/MathAbs(fill-sl), trade.ResultRetcodeDescription()));
+   return true;
 }
 
 //+------------------------------------------------------------------+
@@ -415,7 +498,6 @@ int CheckM5FvgAndPinbar(const int breakoutDirection, double &stopPrice)
       return 0;
 
    const MqlRates signal = m5[1]; // آخرین کندل تکمیل‌شده برای پین‌بار
-   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    if(point <= 0.0)
       return 0;
    double body = MathAbs(signal.close - signal.open);
