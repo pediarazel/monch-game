@@ -498,10 +498,10 @@ int CheckM5FvgAndPinbar(const int breakoutDirection, double &stopPrice)
       return 0;
 
    const MqlRates signal = m5[1]; // آخرین کندل تکمیل‌شده برای پین‌بار
-   if(point <= 0.0)
+   if(_Point <= 0.0)
       return 0;
    double body = MathAbs(signal.close - signal.open);
-   double effectiveBody = MathMax(body, point);
+   double effectiveBody = MathMax(body, _Point);
    double upperWick = signal.high - MathMax(signal.open, signal.close);
    double lowerWick = MathMin(signal.open, signal.close) - signal.low;
    double range = signal.high - signal.low;
@@ -519,14 +519,14 @@ int CheckM5FvgAndPinbar(const int breakoutDirection, double &stopPrice)
       {
          zoneLow = m5[i + 2].high;
          zoneHigh = m5[i].low;
-         bool wickTouched = (signal.low <= zoneHigh && signal.low >= zoneLow - 2.0 * point);
+         bool wickTouched = (signal.low <= zoneHigh && signal.low >= zoneLow - 2.0 * _Point);
          bool bullishPin = (lowerWick >= 2.0 * effectiveBody &&
                             signal.close >= signal.low + 0.65 * range &&
                             signal.close > signal.open);
          if(wickTouched && bullishPin && signal.close > g_bodyTop)
          {
             stopPrice = MathMin(MathMin(signal.low, zoneLow), g_bodyBottom) -
-                        InpFvgSLBufferPoints * point - InpSLBufferPoints * point;
+                        InpFvgSLBufferPoints * _Point - InpSLBufferPoints * _Point;
             return 1;
          }
       }
@@ -534,14 +534,14 @@ int CheckM5FvgAndPinbar(const int breakoutDirection, double &stopPrice)
       {
          zoneLow = m5[i].high;
          zoneHigh = m5[i + 2].low;
-         bool wickTouched = (signal.high >= zoneLow && signal.high <= zoneHigh + 2.0 * point);
+         bool wickTouched = (signal.high >= zoneLow && signal.high <= zoneHigh + 2.0 * _Point);
          bool bearishPin = (upperWick >= 2.0 * effectiveBody &&
                             signal.close <= signal.high - 0.65 * range &&
                             signal.close < signal.open);
          if(wickTouched && bearishPin && signal.close < g_bodyBottom)
          {
             stopPrice = MathMax(MathMax(signal.high, zoneHigh), g_bodyTop) +
-                        InpFvgSLBufferPoints * point + InpSLBufferPoints * point;
+                        InpFvgSLBufferPoints * _Point + InpSLBufferPoints * _Point;
             return -1;
          }
       }
