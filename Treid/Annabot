@@ -1,276 +1,731 @@
-//@version=6
-// ============================================================================
-// [STRATEGY][RS] ZigZag PA Strategy V4.1 — modern Pine v6 rewrite
-// English: Original logic/pattern definitions are preserved; the only intended
-// behavior change is fixed entry quantity 0.03 instead of the original 10000.
-// TradingView qty means contracts/units, not broker lots. Thus 0.03 units is
-// tiny; for a CFD broker's “0.03 lot”, you may need qty = 0.03 * contract_size.
-// فارسی: منطق و تعریف الگوهای کد اصلی حفظ شده است؛ تنها تغییر رفتاریِ موردنظر
-// مقدار ثابت ورود ۰٫۰۳ به‌جای ۱۰۰۰۰ است. qty در TradingView تعداد قرارداد/واحد
-// است، نه لات کارگزاری؛ بنابراین ۰٫۰۳ واحد بسیار کوچک است. برای «۰٫۰۳ لات» در
-// CFD ممکن است لازم باشد از qty = 0.03 * contract_size استفاده کنید.
-// ============================================================================
-strategy(title="[STRATEGY][RS]ZigZag PA Strategy V4.1", shorttitle="S", default_qty_type=strategy.fixed, default_qty_value=0.03, initial_capital=100000, currency=currency.USD, pyramiding=0, overlay=true)
+//+------------------------------------------------------------------+
+//| AnnaBot EURUSD_o compatible fixed-risk EA                                            |
+//| اکسپرت آنا: شکست بدنه کندل مرجع نیویورک و تأیید FVG/پین‌بار     |
+//+------------------------------------------------------------------+
+#property strict
+#property version   "1.09"
+#property description "AnnaBot strategy; symbol-property validated, fixed USD risk, RR 2 compatible with EURUSD_o"
 
-// Single fixed-lot control replaces the original Target 1/Target 2 trade-size inputs.
-inpLot = input.float(0.03, "Lot size (fixed)")
-useHA = input.bool(false, title="Use Heikken Ashi Candles")
-useAltTF = input.bool(true, title="Use Alt Timeframe")
-tf = input.timeframe("60", title="Alt Timeframe")
-showPatterns = input.bool(true, title="Show Patterns")
-showFib0000 = input.bool(true, title="Display Fibonacci 0.000:")
-showFib0236 = input.bool(true, title="Display Fibonacci 0.236:")
-showFib0382 = input.bool(true, title="Display Fibonacci 0.382:")
-showFib0500 = input.bool(true, title="Display Fibonacci 0.500:")
-showFib0618 = input.bool(true, title="Display Fibonacci 0.618:")
-showFib0764 = input.bool(true, title="Display Fibonacci 0.764:")
-showFib1000 = input.bool(true, title="Display Fibonacci 1.000:")
+#include <Trade\Trade.mqh>
+CTrade trade;
 
-zigzag() =>
-    _isUp = close >= open
-    _isDown = close <= open
-    var int _direction = 0
-    _direction := _isUp[1] and _isDown ? -1 : _isDown[1] and _isUp ? 1 : nz(_direction[1])
-    _zigzag = _isUp[1] and _isDown and _direction[1] != -1 ? ta.highest(high, 2) : _isDown[1] and _isUp and _direction[1] != 1 ? ta.lowest(low, 2) : na
-    _zigzag
+//--- تنظیمات اصلی استراتژی و مدیریت ریسک
+input double InpRiskUSD               = 2.0;        // ریسک اسمی هر معامله؛ ارز حساب باید USD باشد
+input double InpMaxLot                = 1.0;        // سقف ایمنی حجم لات
+input double InpMinLotGuard           = 0.01;       // حداقل مجاز محافظتی؛ در صورت نیاز با حداقل بروکر تطبیق داده می‌شود
+input double InpRiskReward            = 2.0;        // نسبت سود به زیان برای حد سود
+input int    InpNYHour                = 10;         // ساعت کندل مرجع در نیویورک
+input bool   InpAutoNYOffset          = true;       // محاسبه خودکار آفست نیویورک با درنظرگرفتن DST
+input int    InpServerOffsetFromNY    = 7;          // فقط در صورت خاموش‌بودن آفست خودکار استفاده می‌شود
+input int    InpSessionWindowHours    = 3;          // مدت اعتبار ستاپ پس از کندل مرجع
+input int    InpSlippage              = 3;          // انحراف مجاز بر حسب پوینت
+input int    InpSLBufferPoints        = 50;         // فاصله حدضرر از مرز بدنه کندل مرجع
+input int    InpFvgSLBufferPoints     = 30;         // فاصله حدضرر از ناحیه FVG/پین‌بار
+input bool   InpDebugLog              = true;       // ثبت گزارش تشخیصی
+input long   InpMagic                 = 123456;     // مجیک نامبر معاملات اکسپرت
 
-_ticker = useHA ? ticker.heikinashi(syminfo.tickerid) : syminfo.tickerid
-sz = useAltTF ? (ta.change(time(tf)) != 0 ? request.security(_ticker, tf, zigzag(), lookahead=barmerge.lookahead_off) : na) : zigzag()
+//--- وضعیت روز جاری و کندل مرجع
+datetime g_lastM5BarTime = 0;
+int      g_sessionDateKey = -1;
+int      g_nyOffset = 7;
+int      g_nyOffsetDateKey = -1;
+double   g_bodyTop = 0.0;
+double   g_bodyBottom = 0.0;
+bool     g_referenceReady = false;
+bool     g_tradeAttemptedToday = false;
 
-plot(sz, title="zigzag", color=color.black, linewidth=2)
+//--- Validated properties for the attached symbol (never use chart g_symbolPoint).
+double g_symbolPoint=0.0, g_tickSize=0.0, g_tickValueLoss=0.0;
+int g_symbolDigits=0;
+double g_volumeMin=0.0, g_volumeMax=0.0, g_volumeStep=0.0, g_contractSize=0.0;
+long g_stopsLevel=0, g_freezeLevel=0;
 
-//  ||---   Pattern Recognition:
-x = ta.valuewhen(not na(sz), sz, 4)
-a = ta.valuewhen(not na(sz), sz, 3)
-b = ta.valuewhen(not na(sz), sz, 2)
-c = ta.valuewhen(not na(sz), sz, 1)
-d = ta.valuewhen(not na(sz), sz, 0)
+//+------------------------------------------------------------------+
+//| پیام تشخیصی فارسی/انگلیسی                                        |
+//+------------------------------------------------------------------+
+void LogMessage(const string message)
+{
+   if(InpDebugLog)
+      Print("AnnaBot: ", message);
+}
 
-xab = (math.abs(b-a)/math.abs(x-a))
-xad = (math.abs(a-d)/math.abs(x-a))
-abc = (math.abs(b-c)/math.abs(a-b))
-bcd = (math.abs(c-d)/math.abs(b-c))
+//+------------------------------------------------------------------+
+//| آخرین یکشنبه ماه (ساعت ۰۰:۰۰)                                    |
+//+------------------------------------------------------------------+
+datetime LastSundayOfMonth(const int year,const int month)
+{
+   MqlDateTime nextMonth;
+   nextMonth.year = year;
+   nextMonth.mon = month + 1;
+   if(nextMonth.mon > 12)
+   {
+      nextMonth.mon = 1;
+      nextMonth.year++;
+   }
+   nextMonth.day = 1;
+   nextMonth.hour = 0;
+   nextMonth.min = 0;
+   nextMonth.sec = 0;
+   datetime firstOfNextMonth = StructToTime(nextMonth);
+   datetime lastDay = firstOfNextMonth - 86400;
+   MqlDateTime lastParts;
+   if(!TimeToStruct(lastDay, lastParts))
+      return 0;
+   return lastDay - (datetime)(lastParts.day_of_week * 86400);
+}
 
-//  ||-->   Functions:
+//+------------------------------------------------------------------+
+//| האם UTC time داخل دوره ساعت تابستانی نیویورک است؟               |
+//+------------------------------------------------------------------+
+bool IsNYSummerTime(datetime utcTime)
+{
+   MqlDateTime utcParts;
+   if(!TimeToStruct(utcTime, utcParts))
+      return false;
 
+   // شروع: دومین یکشنبه مارس، ساعت ۰۷:۰۰ UTC (۰۲:۰۰ EST).
+   MqlDateTime marchFirst;
+   marchFirst.year = utcParts.year;
+   marchFirst.mon = 3;
+   marchFirst.day = 1;
+   marchFirst.hour = 0;
+   marchFirst.min = 0;
+   marchFirst.sec = 0;
+   datetime marchFirstTime = StructToTime(marchFirst);
+   MqlDateTime marchFirstParts;
+   if(!TimeToStruct(marchFirstTime, marchFirstParts))
+      return false;
+   int secondSunday = 1 + ((7 - marchFirstParts.day_of_week) % 7) + 7;
+   MqlDateTime dstStartParts;
+   dstStartParts.year = utcParts.year;
+   dstStartParts.mon = 3;
+   dstStartParts.day = secondSunday;
+   dstStartParts.hour = 7;
+   dstStartParts.min = 0;
+   dstStartParts.sec = 0;
+   datetime dstStart = StructToTime(dstStartParts);
 
-isBat(_mode)=>
-    _xab = xab >= 0.382 and xab <= 0.5
-    _abc = abc >= 0.382 and abc <= 0.886
-    _bcd = bcd >= 1.618 and bcd <= 2.618
-    _xad = xad <= 0.618 and xad <= 1.000    // 0.886
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+   // پایان: اولین یکشنبه نوامبر، ساعت ۰۶:۰۰ UTC (۰۲:۰۰ EDT).
+   MqlDateTime novemberFirst;
+   novemberFirst.year = utcParts.year;
+   novemberFirst.mon = 11;
+   novemberFirst.day = 1;
+   novemberFirst.hour = 0;
+   novemberFirst.min = 0;
+   novemberFirst.sec = 0;
+   datetime novemberFirstTime = StructToTime(novemberFirst);
+   MqlDateTime novemberFirstParts;
+   if(!TimeToStruct(novemberFirstTime, novemberFirstParts))
+      return false;
+   int firstSunday = 1 + ((7 - novemberFirstParts.day_of_week) % 7);
+   MqlDateTime dstEndParts;
+   dstEndParts.year = utcParts.year;
+   dstEndParts.mon = 11;
+   dstEndParts.day = firstSunday;
+   dstEndParts.hour = 6;
+   dstEndParts.min = 0;
+   dstEndParts.sec = 0;
+   datetime dstEnd = StructToTime(dstEndParts);
+   return (utcTime >= dstStart && utcTime < dstEnd);
+}
 
-isAntiBat(_mode)=>
-    _xab = xab >= 0.500 and xab <= 0.886    // 0.618
-    _abc = abc >= 1.000 and abc <= 2.618    // 1.13 --> 2.618
-    _bcd = bcd >= 1.618 and bcd <= 2.618    // 2.0  --> 2.618
-    _xad = xad >= 0.886 and xad <= 1.000    // 1.13
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+//+------------------------------------------------------------------+
+//| محاسبه اختلاف ساعت سرور و نیویورک                                |
+//+------------------------------------------------------------------+
+int NYOffsetAuto()
+{
+   int nyUtcOffset = IsNYSummerTime(TimeGMT()) ? -4 : -5;
+   int serverUtcOffset = (int)MathRound((TimeTradeServer() - TimeGMT()) / 3600.0);
+   return serverUtcOffset - nyUtcOffset;
+}
 
-isAltBat(_mode)=>
-    _xab = xab <= 0.382
-    _abc = abc >= 0.382 and abc <= 0.886
-    _bcd = bcd >= 2.0 and bcd <= 3.618
-    _xad = xad <= 1.13
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+//+------------------------------------------------------------------+
+//| انتخاب آفست خودکار یا آفست دستی                                  |
+//+------------------------------------------------------------------+
+int CurrentNYOffset()
+{
+   return InpAutoNYOffset ? NYOffsetAuto() : InpServerOffsetFromNY;
+}
 
-isButterfly(_mode)=>
-    _xab = xab <= 0.786
-    _abc = abc >= 0.382 and abc <= 0.886
-    _bcd = bcd >= 1.618 and bcd <= 2.618
-    _xad = xad >= 1.27 and xad <= 1.618
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+//+------------------------------------------------------------------+
+//| تبدیل ساعت سرور به ساعت نیویورک با آفست دستی ورودی               |
+//+------------------------------------------------------------------+
+int ServerHourToNYHour(const int serverHour)
+{
+   int hour = (serverHour - CurrentNYOffset()) % 24;
+   if(hour < 0)
+      hour += 24;
+   return hour;
+}
 
-isAntiButterfly(_mode)=>
-    _xab = xab >= 0.236 and xab <= 0.886    // 0.382 - 0.618
-    _abc = abc >= 1.130 and abc <= 2.618    // 1.130 - 2.618
-    _bcd = bcd >= 1.000 and bcd <= 1.382    // 1.27
-    _xad = xad >= 0.500 and xad <= 0.886    // 0.618 - 0.786
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+//+------------------------------------------------------------------+
+//| کلید تاریخ به شکل YYYYMMDD                                       |
+//+------------------------------------------------------------------+
+int DateKey(const datetime value)
+{
+   MqlDateTime parts;
+   if(!TimeToStruct(value, parts))
+      return -1;
+   return parts.year * 10000 + parts.mon * 100 + parts.day;
+}
 
-isABCD(_mode)=>
-    _abc = abc >= 0.382 and abc <= 0.886
-    _bcd = bcd >= 1.13 and bcd <= 2.618
-    _abc and _bcd and (_mode == 1 ? d < c : d > c)
+//+------------------------------------------------------------------+
+//| ارزش زیان هر تیک برای یک لات؛ در نبود فیلد اختصاصی از مقدار کلی استفاده می‌شود |
+double LossTickValue()
+{
+   double value=0.0;
+   if(!SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE_LOSS,value) || !MathIsValidNumber(value) || value<=0.0)
+      return 0.0;
+   return value;
+}
 
-isGartley(_mode)=>
-    _xab = xab >= 0.5 and xab <= 0.618 // 0.618
-    _abc = abc >= 0.382 and abc <= 0.886
-    _bcd = bcd >= 1.13 and bcd <= 2.618
-    _xad = xad >= 0.75 and xad <= 0.875 // 0.786
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+// Round prices to the symbol tick grid in the risk-conservative direction.
+double RoundPriceToTick(const double price,const bool roundUp)
+{
+   if(g_tickSize<=0.0 || g_symbolDigits<0) return 0.0;
+   double units=price/g_tickSize;
+   double rounded=(roundUp ? MathCeil(units-1e-10) : MathFloor(units+1e-10))*g_tickSize;
+   return NormalizeDouble(rounded,g_symbolDigits);
+}
 
-isAntiGartley(_mode)=>
-    _xab = xab >= 0.500 and xab <= 0.886    // 0.618 -> 0.786
-    _abc = abc >= 1.000 and abc <= 2.618    // 1.130 -> 2.618
-    _bcd = bcd >= 1.500 and bcd <= 5.000    // 1.618
-    _xad = xad >= 1.000 and xad <= 5.000    // 1.272
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+bool ValidateOrderStops(const bool isBuy,const double sl,const double tp)
+{
+   MqlTick q;
+   if(!SymbolInfoTick(_Symbol,q) || q.bid<=0.0 || q.ask<=0.0)
+   { LogMessage("قیمت جاری نماد در دسترس نیست؛ سفارش لغو شد."); return false; }
+   double required=(double)MathMax(g_stopsLevel,g_freezeLevel)*g_symbolPoint;
+   double tol=g_tickSize*1e-6;
+   bool valid=isBuy ? (sl<q.bid && tp>q.bid && q.bid-sl+tol>=required && tp-q.bid+tol>=required)
+                    : (sl>q.ask && tp<q.ask && sl-q.ask+tol>=required && q.ask-tp+tol>=required);
+   if(!valid)
+      PrintFormat("AnnaBot: intended SL/TP violates direction or broker stops/freeze; no price distortion. side=%s bid=%.*f ask=%.*f SL=%.*f TP=%.*f minDistance=%.*f (stops=%d freeze=%d points)",
+                  isBuy?"BUY":"SELL",g_symbolDigits,q.bid,g_symbolDigits,q.ask,g_symbolDigits,sl,g_symbolDigits,tp,g_symbolDigits,required,(int)g_stopsLevel,(int)g_freezeLevel);
+   return valid;
+}
 
-isCrab(_mode)=>
-    _xab = xab >= 0.500 and xab <= 0.875    // 0.886
-    _abc = abc >= 0.382 and abc <= 0.886
-    _bcd = bcd >= 2.000 and bcd <= 5.000    // 3.618
-    _xad = xad >= 1.382 and xad <= 5.000    // 1.618
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+//+------------------------------------------------------------------+
+//| فاصله استاپ به پیپ؛ پیپ فارکس ۳/۵ رقمی برابر ۱۰ پوینت است       |
+double SLDistancePips(const double distance)
+{
+   double point=g_symbolPoint;
+   int digits=g_symbolDigits;
+   if(point<=0.0) return 0.0;
+   double pip=((digits==3 || digits==5) ? 10.0*point : point);
+   return MathAbs(distance)/pip;
+}
 
-isAntiCrab(_mode)=>
-    _xab = xab >= 0.250 and xab <= 0.500    // 0.276 -> 0.446
-    _abc = abc >= 1.130 and abc <= 2.618    // 1.130 -> 2.618
-    _bcd = bcd >= 1.618 and bcd <= 2.618    // 1.618 -> 2.618
-    _xad = xad >= 0.500 and xad <= 0.750    // 0.618
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+//+------------------------------------------------------------------+
+//| گرد کردن حجم فقط به سمت پایین و تعداد اعشار لازم                |
+double NormalizeVolumeDown(const double volume,const double step)
+{
+   if(step<=0.0 || volume<=0.0) return 0.0;
+   int digits=0; double scaled=step;
+   while(digits<8 && MathAbs(scaled-MathRound(scaled))>1e-8) { scaled*=10.0; digits++; }
+   return NormalizeDouble(MathFloor((volume+step*1e-10)/step)*step,digits);
+}
 
-isShark(_mode)=>
-    _xab = xab >= 0.500 and xab <= 0.875    // 0.5 --> 0.886
-    _abc = abc >= 1.130 and abc <= 1.618    //
-    _bcd = bcd >= 1.270 and bcd <= 2.240    //
-    _xad = xad >= 0.886 and xad <= 1.130    // 0.886 --> 1.13
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+//+------------------------------------------------------------------+
+//| ریسک تقریبی پولی برای حجم مشخص با اندازه استاپ داده‌شده           |
+double RiskForVolume(const double distance,const double volume)
+{
+   if(g_tickSize<=0.0 || g_tickValueLoss<=0.0) return 0.0;
+   return (MathAbs(distance)/g_tickSize)*g_tickValueLoss*volume;
+}
 
-isAntiShark(_mode)=>
-    _xab = xab >= 0.382 and xab <= 0.875    // 0.446 --> 0.618
-    _abc = abc >= 0.500 and abc <= 1.000    // 0.618 --> 0.886
-    _bcd = bcd >= 1.250 and bcd <= 2.618    // 1.618 --> 2.618
-    _xad = xad >= 0.500 and xad <= 1.250    // 1.130 --> 1.130
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+//+------------------------------------------------------------------+
+//| حجم ریسک ثابت، محدود به گام/حد نماد/سقف کاربر/حجم مجاز و مارجین |
+double PickLot(const double entry,const double sl,const ENUM_ORDER_TYPE orderType)
+{
+   if(AccountInfoString(ACCOUNT_CURRENCY)!="USD")
+   { LogMessage("حساب با ارز غیر USD است؛ ریسک ثابت دلاری قابل تضمین نیست و معامله رد شد."); return 0.0; }
+   double liveLoss=LossTickValue(), liveProfit=0.0, liveGeneric=0.0;
+   SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE_PROFIT,liveProfit);
+   SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE,liveGeneric);
+   if(liveLoss<=0.0 || g_tickSize<=0.0 || !MathIsValidNumber(liveLoss))
+   { LogMessage("مقدار معتبر cash SYMBOL_TRADE_TICK_VALUE_LOSS یا tick size موجود نیست؛ معامله رد شد."); return 0.0; }
+   // Broker profit/loss conversions may differ modestly; extreme disagreement is unsafe for a fixed cash risk.
+   if((liveProfit>0.0 && (liveLoss/liveProfit<0.5 || liveLoss/liveProfit>2.0)) ||
+      (liveGeneric>0.0 && (liveLoss/liveGeneric<0.5 || liveLoss/liveGeneric>2.0)))
+   { PrintFormat("AnnaBot: inconsistent cash tick values (loss=%.10g profit=%.10g generic=%.10g); trade refused.",liveLoss,liveProfit,liveGeneric); return 0.0; }
+   g_tickValueLoss=liveLoss;
+   double distance=MathAbs(entry-sl);
+   if(g_volumeMin<=0.0 || g_volumeMax<=0.0 || g_volumeStep<=0.0 || distance<=0.0 || InpRiskUSD<=0.0)
+   { LogMessage("اطلاعات حجم/تیک/ریسک نامعتبر است؛ معامله لغو شد."); return 0.0; }
+   double riskPerLot=(distance/g_tickSize)*g_tickValueLoss;
+   if(!MathIsValidNumber(riskPerLot) || riskPerLot<=0.0) return 0.0;
+   double requested=InpRiskUSD/riskPerLot;
+   double permitted=MathMin(g_volumeMax,InpMaxLot);
+   if(g_volumeMin>permitted) { LogMessage("حداقل حجم نماد از سقف مجاز بیشتر است."); return 0.0; }
+   if(g_symbolDigits<0) return 0.0;
+   // Keep existing directional symbol volume-limit accounting.
+   double vlimit=0.0; SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_LIMIT,vlimit);
+   if(vlimit>0.0)
+   {
+      double used=0.0;
+      for(int i=PositionsTotal()-1;i>=0;--i)
+      {
+         ulong ticket=PositionGetTicket(i); if(ticket==0 || PositionGetString(POSITION_SYMBOL)!=_Symbol) continue;
+         ENUM_POSITION_TYPE pt=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+         if((orderType==ORDER_TYPE_BUY && pt==POSITION_TYPE_BUY) || (orderType==ORDER_TYPE_SELL && pt==POSITION_TYPE_SELL)) used+=PositionGetDouble(POSITION_VOLUME);
+      }
+      for(int j=OrdersTotal()-1;j>=0;--j)
+      {
+         ulong ticket=OrderGetTicket(j); if(ticket==0 || OrderGetString(ORDER_SYMBOL)!=_Symbol) continue;
+         ENUM_ORDER_TYPE ot=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+         bool buyOrder=(ot==ORDER_TYPE_BUY_LIMIT || ot==ORDER_TYPE_BUY_STOP || ot==ORDER_TYPE_BUY_STOP_LIMIT);
+         bool sellOrder=(ot==ORDER_TYPE_SELL_LIMIT || ot==ORDER_TYPE_SELL_STOP || ot==ORDER_TYPE_SELL_STOP_LIMIT);
+         if((orderType==ORDER_TYPE_BUY && buyOrder) || (orderType==ORDER_TYPE_SELL && sellOrder)) used+=OrderGetDouble(ORDER_VOLUME_CURRENT);
+      }
+      permitted=MathMin(permitted,MathMax(0.0,vlimit-used));
+   }
+   permitted=NormalizeVolumeDown(permitted,g_volumeStep);
+   if(permitted<g_volumeMin) { LogMessage("محدودیت حجم نماد/سقف ورودی اجازه حداقل لات را نمی‌دهد."); return 0.0; }
+   double guard=MathMax(g_volumeMin,InpMinLotGuard);
+   double lots=NormalizeVolumeDown(MathMin(requested,permitted),g_volumeStep);
+   if(lots<guard-1e-10)
+   { PrintFormat("AnnaBot: target risk %.2f USD requires %.8f lots, below configured/broker minimum %.8f; refuse rather than exceed risk.",InpRiskUSD,requested,guard); return 0.0; }
+   if(lots<g_volumeMin || lots>permitted) return 0.0;
+   double freeMargin=AccountInfoDouble(ACCOUNT_MARGIN_FREE), margin=0.0;
+   while(lots>=g_volumeMin-1e-10)
+   {
+      if(OrderCalcMargin(orderType,_Symbol,lots,entry,margin) && margin<=freeMargin) break;
+      lots=NormalizeVolumeDown(lots-g_volumeStep,g_volumeStep);
+   }
+   if(lots<guard-1e-10) { LogMessage("مارجین آزاد کافی نیست بدون آنکه از حداقل حجم/گارد عبور شود؛ معامله لغو شد."); return 0.0; }
+   double actualRisk=RiskForVolume(distance,lots);
+   if(actualRisk>InpRiskUSD+MathMax(0.000001,InpRiskUSD*1e-8))
+   { PrintFormat("AnnaBot: computed risk %.8f exceeds target %.8f USD; trade refused.",actualRisk,InpRiskUSD); return 0.0; }
+   PrintFormat("SL distance = %.2f pips | calculated lot = %.8f | estimated loss = %.4f USD",SLDistancePips(distance),lots,actualRisk);
+   return lots;
+}
 
-is5o(_mode)=>
-    _xab = xab >= 1.13 and xab <= 1.618
-    _abc = abc >= 1.618 and abc <= 2.24
-    _bcd = bcd >= 0.5 and bcd <= 0.625 // 0.5
-    _xad = xad >= 0.0 and xad <= 0.236 // negative?
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+//+------------------------------------------------------------------+
+//| بررسی اینکه برای همین نماد و مجیک پوزیشن باز وجود دارد یا نه     |
+//+------------------------------------------------------------------+
+bool HasOpenPosition()
+{
+   for(int i = PositionsTotal() - 1; i >= 0; --i)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0)
+         continue;
+      if(PositionGetString(POSITION_SYMBOL) == _Symbol &&
+         (long)PositionGetInteger(POSITION_MAGIC) == InpMagic)
+         return true;
+   }
+   return false;
+}
 
-isWolf(_mode)=>
-    _xab = xab >= 1.27 and xab <= 1.618
-    _abc = abc >= 0 and abc <= 5
-    _bcd = bcd >= 1.27 and bcd <= 1.618
-    _xad = xad >= 0.0 and xad <= 5
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+// Find this EA's position ticket; symbol-only modification can target another hedging position.
+bool FindOwnPositionTicket(ulong &ticket)
+{
+   ticket = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; --i)
+   {
+      ulong current = PositionGetTicket(i);
+      if(current == 0)
+         continue;
+      if(PositionGetString(POSITION_SYMBOL) == _Symbol &&
+         (long)PositionGetInteger(POSITION_MAGIC) == InpMagic)
+      {
+         ticket = current;
+         return true;
+      }
+   }
+   return false;
+}
 
-isHnS(_mode)=>
-    _xab = xab >= 2.0 and xab <= 10
-    _abc = abc >= 0.90 and abc <= 1.1
-    _bcd = bcd >= 0.236 and bcd <= 0.88
-    _xad = xad >= 0.90 and xad <= 1.1
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+//+------------------------------------------------------------------+
+//| ارسال سفارش خرید با حدضرر و حدسود مبتنی بر ریسک                 |
+//+------------------------------------------------------------------+
+bool OpenBuy(const double stopLoss)
+{
+   double ask = 0.0;
+   if(!SymbolInfoDouble(_Symbol, SYMBOL_ASK, ask) || ask <= 0.0)
+      return false;
+   int digits = g_symbolDigits;
+   double sl = RoundPriceToTick(stopLoss, false);
+   if(sl >= ask)
+   {
+      LogMessage("حدضرر خرید بالاتر از قیمت ورود است.");
+      return false;
+   }
+   double riskDistance = ask - sl;
+   double tp = RoundPriceToTick(ask + riskDistance * InpRiskReward, true);
+   if(!ValidateOrderStops(true,sl,tp)) return false;
+   double lots = PickLot(ask, sl, ORDER_TYPE_BUY);
+   if(lots <= 0.0)
+      return false;
 
-isConTria(_mode)=>
-    _xab = xab >= 0.382 and xab <= 0.618
-    _abc = abc >= 0.382 and abc <= 0.618
-    _bcd = bcd >= 0.382 and bcd <= 0.618
-    _xad = xad >= 0.236 and xad <= 0.764
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+   trade.SetExpertMagicNumber((ulong)InpMagic);
+   trade.SetDeviationInPoints(InpSlippage);
+   bool sent = trade.Buy(lots, _Symbol, 0.0, sl, tp, "AnnaBot EURUSD_o compatible buy");
+   if(!sent)
+   {
+      LogMessage("ارسال خرید ناموفق: " + trade.ResultRetcodeDescription());
+      return false;
+   }
 
-isExpTria(_mode)=>
-    _xab = xab >= 1.236 and xab <= 1.618
-    _abc = abc >= 1.000 and abc <= 1.618
-    _bcd = bcd >= 1.236 and bcd <= 2.000
-    _xad = xad >= 2.000 and xad <= 2.236
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+   ulong positionTicket = 0;
+   double fill = trade.ResultPrice();
+   if(FindOwnPositionTicket(positionTicket))
+   {
+      if(fill <= 0.0)
+      {
+         PositionSelectByTicket(positionTicket);
+         fill = PositionGetDouble(POSITION_PRICE_OPEN);
+      }
+   }
+   if(fill <= 0.0 || sl >= fill)
+   {
+      LogMessage("خرید ارسال شد اما قیمت پرشدن/SL برای اصلاح RR معتبر نیست؛ " + trade.ResultRetcodeDescription());
+      return true;
+   }
+   double actualRisk = fill - sl;
+   double correctedTP = RoundPriceToTick(fill + actualRisk * InpRiskReward, true);
+   double rr = MathAbs(correctedTP - fill) / actualRisk;
+   if(MathAbs(rr - InpRiskReward) > 1e-8)
+   {
+      if(positionTicket == 0 || !ValidateOrderStops(true,sl,correctedTP) || !trade.PositionModify(positionTicket, sl, correctedTP) ||
+         (trade.ResultRetcode() != TRADE_RETCODE_DONE && trade.ResultRetcode() != TRADE_RETCODE_NO_CHANGES))
+         LogMessage("اصلاح TP خرید ناموفق؛ " + trade.ResultRetcodeDescription());
+      else
+         tp = correctedTP;
+   }
+   LogMessage(StringFormat("BUY fill=%.*f SL=%.*f TP=%.*f | SLdist=%.*f TPdist=%.*f RR=%.5f | retcode=%s",
+                           digits, fill, digits, sl, digits, tp,
+                           digits, MathAbs(fill-sl), digits, MathAbs(tp-fill),
+                           MathAbs(tp-fill)/MathAbs(fill-sl), trade.ResultRetcodeDescription()));
+   return true;
+}
 
-// Pattern markers. All retain the original labels, locations, colors and -2 offset.
-plotshape(showPatterns and isABCD(-1) and not isABCD(-1)[1], text="\nAB=CD", title="Bear ABCD", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isBat(-1) and not isBat(-1)[1], text="Bat", title="Bear Bat", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isAntiBat(-1) and not isAntiBat(-1)[1], text="Anti Bat", title="Bear Anti Bat", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isAltBat(-1) and not isAltBat(-1)[1], text="Alt Bat", title="Bear Alt Bat", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isButterfly(-1) and not isButterfly(-1)[1], text="Butterfly", title="Bear Butterfly", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isAntiButterfly(-1) and not isAntiButterfly(-1)[1], text="Anti Butterfly", title="Bear Anti Butterfly", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isGartley(-1) and not isGartley(-1)[1], text="Gartley", title="Bear Gartley", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isAntiGartley(-1) and not isAntiGartley(-1)[1], text="Anti Gartley", title="Bear Anti Gartley", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isCrab(-1) and not isCrab(-1)[1], text="Crab", title="Bear Crab", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isAntiCrab(-1) and not isAntiCrab(-1)[1], text="Anti Crab", title="Bear Anti Crab", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isShark(-1) and not isShark(-1)[1], text="Shark", title="Bear Shark", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isAntiShark(-1) and not isAntiShark(-1)[1], text="Anti Shark", title="Bear Anti Shark", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and is5o(-1) and not is5o(-1)[1], text="5-O", title="Bear 5-O", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isWolf(-1) and not isWolf(-1)[1], text="Wolf Wave", title="Bear Wolf Wave", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isHnS(-1) and not isHnS(-1)[1], text="Head and Shoulders", title="Bear Head and Shoulders", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isConTria(-1) and not isConTria(-1)[1], text="Contracting Triangle", title="Bear Contracting Triangle", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isExpTria(-1) and not isExpTria(-1)[1], text="Expanding Triangle", title="Bear Expanding Triangle", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
-plotshape(showPatterns and isABCD(1) and not isABCD(1)[1], text="AB=CD\n", title="Bull ABCD", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isBat(1) and not isBat(1)[1], text="Bat", title="Bull Bat", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isAntiBat(1) and not isAntiBat(1)[1], text="Anti Bat", title="Bull Anti Bat", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isAltBat(1) and not isAltBat(1)[1], text="Alt Bat", title="Bull Alt Bat", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isButterfly(1) and not isButterfly(1)[1], text="Butterfly", title="Bull Butterfly", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isAntiButterfly(1) and not isAntiButterfly(1)[1], text="Anti Butterfly", title="Bull Anti Butterfly", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isGartley(1) and not isGartley(1)[1], text="Gartley", title="Bull Gartley", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isAntiGartley(1) and not isAntiGartley(1)[1], text="Anti Gartley", title="Bull Anti Gartley", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isCrab(1) and not isCrab(1)[1], text="Crab", title="Bull Crab", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isAntiCrab(1) and not isAntiCrab(1)[1], text="Anti Crab", title="Bull Anti Crab", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isShark(1) and not isShark(1)[1], text="Shark", title="Bull Shark", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isAntiShark(1) and not isAntiShark(1)[1], text="Anti Shark", title="Bull Anti Shark", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and is5o(1) and not is5o(1)[1], text="5-O", title="Bull 5-O", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isWolf(1) and not isWolf(1)[1], text="Wolf Wave", title="Bull Wolf Wave", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isHnS(1) and not isHnS(1)[1], text="Head and Shoulders", title="Bull Head and Shoulders", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isConTria(1) and not isConTria(1)[1], text="Contracting Triangle", title="Bull Contracting Triangle", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
-plotshape(showPatterns and isExpTria(1) and not isExpTria(1)[1], text="Expanding Triangle", title="Bull Expanding Triangle", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+//+------------------------------------------------------------------+
+//| ارسال سفارش فروش با حدضرر و حدسود مبتنی بر ریسک                 |
+//+------------------------------------------------------------------+
+bool OpenSell(const double stopLoss)
+{
+   double bid = 0.0;
+   if(!SymbolInfoDouble(_Symbol, SYMBOL_BID, bid) || bid <= 0.0)
+      return false;
+   int digits = g_symbolDigits;
+   double sl = RoundPriceToTick(stopLoss, true);
+   if(sl <= bid)
+   {
+      LogMessage("حدضرر فروش پایین‌تر از قیمت ورود است.");
+      return false;
+   }
+   double riskDistance = sl - bid;
+   double tp = RoundPriceToTick(bid - riskDistance * InpRiskReward, false);
+   if(!ValidateOrderStops(false,sl,tp)) return false;
+   double lots = PickLot(bid, sl, ORDER_TYPE_SELL);
+   if(lots <= 0.0)
+      return false;
 
-//-------------------------------------------------------------------------------------------------------------------------------------------------------------
-fib_range = math.abs(d-c)
-fib_0000 = not showFib0000 ? na : d > c ? d-(fib_range*0.000):d+(fib_range*0.000)
-fib_0236 = not showFib0236 ? na : d > c ? d-(fib_range*0.236):d+(fib_range*0.236)
-fib_0382 = not showFib0382 ? na : d > c ? d-(fib_range*0.382):d+(fib_range*0.382)
-fib_0500 = not showFib0500 ? na : d > c ? d-(fib_range*0.500):d+(fib_range*0.500)
-fib_0618 = not showFib0618 ? na : d > c ? d-(fib_range*0.618):d+(fib_range*0.618)
-fib_0764 = not showFib0764 ? na : d > c ? d-(fib_range*0.764):d+(fib_range*0.764)
-fib_1000 = not showFib1000 ? na : d > c ? d-(fib_range*1.000):d+(fib_range*1.000)
-plot(title="Fib 0.000", series=fib_0000, color=color.new(color.black, fib_0000 != fib_0000[1] ? 100 : 0))
-plot(title="Fib 0.236", series=fib_0236, color=color.new(color.red, fib_0236 != fib_0236[1] ? 100 : 0))
-plot(title="Fib 0.382", series=fib_0382, color=color.new(color.olive, fib_0382 != fib_0382[1] ? 100 : 0))
-plot(title="Fib 0.500", series=fib_0500, color=color.new(color.lime, fib_0500 != fib_0500[1] ? 100 : 0))
-plot(title="Fib 0.618", series=fib_0618, color=color.new(color.teal, fib_0618 != fib_0618[1] ? 100 : 0))
-plot(title="Fib 0.764", series=fib_0764, color=color.new(color.blue, fib_0764 != fib_0764[1] ? 100 : 0))
-plot(title="Fib 1.000", series=fib_1000, color=color.new(color.black, fib_1000 != fib_1000[1] ? 100 : 0))
+   trade.SetExpertMagicNumber((ulong)InpMagic);
+   trade.SetDeviationInPoints(InpSlippage);
+   bool sent = trade.Sell(lots, _Symbol, 0.0, sl, tp, "AnnaBot EURUSD_o compatible sell");
+   if(!sent)
+   {
+      LogMessage("ارسال فروش ناموفق: " + trade.ResultRetcodeDescription());
+      return false;
+   }
 
-bgcolor(not useAltTF ? na : ta.change(time(tf)) != 0 ? color.new(color.black, 0) : na)
-f_last_fib(_rate) => d > c ? d-(fib_range*_rate):d+(fib_range*_rate)
+   ulong positionTicket = 0;
+   double fill = trade.ResultPrice();
+   if(FindOwnPositionTicket(positionTicket))
+   {
+      if(fill <= 0.0)
+      {
+         PositionSelectByTicket(positionTicket);
+         fill = PositionGetDouble(POSITION_PRICE_OPEN);
+      }
+   }
+   if(fill <= 0.0 || sl <= fill)
+   {
+      LogMessage("فروش ارسال شد اما قیمت پرشدن/SL برای اصلاح RR معتبر نیست؛ " + trade.ResultRetcodeDescription());
+      return true;
+   }
+   double actualRisk = sl - fill;
+   double correctedTP = RoundPriceToTick(fill - actualRisk * InpRiskReward, false);
+   double rr = MathAbs(fill - correctedTP) / actualRisk;
+   if(MathAbs(rr - InpRiskReward) > 1e-8)
+   {
+      if(positionTicket == 0 || !ValidateOrderStops(false,sl,correctedTP) || !trade.PositionModify(positionTicket, sl, correctedTP) ||
+         (trade.ResultRetcode() != TRADE_RETCODE_DONE && trade.ResultRetcode() != TRADE_RETCODE_NO_CHANGES))
+         LogMessage("اصلاح TP فروش ناموفق؛ " + trade.ResultRetcodeDescription());
+      else
+         tp = correctedTP;
+   }
+   LogMessage(StringFormat("SELL fill=%.*f SL=%.*f TP=%.*f | SLdist=%.*f TPdist=%.*f RR=%.5f | retcode=%s",
+                           digits, fill, digits, sl, digits, tp,
+                           digits, MathAbs(fill-sl), digits, MathAbs(tp-fill),
+                           MathAbs(tp-fill)/MathAbs(fill-sl), trade.ResultRetcodeDescription()));
+   return true;
+}
 
-// Remaining original settings are retained in original order; trade-size inputs
-// were removed and replaced by inpLot above.
-target01_ew_rate = input.float(0.236, title="Target 1 - Fib. Rate to use for Entry Window:")
-target01_tp_rate = input.float(0.618, title="Target 1 - Fib. Rate to use for TP:")
-target01_sl_rate = input.float(-0.236, title="Target 1 - Fib. Rate to use for SL:")
-target02_active = input.bool(false, title="Target 2 - Active?")
-target02_ew_rate = input.float(0.236, title="Target 2 - Fib. Rate to use for Entry Window:")
-target02_tp_rate = input.float(1.618, title="Target 2 - Fib. Rate to use for TP:")
-target02_sl_rate = input.float(-0.236, title="Target 2 - Fib. Rate to use for SL:")
+//+------------------------------------------------------------------+
+//| بارگذاری کندل مرجع H1 ساعت ۱۰ نیویورک و ذخیره بدنه آن            |
+//+------------------------------------------------------------------+
+bool LoadReferenceCandle(const int todayKey)
+{
+   MqlRates h1[];
+   ArraySetAsSeries(h1, true);
+   int copied = CopyRates(_Symbol, PERIOD_H1, 0, 72, h1);
+   if(copied < 3)
+      return false;
 
-buy_patterns_00 = isABCD(1) or isBat(1) or isAltBat(1) or isButterfly(1) or isGartley(1) or isCrab(1) or isShark(1) or is5o(1) or isWolf(1) or isHnS(1) or isConTria(1) or isExpTria(1)
-buy_patterns_01 = isAntiBat(1) or isAntiButterfly(1) or isAntiGartley(1) or isAntiCrab(1) or isAntiShark(1)
-sel_patterns_00 = isABCD(-1) or isBat(-1) or isAltBat(-1) or isButterfly(-1) or isGartley(-1) or isCrab(-1) or isShark(-1) or is5o(-1) or isWolf(-1) or isHnS(-1) or isConTria(-1) or isExpTria(-1)
-sel_patterns_01 = isAntiBat(-1) or isAntiButterfly(-1) or isAntiGartley(-1) or isAntiCrab(-1) or isAntiShark(-1)
+   for(int i = 1; i < copied; ++i) // فقط کندل‌های بسته‌شده
+   {
+      MqlDateTime serverParts;
+      if(!TimeToStruct(h1[i].time, serverParts))
+         continue;
+      datetime nyTime = h1[i].time - (datetime)(CurrentNYOffset() * 3600);
+      MqlDateTime nyParts;
+      if(!TimeToStruct(nyTime, nyParts))
+         continue;
+      int key = nyParts.year * 10000 + nyParts.mon * 100 + nyParts.day;
+      if(key != todayKey || nyParts.hour != InpNYHour || nyParts.min != 0)
+         continue;
 
-target01_buy_entry = (buy_patterns_00 or buy_patterns_01) and close <= f_last_fib(target01_ew_rate)
-target01_buy_close = high >= f_last_fib(target01_tp_rate) or low <= f_last_fib(target01_sl_rate)
-target01_sel_entry = (sel_patterns_00 or sel_patterns_01) and close >= f_last_fib(target01_ew_rate)
-target01_sel_close = low <= f_last_fib(target01_tp_rate) or high >= f_last_fib(target01_sl_rate)
+      // کندل مرجع باید داخل دامنه کندل H1 قبلی باشد؛ آرایه سری است و i+1 قدیمی‌تر است.
+      if(i+1>=copied || h1[i].high>=h1[i+1].high || h1[i].low<=h1[i+1].low)
+      {
+         LogMessage("کندل ساعت ۱۰ نیویورک شرط inside-bar را ندارد.");
+         continue;
+      }
 
-if target01_buy_entry
-    strategy.entry("target01_buy", strategy.long, qty=inpLot, comment="buy 01")
-if target01_buy_close
-    strategy.close("target01_buy")
-if target01_sel_entry
-    strategy.entry("target01_sell", strategy.short, qty=inpLot, comment="sell 01")
-if target01_sel_close
-    strategy.close("target01_sell")
+      g_bodyTop = MathMax(h1[i].open, h1[i].close);
+      g_bodyBottom = MathMin(h1[i].open, h1[i].close);
+      g_referenceReady = true;
+      LogMessage(StringFormat("کندل مرجع یافت شد: بدنه بالا=%.*f پایین=%.*f",
+                              g_symbolDigits, g_bodyTop,
+                              g_symbolDigits, g_bodyBottom));
+      return true;
+   }
+   return false;
+}
 
-target02_buy_entry = target02_active and (buy_patterns_00 or buy_patterns_01) and close <= f_last_fib(target02_ew_rate)
-// Preserve original operator-precedence behavior: `and` binds before `or`, so
-// the SL clause can close even when target02_active is false.
-target02_buy_close = target02_active and high >= f_last_fib(target02_tp_rate) or low <= f_last_fib(target02_sl_rate)
-target02_sel_entry = target02_active and (sel_patterns_00 or sel_patterns_01) and close >= f_last_fib(target02_ew_rate)
-target02_sel_close = target02_active and low <= f_last_fib(target02_tp_rate) or high >= f_last_fib(target02_sl_rate)
-// Corrected alternatives (intentionally NOT used; uncomment to gate both clauses):
-// target02_buy_close = target02_active and (high >= f_last_fib(target02_tp_rate) or low <= f_last_fib(target02_sl_rate))
-// target02_sel_close = target02_active and (low <= f_last_fib(target02_tp_rate) or high >= f_last_fib(target02_sl_rate))
+//+------------------------------------------------------------------+
+//| جست‌وجوی شکست ناحیه FVG با نفوذ سایه و تأیید پین‌بار در M5       |
+//| خروجی: جهت +1 خرید، -1 فروش، صفر بدون ستاپ؛ stopPrice مقدار SL   |
+//+------------------------------------------------------------------+
+int CheckM5FvgAndPinbar(const int breakoutDirection, double &stopPrice)
+{
+   stopPrice = 0.0;
+   if(breakoutDirection != 1 && breakoutDirection != -1)
+      return 0;
 
-if target02_buy_entry
-    strategy.entry("target02_buy", strategy.long, qty=inpLot, comment="buy 02")
-if target02_buy_close
-    strategy.close("target02_buy")
-if target02_sel_entry
-    strategy.entry("target02_sell", strategy.short, qty=inpLot, comment="sell 02")
-if target02_sel_close
-    strategy.close("target02_sell")
+   MqlRates m5[];
+   ArraySetAsSeries(m5, true);
+   int copied = CopyRates(_Symbol, PERIOD_M5, 0, 40, m5);
+   if(copied < 6)
+      return 0;
+
+   const MqlRates signal = m5[1]; // آخرین کندل تکمیل‌شده برای پین‌بار
+   if(g_symbolPoint <= 0.0)
+      return 0;
+   double body = MathAbs(signal.close - signal.open);
+   double effectiveBody = MathMax(body, g_symbolPoint);
+   double upperWick = signal.high - MathMax(signal.open, signal.close);
+   double lowerWick = MathMin(signal.open, signal.close) - signal.low;
+   double range = signal.high - signal.low;
+   if(range <= 0.0)
+      return 0;
+
+   // بررسی FVGهای تازه؛ i>=2 تا کندل تأیید پس از تشکیل شکاف باشد.
+   for(int i = 2; i + 2 < copied && i <= 20; ++i)
+   {
+      double zoneLow = 0.0, zoneHigh = 0.0;
+      bool bullishGap = (m5[i].low > m5[i + 2].high);
+      bool bearishGap = (m5[i].high < m5[i + 2].low);
+
+      if(breakoutDirection == 1 && bullishGap)
+      {
+         zoneLow = m5[i + 2].high;
+         zoneHigh = m5[i].low;
+         bool wickTouched = (signal.low <= zoneHigh && signal.low >= zoneLow - 2.0 * g_symbolPoint);
+         bool bullishPin = (lowerWick >= 2.0 * effectiveBody &&
+                            signal.close >= signal.low + 0.65 * range &&
+                            signal.close > signal.open);
+         if(wickTouched && bullishPin && signal.close > g_bodyTop)
+         {
+            stopPrice = MathMin(MathMin(signal.low, zoneLow), g_bodyBottom) -
+                        InpFvgSLBufferPoints * g_symbolPoint - InpSLBufferPoints * g_symbolPoint;
+            return 1;
+         }
+      }
+      else if(breakoutDirection == -1 && bearishGap)
+      {
+         zoneLow = m5[i].high;
+         zoneHigh = m5[i + 2].low;
+         bool wickTouched = (signal.high >= zoneLow && signal.high <= zoneHigh + 2.0 * g_symbolPoint);
+         bool bearishPin = (upperWick >= 2.0 * effectiveBody &&
+                            signal.close <= signal.high - 0.65 * range &&
+                            signal.close < signal.open);
+         if(wickTouched && bearishPin && signal.close < g_bodyBottom)
+         {
+            stopPrice = MathMax(MathMax(signal.high, zoneHigh), g_bodyTop) +
+                        InpFvgSLBufferPoints * g_symbolPoint + InpSLBufferPoints * g_symbolPoint;
+            return -1;
+         }
+      }
+   }
+   return 0;
+}
+
+//+------------------------------------------------------------------+
+//| منطق روزانه شکست بدنه و اجرای ستاپ FVG/پین‌بار                   |
+//+------------------------------------------------------------------+
+void RunAnnaStrategy()
+{
+   int offsetDateKey = DateKey(TimeGMT());
+   if(offsetDateKey < 0)
+      return;
+   if(offsetDateKey != g_nyOffsetDateKey)
+   {
+      g_nyOffset = CurrentNYOffset();
+      g_nyOffsetDateKey = offsetDateKey;
+   }
+
+   datetime nowServer = TimeCurrent();
+   datetime nowNY = nowServer - (datetime)(g_nyOffset * 3600);
+   int todayKey = DateKey(nowNY);
+   if(todayKey < 0)
+      return;
+
+   if(todayKey != g_sessionDateKey)
+   {
+      g_sessionDateKey = todayKey;
+      g_referenceReady = false;
+      g_tradeAttemptedToday = false;
+      g_bodyTop = 0.0;
+      g_bodyBottom = 0.0;
+   }
+
+   if(!g_referenceReady && !LoadReferenceCandle(todayKey))
+      return;
+
+   // پنجره فقط לאחר بسته‌شدن کندل مرجع و به مدت تعیین‌شده بر اساس NY time است.
+   MqlDateTime nyParts;
+   if(!TimeToStruct(nowNY, nyParts))
+      return;
+   int nowMinutes = nyParts.hour * 60 + nyParts.min;
+   int windowStart = InpNYHour * 60 + 60; // کندل مرجع باید کامل بسته شود
+   int windowEnd = windowStart + MathMax(0, InpSessionWindowHours) * 60;
+   if(nowMinutes < windowStart || nowMinutes >= windowEnd || g_tradeAttemptedToday)
+      return;
+   if(HasOpenPosition())
+      return;
+
+   MqlRates m5[];
+   ArraySetAsSeries(m5, true);
+   if(CopyRates(_Symbol, PERIOD_M5, 0, 4, m5) < 3)
+      return;
+
+   // شکست بدنه با بسته‌شدن کندل پنج‌دقیقه‌ای بیرون از مرز بدنه H1.
+   int direction = 0;
+   if(m5[1].close > g_bodyTop)
+      direction = 1;
+   else if(m5[1].close < g_bodyBottom)
+      direction = -1;
+   if(direction == 0)
+      return;
+
+   double stopPrice = 0.0;
+   int confirmation = CheckM5FvgAndPinbar(direction, stopPrice);
+   if(confirmation == 0)
+      return;
+
+   bool opened = (confirmation > 0) ? OpenBuy(stopPrice) : OpenSell(stopPrice);
+   // از تکرار سفارش پس از تأیید جلوگیری می‌شود؛ خطای ارسال نیز در همان ستاپ دوباره‌کاری نمی‌کند.
+   if(opened)
+      g_tradeAttemptedToday = true;
+}
+
+//+------------------------------------------------------------------+
+//| مقداردهی اولیه اکسپرت                                            |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+   if(InpNYHour < 0 || InpNYHour > 23 || InpSessionWindowHours < 0 ||
+      InpRiskUSD <= 0.0 || InpRiskReward <= 0.0 || InpMaxLot <= 0.0 || InpMinLotGuard <= 0.0 || InpSlippage < 0 ||
+      InpSLBufferPoints < 0 || InpFvgSLBufferPoints < 0)
+   {
+      Print("AnnaBot: invalid strategy/risk input values.");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+   long digitsLong=0;
+   if(!SymbolInfoInteger(_Symbol,SYMBOL_DIGITS,digitsLong) || digitsLong<0 || digitsLong>8 ||
+      !SymbolInfoDouble(_Symbol,SYMBOL_POINT,g_symbolPoint) || g_symbolPoint<=0.0 ||
+      !SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE,g_tickSize) || g_tickSize<=0.0 ||
+      !SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN,g_volumeMin) || g_volumeMin<=0.0 ||
+      !SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX,g_volumeMax) || g_volumeMax<g_volumeMin ||
+      !SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP,g_volumeStep) || g_volumeStep<=0.0 ||
+      !SymbolInfoDouble(_Symbol,SYMBOL_TRADE_CONTRACT_SIZE,g_contractSize) || g_contractSize<=0.0)
+   {
+      PrintFormat("AnnaBot: required symbol properties unavailable/invalid for %s; initialization aborted.",_Symbol);
+      return INIT_FAILED;
+   }
+   g_symbolDigits=(int)digitsLong;
+   SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL,g_stopsLevel);
+   SymbolInfoInteger(_Symbol,SYMBOL_TRADE_FREEZE_LEVEL,g_freezeLevel);
+   g_tickValueLoss=LossTickValue();
+   double tickValueProfit=0.0, tickValueGeneric=0.0;
+   SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE_PROFIT,tickValueProfit);
+   SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE,tickValueGeneric);
+   string accountCurrency=AccountInfoString(ACCOUNT_CURRENCY);
+   double tickRatio=g_tickSize/g_symbolPoint;
+   if(!MathIsValidNumber(tickRatio) || tickRatio < 1.0-1e-8 || MathAbs(tickRatio-MathRound(tickRatio))>1e-6)
+   {
+      PrintFormat("AnnaBot: tick-size %.12g inconsistent with point %.12g; initialization aborted.",g_tickSize,g_symbolPoint);
+      return INIT_FAILED;
+   }
+   PrintFormat("AnnaBot symbol report | symbol=%s chartTF=%s digits=%d point=%.10g pip=%.10g tickSize=%.10g tickValueLoss=%.10g tickValueProfit=%.10g tickValueGeneric=%.10g contractSize=%.2f volumeMin=%.8f volumeMax=%.8f volumeStep=%.8f stops=%d freeze=%d accountCurrency=%s",
+               _Symbol,EnumToString((ENUM_TIMEFRAMES)_Period),g_symbolDigits,g_symbolPoint,
+               ((g_symbolDigits==3 || g_symbolDigits==5)?10.0*g_symbolPoint:g_symbolPoint),g_tickSize,
+               g_tickValueLoss,tickValueProfit,tickValueGeneric,g_contractSize,g_volumeMin,g_volumeMax,g_volumeStep,
+               (int)g_stopsLevel,(int)g_freezeLevel,accountCurrency);
+   if(g_tickValueLoss<=0.0 || !MathIsValidNumber(g_tickValueLoss))
+      Print("AnnaBot: WARNING loss tick value unavailable/invalid; all trades will be refused.");
+   if(accountCurrency!="USD")
+      PrintFormat("AnnaBot: WARNING account currency is %s, not USD; fixed USD risk trades will be refused.",accountCurrency);
+   if(tickValueProfit>0.0 && g_tickValueLoss>0.0 &&
+      (tickValueProfit/g_tickValueLoss>2.0 || tickValueProfit/g_tickValueLoss<0.5))
+      Print("AnnaBot: WARNING profit/loss cash tick values differ by >2x; all trades will be refused until broker properties are consistent.");
+   if(_Symbol!="EURUSD_o")
+      PrintFormat("AnnaBot: built for compatibility with EURUSD_o specifications but uses attached symbol %s (_Symbol), no symbol is hardcoded.",_Symbol);
+   trade.SetExpertMagicNumber((ulong)InpMagic);
+   trade.SetDeviationInPoints(InpSlippage);
+   if(!trade.SetTypeFillingBySymbol(_Symbol))
+      PrintFormat("AnnaBot: could not determine symbol filling mode for %s; trade server may reject orders.",_Symbol);
+   g_lastM5BarTime = 0;
+   g_nyOffset = CurrentNYOffset();
+   g_nyOffsetDateKey = DateKey(TimeGMT());
+   int serverUtcOffset = (int)MathRound((TimeTradeServer() - TimeGMT()) / 3600.0);
+   bool nyDst = IsNYSummerTime(TimeGMT());
+   PrintFormat("AnnaBot: NY offset=%d | server UTC offset=%d | NY DST=%s | Magic=%I64d | slippage=%d points",
+               g_nyOffset, serverUtcOffset, nyDst ? "ON" : "OFF",InpMagic,InpSlippage);
+   LogMessage("EA آماده است؛ استراتژی و محاسبه DST نیویورک حفظ شده‌اند.");
+   return INIT_SUCCEEDED;
+}
+
+//+------------------------------------------------------------------+
+//| آزادسازی منابع هنگام توقف                                        |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   LogMessage(StringFormat("اکسپرت متوقف شد؛ reason=%d", reason));
+}
+
+//+------------------------------------------------------------------+
+//| اجرای استراتژی فقط با شروع کندل جدید M5                          |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+   datetime currentM5 = iTime(_Symbol, PERIOD_M5, 0);
+   if(currentM5 <= 0 || currentM5 == g_lastM5BarTime)
+      return;
+   g_lastM5BarTime = currentM5;
+   RunAnnaStrategy();
+}
+//+------------------------------------------------------------------+
