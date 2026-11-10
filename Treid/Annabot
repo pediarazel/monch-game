@@ -1,223 +1,276 @@
-//+------------------------------------------------------------------+
-//| Anna Strategy Expert Advisor - XAUUSD.zero                       |
-//| Reconstructed Anna-style session liquidity / breakout EA.        |
-//| Attach to an M15 chart. Test on demo before live use.             |
-//+------------------------------------------------------------------+
-#property strict
-#property version   "1.00"
-#property description "Anna-style session liquidity EA for XAUUSD.zero"
+//@version=6
+// ============================================================================
+// [STRATEGY][RS] ZigZag PA Strategy V4.1 — modern Pine v6 rewrite
+// English: Original logic/pattern definitions are preserved; the only intended
+// behavior change is fixed entry quantity 0.03 instead of the original 10000.
+// TradingView qty means contracts/units, not broker lots. Thus 0.03 units is
+// tiny; for a CFD broker's “0.03 lot”, you may need qty = 0.03 * contract_size.
+// فارسی: منطق و تعریف الگوهای کد اصلی حفظ شده است؛ تنها تغییر رفتاریِ موردنظر
+// مقدار ثابت ورود ۰٫۰۳ به‌جای ۱۰۰۰۰ است. qty در TradingView تعداد قرارداد/واحد
+// است، نه لات کارگزاری؛ بنابراین ۰٫۰۳ واحد بسیار کوچک است. برای «۰٫۰۳ لات» در
+// CFD ممکن است لازم باشد از qty = 0.03 * contract_size استفاده کنید.
+// ============================================================================
+strategy(title="[STRATEGY][RS]ZigZag PA Strategy V4.1", shorttitle="S", default_qty_type=strategy.fixed, default_qty_value=0.03, initial_capital=100000, currency=currency.USD, pyramiding=0, overlay=true)
 
-#include <Trade/Trade.mqh>
-CTrade trade;
+// Single fixed-lot control replaces the original Target 1/Target 2 trade-size inputs.
+inpLot = input.float(0.03, "Lot size (fixed)")
+useHA = input.bool(false, title="Use Heikken Ashi Candles")
+useAltTF = input.bool(true, title="Use Alt Timeframe")
+tf = input.timeframe("60", title="Alt Timeframe")
+showPatterns = input.bool(true, title="Show Patterns")
+showFib0000 = input.bool(true, title="Display Fibonacci 0.000:")
+showFib0236 = input.bool(true, title="Display Fibonacci 0.236:")
+showFib0382 = input.bool(true, title="Display Fibonacci 0.382:")
+showFib0500 = input.bool(true, title="Display Fibonacci 0.500:")
+showFib0618 = input.bool(true, title="Display Fibonacci 0.618:")
+showFib0764 = input.bool(true, title="Display Fibonacci 0.764:")
+showFib1000 = input.bool(true, title="Display Fibonacci 1.000:")
 
-input string          InpSymbol              = "XAUUSD.zero";
-input ENUM_TIMEFRAMES InpSignalTimeframe     = PERIOD_M15;
-input double          InpLots                = 0.05;
-input double          InpMinStopUSD          = 1.00;  // Gold price units, not account-currency loss
-input double          InpMaxStopUSD          = 1.50;
-input double          InpRewardRisk          = 2.00;
-input double          InpBigBodyATRMultiple  = 1.20;
-input int             InpATRPeriod           = 14;
-input ulong           InpMagic               = 26102501;
-input int             InpDeviationPoints     = 30;
-input bool            InpEnableAsia          = true;
-input bool            InpEnableLondon        = true;
-input bool            InpEnableNewYork       = true;
-// Session hours are interpreted in BROKER SERVER TIME. Adjust for broker/DST.
-input int             InpAsiaStartHour       = 20;
-input int             InpAsiaEndHour         = 2;
-input int             InpLondonStartHour     = 2;
-input int             InpLondonEndHour       = 8;
-input int             InpNewYorkStartHour    = 8;
-input int             InpNewYorkEndHour      = 12;
-// EA cannot remove spread or set broker commission. This is only a note/estimate.
-input double          InpEstimatedCommissionUSDPerTrade = 1.00;
+zigzag() =>
+    _isUp = close >= open
+    _isDown = close <= open
+    var int _direction = 0
+    _direction := _isUp[1] and _isDown ? -1 : _isDown[1] and _isUp ? 1 : nz(_direction[1])
+    _zigzag = _isUp[1] and _isDown and _direction[1] != -1 ? ta.highest(high, 2) : _isDown[1] and _isUp and _direction[1] != 1 ? ta.lowest(low, 2) : na
+    _zigzag
 
-int      atrHandle = INVALID_HANDLE;
-datetime lastBarTime = 0;
-int      currentSession = -1;
-bool     haveRange = false;
-double   rangeHigh = 0.0, rangeLow = 0.0;
-bool     havePreviousSession = false;
-double   previousHigh = 0.0, previousLow = 0.0;
+_ticker = useHA ? ticker.heikinashi(syminfo.tickerid) : syminfo.tickerid
+sz = useAltTF ? (ta.change(time(tf)) != 0 ? request.security(_ticker, tf, zigzag(), lookahead=barmerge.lookahead_off) : na) : zigzag()
 
-// Return session index: 0 Asia, 1 London, 2 New York; -1 outside configured sessions.
-int GetSession(datetime t)
-{
-   MqlDateTime x; TimeToStruct(t,x);
-   int h=x.hour;
-   bool asia=(InpAsiaStartHour>InpAsiaEndHour ? (h>=InpAsiaStartHour || h<InpAsiaEndHour) : (h>=InpAsiaStartHour && h<InpAsiaEndHour));
-   bool lon=(InpLondonStartHour>InpLondonEndHour ? (h>=InpLondonStartHour || h<InpLondonEndHour) : (h>=InpLondonStartHour && h<InpLondonEndHour));
-   bool ny=(InpNewYorkStartHour>InpNewYorkEndHour ? (h>=InpNewYorkStartHour || h<InpNewYorkEndHour) : (h>=InpNewYorkStartHour && h<InpNewYorkEndHour));
-   if(asia && InpEnableAsia) return 0;
-   if(lon && InpEnableLondon) return 1;
-   if(ny && InpEnableNewYork) return 2;
-   return -1;
-}
+plot(sz, title="zigzag", color=color.black, linewidth=2)
 
-bool IsNewBar()
-{
-   datetime t=iTime(InpSymbol,InpSignalTimeframe,0);
-   if(t<=0 || t==lastBarTime) return false;
-   lastBarTime=t;
-   return true;
-}
+//  ||---   Pattern Recognition:
+x = ta.valuewhen(not na(sz), sz, 4)
+a = ta.valuewhen(not na(sz), sz, 3)
+b = ta.valuewhen(not na(sz), sz, 2)
+c = ta.valuewhen(not na(sz), sz, 1)
+d = ta.valuewhen(not na(sz), sz, 0)
 
-bool HasOurPosition()
-{
-   for(int i=PositionsTotal()-1;i>=0;i--)
-   {
-      ulong ticket=PositionGetTicket(i);
-      if(ticket>0 && PositionGetString(POSITION_SYMBOL)==InpSymbol && (ulong)PositionGetInteger(POSITION_MAGIC)==InpMagic) return true;
-   }
-   return false;
-}
+xab = (math.abs(b-a)/math.abs(x-a))
+xad = (math.abs(a-d)/math.abs(x-a))
+abc = (math.abs(b-c)/math.abs(a-b))
+bcd = (math.abs(c-d)/math.abs(b-c))
 
-int VolumeDigits(double step)
-{
-   for(int n=0;n<=8;n++) if(MathAbs(step-NormalizeDouble(step,n))<1e-9) return n;
-   return 2;
-}
+//  ||-->   Functions:
 
-double NormalizeLots(double lots)
-{
-   double vmin=SymbolInfoDouble(InpSymbol,SYMBOL_VOLUME_MIN);
-   double vmax=SymbolInfoDouble(InpSymbol,SYMBOL_VOLUME_MAX);
-   double step=SymbolInfoDouble(InpSymbol,SYMBOL_VOLUME_STEP);
-   if(step<=0 || vmin<=0) return 0;
-   // Preserve the requested fixed lot; reject if broker constraints cannot accept it.
-   if(lots<vmin-1e-9 || lots>vmax+1e-9) return 0;
-   double aligned=MathFloor((lots-vmin)/step+1e-8)*step+vmin;
-   if(MathAbs(aligned-lots)>1e-7) return 0;
-   return NormalizeDouble(lots,VolumeDigits(step));
-}
 
-bool OpenTrade(int direction,double stopDistance)
-{
-   double lots=NormalizeLots(InpLots);
-   if(lots<=0) { Print("Fixed lot is not valid for broker volume limits/step."); return false; }
-   double ask=SymbolInfoDouble(InpSymbol,SYMBOL_ASK);
-   double bid=SymbolInfoDouble(InpSymbol,SYMBOL_BID);
-   double point=SymbolInfoDouble(InpSymbol,SYMBOL_POINT);
-   int digits=(int)SymbolInfoInteger(InpSymbol,SYMBOL_DIGITS);
-   if(ask<=0 || bid<=0 || point<=0) return false;
-   double entry=(direction>0 ? ask : bid);
-   double sl=(direction>0 ? entry-stopDistance : entry+stopDistance);
-   double tp=(direction>0 ? entry+InpRewardRisk*stopDistance : entry-InpRewardRisk*stopDistance);
-   sl=NormalizeDouble(sl,digits); tp=NormalizeDouble(tp,digits);
-   long stopsLevel=SymbolInfoInteger(InpSymbol,SYMBOL_TRADE_STOPS_LEVEL);
-   if(stopsLevel>0 && stopDistance < stopsLevel*point)
-   { Print("Trade skipped: broker minimum stop distance exceeds configured stop."); return false; }
-   trade.SetExpertMagicNumber(InpMagic);
-   trade.SetDeviationInPoints(InpDeviationPoints);
-   trade.SetTypeFillingBySymbol(InpSymbol);
-   bool ok=false;
-   if(direction>0) ok=trade.Buy(lots,InpSymbol,0.0,sl,tp,"Anna 2R long");
-   else            ok=trade.Sell(lots,InpSymbol,0.0,sl,tp,"Anna 2R short");
-   if(!ok) PrintFormat("Order failed: retcode=%u (%s)",trade.ResultRetcode(),trade.ResultRetcodeDescription());
-   else PrintFormat("Anna order placed. Lots=%.2f stop=%.2f price units target=%.2fR; estimated commission/trade=$%.2f (broker setting only)",lots,stopDistance,InpRewardRisk,InpEstimatedCommissionUSDPerTrade);
-   return ok;
-}
+isBat(_mode)=>
+    _xab = xab >= 0.382 and xab <= 0.5
+    _abc = abc >= 0.382 and abc <= 0.886
+    _bcd = bcd >= 1.618 and bcd <= 2.618
+    _xad = xad <= 0.618 and xad <= 1.000    // 0.886
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
 
-void OnInitHistory()
-{
-   // Build current and most recently completed active-session range from closed bars.
-   MqlRates bars[];
-   ArraySetAsSeries(bars,false);
-   int copied=CopyRates(InpSymbol,InpSignalTimeframe,1,1200,bars);
-   if(copied<=0) return;
-   currentSession=-1; haveRange=false; havePreviousSession=false;
-   for(int i=0;i<copied;i++)
-   {
-      int s=GetSession(bars[i].time);
-      if(s<0) continue;
-      if(!haveRange) { currentSession=s; rangeHigh=bars[i].high; rangeLow=bars[i].low; haveRange=true; }
-      else if(s!=currentSession)
-      {
-         previousHigh=rangeHigh; previousLow=rangeLow; havePreviousSession=true;
-         currentSession=s; rangeHigh=bars[i].high; rangeLow=bars[i].low;
-      }
-      else { rangeHigh=MathMax(rangeHigh,bars[i].high); rangeLow=MathMin(rangeLow,bars[i].low); }
-   }
-}
+isAntiBat(_mode)=>
+    _xab = xab >= 0.500 and xab <= 0.886    // 0.618
+    _abc = abc >= 1.000 and abc <= 2.618    // 1.13 --> 2.618
+    _bcd = bcd >= 1.618 and bcd <= 2.618    // 2.0  --> 2.618
+    _xad = xad >= 0.886 and xad <= 1.000    // 1.13
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
 
-int OnInit()
-{
-   if(InpSymbol=="" || InpLots<=0 || InpMinStopUSD<=0 || InpMaxStopUSD<InpMinStopUSD || InpRewardRisk<=0 || InpATRPeriod<2)
-      return INIT_PARAMETERS_INCORRECT;
-   if(!SymbolSelect(InpSymbol,true)) { Print("Cannot select symbol: ",InpSymbol); return INIT_FAILED; }
-   atrHandle=iATR(InpSymbol,InpSignalTimeframe,InpATRPeriod);
-   if(atrHandle==INVALID_HANDLE) { Print("Could not create ATR indicator."); return INIT_FAILED; }
-   OnInitHistory();
-   lastBarTime=iTime(InpSymbol,InpSignalTimeframe,0);
-   Print("Anna EA initialized for ",InpSymbol,". Session hours use broker server time.");
-   return INIT_SUCCEEDED;
-}
+isAltBat(_mode)=>
+    _xab = xab <= 0.382
+    _abc = abc >= 0.382 and abc <= 0.886
+    _bcd = bcd >= 2.0 and bcd <= 3.618
+    _xad = xad <= 1.13
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
 
-void OnDeinit(const int reason)
-{
-   if(atrHandle!=INVALID_HANDLE) IndicatorRelease(atrHandle);
-}
+isButterfly(_mode)=>
+    _xab = xab <= 0.786
+    _abc = abc >= 0.382 and abc <= 0.886
+    _bcd = bcd >= 1.618 and bcd <= 2.618
+    _xad = xad >= 1.27 and xad <= 1.618
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
 
-void OnTick()
-{
-   if(_Symbol!=InpSymbol) { /* EA can still run when attached elsewhere, but trades only configured symbol. */ }
-   if(!IsNewBar()) return;
-   MqlRates b[];
-   ArraySetAsSeries(b,true);
-   if(CopyRates(InpSymbol,InpSignalTimeframe,0,3,b)<3) return;
-   MqlRates c=b[1]; // last closed signal candle
-   int s=GetSession(c.time);
-   if(s<0) return;
+isAntiButterfly(_mode)=>
+    _xab = xab >= 0.236 and xab <= 0.886    // 0.382 - 0.618
+    _abc = abc >= 1.130 and abc <= 2.618    // 1.130 - 2.618
+    _bcd = bcd >= 1.000 and bcd <= 1.382    // 1.27
+    _xad = xad >= 0.500 and xad <= 0.886    // 0.618 - 0.786
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
 
-   // On session transition, freeze the preceding active session's high/low.
-   if(!haveRange)
-   {
-      currentSession=s; rangeHigh=c.high; rangeLow=c.low; haveRange=true; return;
-   }
-   bool newSession=(s!=currentSession);
-   if(newSession)
-   {
-      previousHigh=rangeHigh; previousLow=rangeLow; havePreviousSession=true;
-      currentSession=s; rangeHigh=c.high; rangeLow=c.low;
-   }
-   else { rangeHigh=MathMax(rangeHigh,c.high); rangeLow=MathMin(rangeLow,c.low); }
-   if(newSession || !havePreviousSession || HasOurPosition()) return;
+isABCD(_mode)=>
+    _abc = abc >= 0.382 and abc <= 0.886
+    _bcd = bcd >= 1.13 and bcd <= 2.618
+    _abc and _bcd and (_mode == 1 ? d < c : d > c)
 
-   double atr[]; ArraySetAsSeries(atr,true);
-   if(CopyBuffer(atrHandle,0,1,1,atr)<1 || atr[0]<=0) return;
-   double tick=SymbolInfoDouble(InpSymbol,SYMBOL_TRADE_TICK_SIZE);
-   if(tick<=0) tick=SymbolInfoDouble(InpSymbol,SYMBOL_POINT);
-   int direction=0; double stopDistance=0.0;
+isGartley(_mode)=>
+    _xab = xab >= 0.5 and xab <= 0.618 // 0.618
+    _abc = abc >= 0.382 and abc <= 0.886
+    _bcd = bcd >= 1.13 and bcd <= 2.618
+    _xad = xad >= 0.75 and xad <= 0.875 // 0.786
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
 
-   // Anna-style BodyBreak: close beyond previous session extreme in candle direction.
-   if(c.close>previousHigh && c.close>c.open)
-   {
-      direction=1;
-      double referenceEntry=(MathAbs(c.close-c.open)>InpBigBodyATRMultiple*atr[0] ? (c.open+c.close)/2.0 : c.close);
-      stopDistance=referenceEntry-(c.low-tick);
-   }
-   else if(c.close<previousLow && c.close<c.open)
-   {
-      direction=-1;
-      double referenceEntry=(MathAbs(c.close-c.open)>InpBigBodyATRMultiple*atr[0] ? (c.open+c.close)/2.0 : c.close);
-      stopDistance=(c.high+tick)-referenceEntry;
-   }
-   // Anna-style WickSweep reversal at prior session liquidity level.
-   else if(c.high>previousHigh && c.close<=previousHigh)
-   {
-      direction=-1; stopDistance=(c.high+tick)-c.close;
-   }
-   else if(c.low<previousLow && c.close>=previousLow)
-   {
-      direction=1; stopDistance=c.close-(c.low-tick);
-   }
-   if(direction==0) return;
-   if(stopDistance<InpMinStopUSD || stopDistance>InpMaxStopUSD)
-   {
-      PrintFormat("Signal ignored: stop %.2f price units is outside allowed %.2f-%.2f.",stopDistance,InpMinStopUSD,InpMaxStopUSD);
-      return;
-   }
-   OpenTrade(direction,stopDistance);
-}
-//+------------------------------------------------------------------+
+isAntiGartley(_mode)=>
+    _xab = xab >= 0.500 and xab <= 0.886    // 0.618 -> 0.786
+    _abc = abc >= 1.000 and abc <= 2.618    // 1.130 -> 2.618
+    _bcd = bcd >= 1.500 and bcd <= 5.000    // 1.618
+    _xad = xad >= 1.000 and xad <= 5.000    // 1.272
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+
+isCrab(_mode)=>
+    _xab = xab >= 0.500 and xab <= 0.875    // 0.886
+    _abc = abc >= 0.382 and abc <= 0.886
+    _bcd = bcd >= 2.000 and bcd <= 5.000    // 3.618
+    _xad = xad >= 1.382 and xad <= 5.000    // 1.618
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+
+isAntiCrab(_mode)=>
+    _xab = xab >= 0.250 and xab <= 0.500    // 0.276 -> 0.446
+    _abc = abc >= 1.130 and abc <= 2.618    // 1.130 -> 2.618
+    _bcd = bcd >= 1.618 and bcd <= 2.618    // 1.618 -> 2.618
+    _xad = xad >= 0.500 and xad <= 0.750    // 0.618
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+
+isShark(_mode)=>
+    _xab = xab >= 0.500 and xab <= 0.875    // 0.5 --> 0.886
+    _abc = abc >= 1.130 and abc <= 1.618    //
+    _bcd = bcd >= 1.270 and bcd <= 2.240    //
+    _xad = xad >= 0.886 and xad <= 1.130    // 0.886 --> 1.13
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+
+isAntiShark(_mode)=>
+    _xab = xab >= 0.382 and xab <= 0.875    // 0.446 --> 0.618
+    _abc = abc >= 0.500 and abc <= 1.000    // 0.618 --> 0.886
+    _bcd = bcd >= 1.250 and bcd <= 2.618    // 1.618 --> 2.618
+    _xad = xad >= 0.500 and xad <= 1.250    // 1.130 --> 1.130
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+
+is5o(_mode)=>
+    _xab = xab >= 1.13 and xab <= 1.618
+    _abc = abc >= 1.618 and abc <= 2.24
+    _bcd = bcd >= 0.5 and bcd <= 0.625 // 0.5
+    _xad = xad >= 0.0 and xad <= 0.236 // negative?
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+
+isWolf(_mode)=>
+    _xab = xab >= 1.27 and xab <= 1.618
+    _abc = abc >= 0 and abc <= 5
+    _bcd = bcd >= 1.27 and bcd <= 1.618
+    _xad = xad >= 0.0 and xad <= 5
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+
+isHnS(_mode)=>
+    _xab = xab >= 2.0 and xab <= 10
+    _abc = abc >= 0.90 and abc <= 1.1
+    _bcd = bcd >= 0.236 and bcd <= 0.88
+    _xad = xad >= 0.90 and xad <= 1.1
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+
+isConTria(_mode)=>
+    _xab = xab >= 0.382 and xab <= 0.618
+    _abc = abc >= 0.382 and abc <= 0.618
+    _bcd = bcd >= 0.382 and bcd <= 0.618
+    _xad = xad >= 0.236 and xad <= 0.764
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+
+isExpTria(_mode)=>
+    _xab = xab >= 1.236 and xab <= 1.618
+    _abc = abc >= 1.000 and abc <= 1.618
+    _bcd = bcd >= 1.236 and bcd <= 2.000
+    _xad = xad >= 2.000 and xad <= 2.236
+    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+
+// Pattern markers. All retain the original labels, locations, colors and -2 offset.
+plotshape(showPatterns and isABCD(-1) and not isABCD(-1)[1], text="\nAB=CD", title="Bear ABCD", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isBat(-1) and not isBat(-1)[1], text="Bat", title="Bear Bat", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isAntiBat(-1) and not isAntiBat(-1)[1], text="Anti Bat", title="Bear Anti Bat", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isAltBat(-1) and not isAltBat(-1)[1], text="Alt Bat", title="Bear Alt Bat", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isButterfly(-1) and not isButterfly(-1)[1], text="Butterfly", title="Bear Butterfly", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isAntiButterfly(-1) and not isAntiButterfly(-1)[1], text="Anti Butterfly", title="Bear Anti Butterfly", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isGartley(-1) and not isGartley(-1)[1], text="Gartley", title="Bear Gartley", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isAntiGartley(-1) and not isAntiGartley(-1)[1], text="Anti Gartley", title="Bear Anti Gartley", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isCrab(-1) and not isCrab(-1)[1], text="Crab", title="Bear Crab", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isAntiCrab(-1) and not isAntiCrab(-1)[1], text="Anti Crab", title="Bear Anti Crab", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isShark(-1) and not isShark(-1)[1], text="Shark", title="Bear Shark", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isAntiShark(-1) and not isAntiShark(-1)[1], text="Anti Shark", title="Bear Anti Shark", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and is5o(-1) and not is5o(-1)[1], text="5-O", title="Bear 5-O", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isWolf(-1) and not isWolf(-1)[1], text="Wolf Wave", title="Bear Wolf Wave", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isHnS(-1) and not isHnS(-1)[1], text="Head and Shoulders", title="Bear Head and Shoulders", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isConTria(-1) and not isConTria(-1)[1], text="Contracting Triangle", title="Bear Contracting Triangle", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isExpTria(-1) and not isExpTria(-1)[1], text="Expanding Triangle", title="Bear Expanding Triangle", style=shape.labeldown, color=color.maroon, textcolor=color.white, location=location.top, offset=-2)
+plotshape(showPatterns and isABCD(1) and not isABCD(1)[1], text="AB=CD\n", title="Bull ABCD", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isBat(1) and not isBat(1)[1], text="Bat", title="Bull Bat", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isAntiBat(1) and not isAntiBat(1)[1], text="Anti Bat", title="Bull Anti Bat", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isAltBat(1) and not isAltBat(1)[1], text="Alt Bat", title="Bull Alt Bat", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isButterfly(1) and not isButterfly(1)[1], text="Butterfly", title="Bull Butterfly", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isAntiButterfly(1) and not isAntiButterfly(1)[1], text="Anti Butterfly", title="Bull Anti Butterfly", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isGartley(1) and not isGartley(1)[1], text="Gartley", title="Bull Gartley", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isAntiGartley(1) and not isAntiGartley(1)[1], text="Anti Gartley", title="Bull Anti Gartley", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isCrab(1) and not isCrab(1)[1], text="Crab", title="Bull Crab", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isAntiCrab(1) and not isAntiCrab(1)[1], text="Anti Crab", title="Bull Anti Crab", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isShark(1) and not isShark(1)[1], text="Shark", title="Bull Shark", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isAntiShark(1) and not isAntiShark(1)[1], text="Anti Shark", title="Bull Anti Shark", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and is5o(1) and not is5o(1)[1], text="5-O", title="Bull 5-O", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isWolf(1) and not isWolf(1)[1], text="Wolf Wave", title="Bull Wolf Wave", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isHnS(1) and not isHnS(1)[1], text="Head and Shoulders", title="Bull Head and Shoulders", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isConTria(1) and not isConTria(1)[1], text="Contracting Triangle", title="Bull Contracting Triangle", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+plotshape(showPatterns and isExpTria(1) and not isExpTria(1)[1], text="Expanding Triangle", title="Bull Expanding Triangle", style=shape.labelup, color=color.green, textcolor=color.white, location=location.bottom, offset=-2)
+
+//-------------------------------------------------------------------------------------------------------------------------------------------------------------
+fib_range = math.abs(d-c)
+fib_0000 = not showFib0000 ? na : d > c ? d-(fib_range*0.000):d+(fib_range*0.000)
+fib_0236 = not showFib0236 ? na : d > c ? d-(fib_range*0.236):d+(fib_range*0.236)
+fib_0382 = not showFib0382 ? na : d > c ? d-(fib_range*0.382):d+(fib_range*0.382)
+fib_0500 = not showFib0500 ? na : d > c ? d-(fib_range*0.500):d+(fib_range*0.500)
+fib_0618 = not showFib0618 ? na : d > c ? d-(fib_range*0.618):d+(fib_range*0.618)
+fib_0764 = not showFib0764 ? na : d > c ? d-(fib_range*0.764):d+(fib_range*0.764)
+fib_1000 = not showFib1000 ? na : d > c ? d-(fib_range*1.000):d+(fib_range*1.000)
+plot(title="Fib 0.000", series=fib_0000, color=color.new(color.black, fib_0000 != fib_0000[1] ? 100 : 0))
+plot(title="Fib 0.236", series=fib_0236, color=color.new(color.red, fib_0236 != fib_0236[1] ? 100 : 0))
+plot(title="Fib 0.382", series=fib_0382, color=color.new(color.olive, fib_0382 != fib_0382[1] ? 100 : 0))
+plot(title="Fib 0.500", series=fib_0500, color=color.new(color.lime, fib_0500 != fib_0500[1] ? 100 : 0))
+plot(title="Fib 0.618", series=fib_0618, color=color.new(color.teal, fib_0618 != fib_0618[1] ? 100 : 0))
+plot(title="Fib 0.764", series=fib_0764, color=color.new(color.blue, fib_0764 != fib_0764[1] ? 100 : 0))
+plot(title="Fib 1.000", series=fib_1000, color=color.new(color.black, fib_1000 != fib_1000[1] ? 100 : 0))
+
+bgcolor(not useAltTF ? na : ta.change(time(tf)) != 0 ? color.new(color.black, 0) : na)
+f_last_fib(_rate) => d > c ? d-(fib_range*_rate):d+(fib_range*_rate)
+
+// Remaining original settings are retained in original order; trade-size inputs
+// were removed and replaced by inpLot above.
+target01_ew_rate = input.float(0.236, title="Target 1 - Fib. Rate to use for Entry Window:")
+target01_tp_rate = input.float(0.618, title="Target 1 - Fib. Rate to use for TP:")
+target01_sl_rate = input.float(-0.236, title="Target 1 - Fib. Rate to use for SL:")
+target02_active = input.bool(false, title="Target 2 - Active?")
+target02_ew_rate = input.float(0.236, title="Target 2 - Fib. Rate to use for Entry Window:")
+target02_tp_rate = input.float(1.618, title="Target 2 - Fib. Rate to use for TP:")
+target02_sl_rate = input.float(-0.236, title="Target 2 - Fib. Rate to use for SL:")
+
+buy_patterns_00 = isABCD(1) or isBat(1) or isAltBat(1) or isButterfly(1) or isGartley(1) or isCrab(1) or isShark(1) or is5o(1) or isWolf(1) or isHnS(1) or isConTria(1) or isExpTria(1)
+buy_patterns_01 = isAntiBat(1) or isAntiButterfly(1) or isAntiGartley(1) or isAntiCrab(1) or isAntiShark(1)
+sel_patterns_00 = isABCD(-1) or isBat(-1) or isAltBat(-1) or isButterfly(-1) or isGartley(-1) or isCrab(-1) or isShark(-1) or is5o(-1) or isWolf(-1) or isHnS(-1) or isConTria(-1) or isExpTria(-1)
+sel_patterns_01 = isAntiBat(-1) or isAntiButterfly(-1) or isAntiGartley(-1) or isAntiCrab(-1) or isAntiShark(-1)
+
+target01_buy_entry = (buy_patterns_00 or buy_patterns_01) and close <= f_last_fib(target01_ew_rate)
+target01_buy_close = high >= f_last_fib(target01_tp_rate) or low <= f_last_fib(target01_sl_rate)
+target01_sel_entry = (sel_patterns_00 or sel_patterns_01) and close >= f_last_fib(target01_ew_rate)
+target01_sel_close = low <= f_last_fib(target01_tp_rate) or high >= f_last_fib(target01_sl_rate)
+
+if target01_buy_entry
+    strategy.entry("target01_buy", strategy.long, qty=inpLot, comment="buy 01")
+if target01_buy_close
+    strategy.close("target01_buy")
+if target01_sel_entry
+    strategy.entry("target01_sell", strategy.short, qty=inpLot, comment="sell 01")
+if target01_sel_close
+    strategy.close("target01_sell")
+
+target02_buy_entry = target02_active and (buy_patterns_00 or buy_patterns_01) and close <= f_last_fib(target02_ew_rate)
+// Preserve original operator-precedence behavior: `and` binds before `or`, so
+// the SL clause can close even when target02_active is false.
+target02_buy_close = target02_active and high >= f_last_fib(target02_tp_rate) or low <= f_last_fib(target02_sl_rate)
+target02_sel_entry = target02_active and (sel_patterns_00 or sel_patterns_01) and close >= f_last_fib(target02_ew_rate)
+target02_sel_close = target02_active and low <= f_last_fib(target02_tp_rate) or high >= f_last_fib(target02_sl_rate)
+// Corrected alternatives (intentionally NOT used; uncomment to gate both clauses):
+// target02_buy_close = target02_active and (high >= f_last_fib(target02_tp_rate) or low <= f_last_fib(target02_sl_rate))
+// target02_sel_close = target02_active and (low <= f_last_fib(target02_tp_rate) or high >= f_last_fib(target02_sl_rate))
+
+if target02_buy_entry
+    strategy.entry("target02_buy", strategy.long, qty=inpLot, comment="buy 02")
+if target02_buy_close
+    strategy.close("target02_buy")
+if target02_sel_entry
+    strategy.entry("target02_sell", strategy.short, qty=inpLot, comment="sell 02")
+if target02_sel_close
+    strategy.close("target02_sell")
