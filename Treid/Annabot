@@ -22,10 +22,17 @@ input int    InpSlippage              = 3;          // انحراف مجاز ب�
 input int    InpSLBufferPoints        = 50;         // فاصله حدضرر از مرز بدنه کندل مرجع
 input int    InpFvgSLBufferPoints     = 30;         // فاصله حدضرر از ناحیه FVG/پین‌بار
 input bool   InpDebugLog              = true;       // ثبت گزارش تشخیصی
+input bool   InpDiagMode              = true;       // حالت تشخیصی: گزارش کامل شرایط هر کندل M5
+input bool   InpIgnoreInsideBarRef    = false;      // نادیده‌گرفتن شرط inside-bar کندل مرجع (تست)
+input bool   InpIgnorePinbarConfirm   = false;      // نادیده‌گرفتن شرط پین‌بار (تست)
+input double InpMinPinBodyRatio       = 2.0;        // حداقل نسبت سایه به بدنه برای پین‌بار
+input double InpPinCloseRatio         = 0.65;       // حداقل بسته‌شدن در انتهای کندل پین‌بار
+input bool   InpUseM5CloseBreakout    = true;       // شکست با بسته‌شدن M5 (اگر false: شکست لحظه‌ای قیمت)
 input long   InpMagic                 = 123456;     // مجیک نامبر معاملات اکسپرت
 
 //--- وضعیت روز جاری و کندل مرجع
 datetime g_lastM5BarTime = 0;
+int      g_diagBarCount = 0;
 int      g_sessionDateKey = -1;
 int      g_nyOffset = 7;
 int      g_nyOffsetDateKey = -1;
@@ -33,6 +40,7 @@ double   g_bodyTop = 0.0;
 double   g_bodyBottom = 0.0;
 bool     g_referenceReady = false;
 bool     g_tradeAttemptedToday = false;
+bool     g_anyTradeAttempted = false;
 
 //--- Validated properties for the attached symbol (never use chart g_symbolPoint).
 double g_symbolPoint=0.0, g_tickSize=0.0, g_tickValueLoss=0.0;
@@ -47,6 +55,12 @@ void LogMessage(const string message)
 {
    if(InpDebugLog)
       Print("AnnaBot: ", message);
+}
+
+void DiagPrint(const string msg)
+{
+   if(InpDiagMode)
+      Print("DIAG | ", msg);
 }
 
 //+------------------------------------------------------------------+
@@ -472,10 +486,20 @@ bool LoadReferenceCandle(const int todayKey)
    ArraySetAsSeries(h1, true);
    int copied = CopyRates(_Symbol, PERIOD_H1, 0, 72, h1);
    if(copied < 3)
+   {
+      DiagPrint(StringFormat("Reference not found: H1 bars scanned=%d (CopyRates returned too few bars)", copied));
       return false;
+   }
 
+   bool nyHourSeen[24];
+   ArrayInitialize(nyHourSeen,false);
+   bool referenceHourSeen=false;
+   bool insideOnlyFailure=false;
+   int scanned=0;
+   string hoursSeen="";
    for(int i = 1; i < copied; ++i) // فقط کندل‌های بسته‌شده
    {
+      scanned++;
       MqlDateTime serverParts;
       if(!TimeToStruct(h1[i].time, serverParts))
          continue;
@@ -483,16 +507,28 @@ bool LoadReferenceCandle(const int todayKey)
       MqlDateTime nyParts;
       if(!TimeToStruct(nyTime, nyParts))
          continue;
+      if(!nyHourSeen[nyParts.hour])
+      {
+         nyHourSeen[nyParts.hour]=true;
+         if(hoursSeen!="") hoursSeen += ",";
+         hoursSeen += IntegerToString(nyParts.hour);
+      }
       int key = nyParts.year * 10000 + nyParts.mon * 100 + nyParts.day;
       if(key != todayKey || nyParts.hour != InpNYHour || nyParts.min != 0)
          continue;
+      referenceHourSeen=true;
 
       // کندل مرجع باید داخل دامنه کندل H1 قبلی باشد؛ آرایه سری است و i+1 قدیمی‌تر است.
-      if(i+1>=copied || h1[i].high>=h1[i+1].high || h1[i].low<=h1[i+1].low)
+      bool insideBar=(i+1<copied && h1[i].high<h1[i+1].high && h1[i].low>h1[i+1].low);
+      if(!insideBar && !InpIgnoreInsideBarRef)
       {
+         insideOnlyFailure=true;
          LogMessage("کندل ساعت ۱۰ نیویورک شرط inside-bar را ندارد.");
+         DiagPrint(StringFormat("Reference candidate failed only inside-bar: refHigh=%.*f refLow=%.*f prevHigh=%.*f prevLow=%.*f",g_symbolDigits,h1[i].high,g_symbolDigits,h1[i].low,g_symbolDigits,(i+1<copied?h1[i+1].high:0.0),g_symbolDigits,(i+1<copied?h1[i+1].low:0.0)));
          continue;
       }
+      if(!insideBar && InpIgnoreInsideBarRef)
+         DiagPrint(StringFormat("Inside-bar condition SKIPPED by InpIgnoreInsideBarRef=true: refHigh=%.*f refLow=%.*f",g_symbolDigits,h1[i].high,g_symbolDigits,h1[i].low));
 
       g_bodyTop = MathMax(h1[i].open, h1[i].close);
       g_bodyBottom = MathMin(h1[i].open, h1[i].close);
@@ -502,6 +538,7 @@ bool LoadReferenceCandle(const int todayKey)
                               g_symbolDigits, g_bodyBottom));
       return true;
    }
+   DiagPrint(StringFormat("Reference not found: H1 bars scanned=%d; unique NY hours seen=[%s]; target NY date=%d hour=%d; target hour exists=%s; inside-bar-only failure=%s",scanned,hoursSeen,todayKey,InpNYHour,referenceHourSeen?"yes":"no",insideOnlyFailure?"yes":"no"));
    return false;
 }
 
@@ -519,7 +556,10 @@ int CheckM5FvgAndPinbar(const int breakoutDirection, double &stopPrice)
    ArraySetAsSeries(m5, true);
    int copied = CopyRates(_Symbol, PERIOD_M5, 0, 40, m5);
    if(copied < 6)
+   {
+      DiagPrint(StringFormat("FVG/pin check skipped: only %d M5 bars copied",copied));
       return 0;
+   }
 
    const MqlRates signal = m5[1]; // آخرین کندل تکمیل‌شده برای پین‌بار
    if(g_symbolPoint <= 0.0)
@@ -531,6 +571,7 @@ int CheckM5FvgAndPinbar(const int breakoutDirection, double &stopPrice)
    double range = signal.high - signal.low;
    if(range <= 0.0)
       return 0;
+   DiagPrint(StringFormat("Signal m5[1]: O=%.*f H=%.*f L=%.*f C=%.*f body=%.*f range=%.*f upperWick=%.*f lowerWick=%.*f lower/body=%.3f upper/body=%.3f",g_symbolDigits,signal.open,g_symbolDigits,signal.high,g_symbolDigits,signal.low,g_symbolDigits,signal.close,g_symbolDigits,body,g_symbolDigits,range,g_symbolDigits,upperWick,g_symbolDigits,lowerWick,lowerWick/effectiveBody,upperWick/effectiveBody));
 
    // بررسی FVGهای تازه؛ i>=2 تا کندل تأیید پس از تشکیل شکاف باشد.
    for(int i = 2; i + 2 < copied && i <= 20; ++i)
@@ -538,16 +579,22 @@ int CheckM5FvgAndPinbar(const int breakoutDirection, double &stopPrice)
       double zoneLow = 0.0, zoneHigh = 0.0;
       bool bullishGap = (m5[i].low > m5[i + 2].high);
       bool bearishGap = (m5[i].high < m5[i + 2].low);
+      bool selectedGap=(breakoutDirection==1 ? bullishGap : bearishGap);
+      bool wickTouched=false;
+      bool pinbarPass=false;
+      bool closeBeyondBody=(breakoutDirection==1 ? signal.close>g_bodyTop : signal.close<g_bodyBottom);
 
       if(breakoutDirection == 1 && bullishGap)
       {
          zoneLow = m5[i + 2].high;
          zoneHigh = m5[i].low;
-         bool wickTouched = (signal.low <= zoneHigh && signal.low >= zoneLow - 2.0 * g_symbolPoint);
-         bool bullishPin = (lowerWick >= 2.0 * effectiveBody &&
-                            signal.close >= signal.low + 0.65 * range &&
+         wickTouched = (signal.low <= zoneHigh && signal.low >= zoneLow - 2.0 * g_symbolPoint);
+         bool bullishPin = (lowerWick >= InpMinPinBodyRatio * effectiveBody &&
+                            signal.close >= signal.low + InpPinCloseRatio * range &&
                             signal.close > signal.open);
-         if(wickTouched && bullishPin && signal.close > g_bodyTop)
+         pinbarPass=InpIgnorePinbarConfirm ? (wickTouched && closeBeyondBody) : bullishPin;
+         DiagPrint(StringFormat("FVG i=%d dir=BUY bullishGap=%s bearishGap=%s zoneLow=%.*f zoneHigh=%.*f wickTouched=%s pinbar=%s ignored=%s",i,bullishGap?"yes":"no",bearishGap?"yes":"no",g_symbolDigits,zoneLow,g_symbolDigits,zoneHigh,wickTouched?"yes":"no",pinbarPass?"PASS":"FAIL",InpIgnorePinbarConfirm?"yes":"no"));
+         if(wickTouched && pinbarPass && closeBeyondBody)
          {
             stopPrice = MathMin(MathMin(signal.low, zoneLow), g_bodyBottom) -
                         InpFvgSLBufferPoints * g_symbolPoint - InpSLBufferPoints * g_symbolPoint;
@@ -558,16 +605,24 @@ int CheckM5FvgAndPinbar(const int breakoutDirection, double &stopPrice)
       {
          zoneLow = m5[i].high;
          zoneHigh = m5[i + 2].low;
-         bool wickTouched = (signal.high >= zoneLow && signal.high <= zoneHigh + 2.0 * g_symbolPoint);
-         bool bearishPin = (upperWick >= 2.0 * effectiveBody &&
-                            signal.close <= signal.high - 0.65 * range &&
+         wickTouched = (signal.high >= zoneLow && signal.high <= zoneHigh + 2.0 * g_symbolPoint);
+         bool bearishPin = (upperWick >= InpMinPinBodyRatio * effectiveBody &&
+                            signal.close <= signal.high - InpPinCloseRatio * range &&
                             signal.close < signal.open);
-         if(wickTouched && bearishPin && signal.close < g_bodyBottom)
+         pinbarPass=InpIgnorePinbarConfirm ? (wickTouched && closeBeyondBody) : bearishPin;
+         DiagPrint(StringFormat("FVG i=%d dir=SELL bullishGap=%s bearishGap=%s zoneLow=%.*f zoneHigh=%.*f wickTouched=%s pinbar=%s ignored=%s",i,bullishGap?"yes":"no",bearishGap?"yes":"no",g_symbolDigits,zoneLow,g_symbolDigits,zoneHigh,wickTouched?"yes":"no",pinbarPass?"PASS":"FAIL",InpIgnorePinbarConfirm?"yes":"no"));
+         if(wickTouched && pinbarPass && closeBeyondBody)
          {
             stopPrice = MathMax(MathMax(signal.high, zoneHigh), g_bodyTop) +
                         InpFvgSLBufferPoints * g_symbolPoint + InpSLBufferPoints * g_symbolPoint;
             return -1;
          }
+      }
+      else
+      {
+         if(breakoutDirection==1 && bearishGap) { zoneLow=m5[i].high; zoneHigh=m5[i+2].low; }
+         if(breakoutDirection==-1 && bullishGap) { zoneLow=m5[i+2].high; zoneHigh=m5[i].low; }
+         DiagPrint(StringFormat("FVG i=%d dir=%s bullishGap=%s bearishGap=%s zoneLow=%.*f zoneHigh=%.*f wickTouched=no pinbar=FAIL (not matching directional gap)",i,breakoutDirection==1?"BUY":"SELL",bullishGap?"yes":"no",bearishGap?"yes":"no",g_symbolDigits,zoneLow,g_symbolDigits,zoneHigh));
       }
    }
    return 0;
@@ -578,6 +633,7 @@ int CheckM5FvgAndPinbar(const int breakoutDirection, double &stopPrice)
 //+------------------------------------------------------------------+
 void RunAnnaStrategy()
 {
+   g_diagBarCount++;
    int offsetDateKey = DateKey(TimeGMT());
    if(offsetDateKey < 0)
       return;
@@ -602,17 +658,26 @@ void RunAnnaStrategy()
       g_bodyBottom = 0.0;
    }
 
-   if(!g_referenceReady && !LoadReferenceCandle(todayKey))
-      return;
-
-   // پنجره فقط לאחר بسته‌شدن کندل مرجع و به مدت تعیین‌شده بر اساس NY time است.
    MqlDateTime nyParts;
    if(!TimeToStruct(nowNY, nyParts))
       return;
    int nowMinutes = nyParts.hour * 60 + nyParts.min;
    int windowStart = InpNYHour * 60 + 60; // کندل مرجع باید کامل بسته شود
    int windowEnd = windowStart + MathMax(0, InpSessionWindowHours) * 60;
-   if(nowMinutes < windowStart || nowMinutes >= windowEnd || g_tradeAttemptedToday)
+
+   if(!g_referenceReady)
+      LoadReferenceCandle(todayKey);
+
+   static datetime lastDiagBar=0;
+   datetime diagBar=iTime(_Symbol,PERIOD_M5,0);
+   if(InpDiagMode && diagBar>0 && diagBar!=lastDiagBar)
+   {
+      lastDiagBar=diagBar;
+      bool inWindow=(nowMinutes>=windowStart && nowMinutes<windowEnd);
+      DiagPrint(StringFormat("M5 bar | NY=%02d:%02d windowStart=%02d:%02d windowEnd=%02d:%02d referenceReady=%s bodyTop=%.*f bodyBottom=%.*f tradeAttemptedToday=%s HasOpenPosition=%s insideWindow=%s",nyParts.hour,nyParts.min,windowStart/60,windowStart%60,windowEnd/60,windowEnd%60,g_referenceReady?"true":"false",g_symbolDigits,g_bodyTop,g_symbolDigits,g_bodyBottom,g_tradeAttemptedToday?"true":"false",HasOpenPosition()?"true":"false",inWindow?"true":"false"));
+   }
+
+   if(!g_referenceReady || nowMinutes < windowStart || nowMinutes >= windowEnd || g_tradeAttemptedToday)
       return;
    if(HasOpenPosition())
       return;
@@ -620,26 +685,56 @@ void RunAnnaStrategy()
    MqlRates m5[];
    ArraySetAsSeries(m5, true);
    if(CopyRates(_Symbol, PERIOD_M5, 0, 4, m5) < 3)
+   {
+      DiagPrint("Breakout check skipped: unable to copy enough M5 bars");
       return;
+   }
 
-   // شکست بدنه با بسته‌شدن کندل پنج‌دقیقه‌ای بیرون از مرز بدنه H1.
+   // شکست بدنه با بسته‌شدن کندل پنج‌دقیقه‌ای بیرون از مرز بدنه H1؛ حالت جایگزین قیمت جاری.
    int direction = 0;
-   if(m5[1].close > g_bodyTop)
-      direction = 1;
-   else if(m5[1].close < g_bodyBottom)
-      direction = -1;
+   double breakoutPrice=m5[1].close;
+   double currentAsk=0.0,currentBid=0.0;
+   if(InpUseM5CloseBreakout)
+   {
+      if(m5[1].close > g_bodyTop)
+         direction = 1;
+      else if(m5[1].close < g_bodyBottom)
+         direction = -1;
+   }
+   else
+   {
+      if(SymbolInfoDouble(_Symbol,SYMBOL_ASK,currentAsk) && SymbolInfoDouble(_Symbol,SYMBOL_BID,currentBid))
+      {
+         if(currentAsk > g_bodyTop) { direction=1; breakoutPrice=currentAsk; }
+         else if(currentBid < g_bodyBottom) { direction=-1; breakoutPrice=currentBid; }
+      }
+      DiagPrint(StringFormat("Instant breakout mode: Ask=%.*f vs bodyTop=%.*f; Bid=%.*f vs bodyBottom=%.*f",g_symbolDigits,currentAsk,g_symbolDigits,g_bodyTop,g_symbolDigits,currentBid,g_symbolDigits,g_bodyBottom));
+   }
    if(direction == 0)
+   {
+      double close=m5[1].close;
+      double topDist=MathAbs(close-g_bodyTop)/g_symbolPoint;
+      double bottomDist=MathAbs(close-g_bodyBottom)/g_symbolPoint;
+      DiagPrint(StringFormat("No breakout: last closed M5 close=%.*f; bodyTop=%.*f distance=%.1f points; bodyBottom=%.*f distance=%.1f points; mode=%s",g_symbolDigits,close,g_symbolDigits,g_bodyTop,topDist,g_symbolDigits,g_bodyBottom,bottomDist,InpUseM5CloseBreakout?"M5 close":"instant price"));
       return;
+   }
+   DiagPrint(StringFormat("Breakout direction=%s using %s price=%.*f",direction==1?"BUY":"SELL",InpUseM5CloseBreakout?"M5 close":"current",g_symbolDigits,breakoutPrice));
 
    double stopPrice = 0.0;
    int confirmation = CheckM5FvgAndPinbar(direction, stopPrice);
    if(confirmation == 0)
+   {
+      DiagPrint("Breakout found but no matching FVG/wick/pinbar confirmation");
       return;
+   }
 
    bool opened = (confirmation > 0) ? OpenBuy(stopPrice) : OpenSell(stopPrice);
    // از تکرار سفارش پس از تأیید جلوگیری می‌شود؛ خطای ارسال نیز در همان ستاپ دوباره‌کاری نمی‌کند.
    if(opened)
+   {
       g_tradeAttemptedToday = true;
+      g_anyTradeAttempted = true;
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -649,7 +744,7 @@ int OnInit()
 {
    if(InpNYHour < 0 || InpNYHour > 23 || InpSessionWindowHours < 0 ||
       InpRiskUSD <= 0.0 || InpRiskReward <= 0.0 || InpMaxLot <= 0.0 || InpMinLotGuard <= 0.0 || InpSlippage < 0 ||
-      InpSLBufferPoints < 0 || InpFvgSLBufferPoints < 0)
+      InpSLBufferPoints < 0 || InpFvgSLBufferPoints < 0 || InpMinPinBodyRatio <= 0.0 || InpPinCloseRatio <= 0.0 || InpPinCloseRatio > 1.0)
    {
       Print("AnnaBot: invalid strategy/risk input values.");
       return INIT_PARAMETERS_INCORRECT;
@@ -706,6 +801,8 @@ int OnInit()
    PrintFormat("AnnaBot: NY offset=%d | server UTC offset=%d | NY DST=%s | Magic=%I64d | slippage=%d points",
                g_nyOffset, serverUtcOffset, nyDst ? "ON" : "OFF",InpMagic,InpSlippage);
    LogMessage("EA آماده است؛ استراتژی و محاسبه DST نیویورک حفظ شده‌اند.");
+   PrintFormat("AnnaBot diagnostic settings | InpNYHour=%d InpSessionWindowHours=%d InpDiagMode=%s InpIgnoreInsideBarRef=%s InpIgnorePinbarConfirm=%s InpUseM5CloseBreakout=%s computedNYOffset=%d hours",InpNYHour,InpSessionWindowHours,InpDiagMode?"true":"false",InpIgnoreInsideBarRef?"true":"false",InpIgnorePinbarConfirm?"true":"false",InpUseM5CloseBreakout?"true":"false",g_nyOffset);
+   Print("AnnaBot WARNING: InpDiagMode should be turned off in production to reduce log volume.");
    return INIT_SUCCEEDED;
 }
 
@@ -714,6 +811,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+   PrintFormat("AnnaBot diagnostic summary | M5 bars processed=%d | any trade attempted=%s",g_diagBarCount,g_anyTradeAttempted?"yes":"no");
    LogMessage(StringFormat("اکسپرت متوقف شد؛ reason=%d", reason));
 }
 
