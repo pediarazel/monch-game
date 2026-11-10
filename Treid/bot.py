@@ -1,244 +1,423 @@
-strategy(title='[STRATEGY][RS]ZigZag PA Strategy V4.1', shorttitle='S', overlay=true, pyramiding=0, initial_capital=100000, currency=currency.USD)
-useHA = input(false, title='Use Heikken Ashi Candles')
-useAltTF = input(true, title='Use Alt Timeframe')
-tf = input('60', title='Alt Timeframe')
-showPatterns = input(true, title='Show Patterns')
-showFib0000 = input(title='Display Fibonacci 0.000:', type=bool, defval=true)
-showFib0236 = input(title='Display Fibonacci 0.236:', type=bool, defval=true)
-showFib0382 = input(title='Display Fibonacci 0.382:', type=bool, defval=true)
-showFib0500 = input(title='Display Fibonacci 0.500:', type=bool, defval=true)
-showFib0618 = input(title='Display Fibonacci 0.618:', type=bool, defval=true)
-showFib0764 = input(title='Display Fibonacci 0.764:', type=bool, defval=true)
-showFib1000 = input(title='Display Fibonacci 1.000:', type=bool, defval=true)
-zigzag() =>
-    _isUp = close >= open
-    _isDown = close <= open
-    _direction = _isUp[1] and _isDown ? -1 : _isDown[1] and _isUp ? 1 : nz(_direction[1])
-    _zigzag = _isUp[1] and _isDown and _direction[1] != -1 ? highest(2) : _isDown[1] and _isUp and _direction[1] != 1 ? lowest(2) : na
+#property strict
+#property version   "1.00"
+#property copyright "Pedram"
+#property description "استراتژی الگوهای هارمونیک ZigZag PA"
 
-_ticker = useHA ? heikenashi(tickerid) : tickerid
-sz = useAltTF ? (change(time(tf)) != 0 ? security(_ticker, tf, zigzag()) : na) : zigzag()
+#include <Trade\Trade.mqh>
 
-plot(sz, title='zigzag', color=black, linewidth=2)
+input group "تنظیمات عمومی"
+input bool InpUseHA = false;                 // استفاده از کندل‌های هیکن‌آشی
+input bool InpUseAltTF = true;               // استفاده از تایم‌فریم جایگزین
+input ENUM_TIMEFRAMES InpAltTF = PERIOD_H1;  // تایم‌فریم جایگزین
+input bool InpShowPatterns = true;            // نمایش الگوها
+input double InpLot = 0.03;                   // حجم ثابت
+input bool InpCloseOnOpposite = true;         // رزرو برای سازگاری؛ خروج با قوانین هدف انجام می‌شود
+input bool InpAllowHedge = false;             // اجازه داشتن معاملات دوطرفه
 
-//  ||---   Pattern Recognition:
+input group "هدف اول"
+input bool InpT1Active = true;
+input double InpT1EwRate = 0.236;
+input double InpT1TpRate = 0.618;
+input double InpT1SlRate = -0.236;
 
-x = valuewhen(sz, sz, 4) 
-a = valuewhen(sz, sz, 3) 
-b = valuewhen(sz, sz, 2) 
-c = valuewhen(sz, sz, 1) 
-d = valuewhen(sz, sz, 0)
+input group "هدف دوم"
+input bool InpT2Active = false;
+input double InpT2EwRate = 0.236;
+input double InpT2TpRate = 1.618;
+input double InpT2SlRate = -0.236;
 
-xab = (abs(b-a)/abs(x-a))
-xad = (abs(a-d)/abs(x-a))
-abc = (abs(b-c)/abs(a-b))
-bcd = (abs(c-d)/abs(b-c))
+input group "معامله"
+input long InpMagic = 20261110;
+input double InpSlippagePoints = 20;
 
-//  ||-->   Functions:
-isBat(_mode)=>
-    _xab = xab >= 0.382 and xab <= 0.5
-    _abc = abc >= 0.382 and abc <= 0.886
-    _bcd = bcd >= 1.618 and bcd <= 2.618
-    _xad = xad <= 0.618 and xad <= 1.000    // 0.886
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+CTrade trade;
+datetime lastBarTime = 0;
+datetime lastAltBarTime = 0;
+double cachedAltPrices[5];
+datetime cachedAltTimes[5];
+int cachedAltCount = 0;
+string previousPatternKey = "";
 
-isAntiBat(_mode)=>
-    _xab = xab >= 0.500 and xab <= 0.886    // 0.618
-    _abc = abc >= 1.000 and abc <= 2.618    // 1.13 --> 2.618
-    _bcd = bcd >= 1.618 and bcd <= 2.618    // 2.0  --> 2.618
-    _xad = xad >= 0.886 and xad <= 1.000    // 1.13
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+struct PivotPoint
+  {
+   double price;
+   datetime time;
+  };
 
-isAltBat(_mode)=>
-    _xab = xab <= 0.382
-    _abc = abc >= 0.382 and abc <= 0.886
-    _bcd = bcd >= 2.0 and bcd <= 3.618
-    _xad = xad <= 1.13
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+// بررسی قرارگرفتن نسبت در بازه مجاز
+bool InRange(const double value,const double minimum,const double maximum)
+  {
+   return (value>=minimum && value<=maximum);
+  }
 
-isButterfly(_mode)=>
-    _xab = xab <= 0.786
-    _abc = abc >= 0.382 and abc <= 0.886
-    _bcd = bcd >= 1.618 and bcd <= 2.618
-    _xad = xad >= 1.27 and xad <= 1.618
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+// هر تابع الگو نسبت‌های XAB، XAD، ABC و BCD را دریافت می‌کند
+bool isBat(double xab,double xad,double abc,double bcd)
+  { return InRange(xab,0.382,0.5) && InRange(abc,0.382,0.886) && InRange(bcd,1.618,2.618) && xad<=0.618; }
+bool isAntiBat(double xab,double xad,double abc,double bcd)
+  { return InRange(xab,0.5,0.886) && InRange(abc,1.0,2.618) && InRange(bcd,1.618,2.618) && InRange(xad,0.886,1.0); }
+bool isAltBat(double xab,double xad,double abc,double bcd)
+  { return xab<=0.382 && InRange(abc,0.382,0.886) && InRange(bcd,2.0,3.618) && xad<=1.13; }
+bool isButterfly(double xab,double xad,double abc,double bcd)
+  { return xab<=0.786 && InRange(abc,0.382,0.886) && InRange(bcd,1.618,2.618) && InRange(xad,1.27,1.618); }
+bool isAntiButterfly(double xab,double xad,double abc,double bcd)
+  { return InRange(xab,0.236,0.886) && InRange(abc,1.13,2.618) && InRange(bcd,1.0,1.382) && InRange(xad,0.5,0.886); }
+bool isABCD(double xab,double xad,double abc,double bcd)
+  { return InRange(abc,0.382,0.886) && InRange(bcd,1.13,2.618); }
+bool isGartley(double xab,double xad,double abc,double bcd)
+  { return InRange(xab,0.5,0.618) && InRange(abc,0.382,0.886) && InRange(bcd,1.13,2.618) && InRange(xad,0.75,0.875); }
+bool isAntiGartley(double xab,double xad,double abc,double bcd)
+  { return InRange(xab,0.5,0.886) && InRange(abc,1.0,2.618) && InRange(bcd,1.5,5.0) && InRange(xad,1.0,5.0); }
+bool isCrab(double xab,double xad,double abc,double bcd)
+  { return InRange(xab,0.5,0.875) && InRange(abc,0.382,0.886) && InRange(bcd,2.0,5.0) && InRange(xad,1.382,5.0); }
+bool isAntiCrab(double xab,double xad,double abc,double bcd)
+  { return InRange(xab,0.25,0.5) && InRange(abc,1.13,2.618) && InRange(bcd,1.618,2.618) && InRange(xad,0.5,0.75); }
+bool isShark(double xab,double xad,double abc,double bcd)
+  { return InRange(xab,0.5,0.875) && InRange(abc,1.13,1.618) && InRange(bcd,1.27,2.24) && InRange(xad,0.886,1.13); }
+bool isAntiShark(double xab,double xad,double abc,double bcd)
+  { return InRange(xab,0.382,0.875) && InRange(abc,0.5,1.0) && InRange(bcd,1.25,2.618) && InRange(xad,0.5,1.25); }
+bool is5o(double xab,double xad,double abc,double bcd)
+  { return InRange(xab,1.13,1.618) && InRange(abc,1.618,2.24) && InRange(bcd,0.5,0.625) && InRange(xad,0.0,0.236); }
+bool isWolf(double xab,double xad,double abc,double bcd)
+  { return InRange(xab,1.27,1.618) && InRange(abc,0.0,5.0) && InRange(bcd,1.27,1.618) && InRange(xad,0.0,5.0); }
+bool isHnS(double xab,double xad,double abc,double bcd)
+  { return InRange(xab,2.0,10.0) && InRange(abc,0.9,1.1) && InRange(bcd,0.236,0.88) && InRange(xad,0.9,1.1); }
+bool isConTria(double xab,double xad,double abc,double bcd)
+  { return InRange(xab,0.382,0.618) && InRange(abc,0.382,0.618) && InRange(bcd,0.382,0.618) && InRange(xad,0.236,0.764); }
+bool isExpTria(double xab,double xad,double abc,double bcd)
+  { return InRange(xab,1.236,1.618) && InRange(abc,1.0,1.618) && InRange(bcd,1.236,2.0) && InRange(xad,2.0,2.236); }
 
-isAntiButterfly(_mode)=>
-    _xab = xab >= 0.236 and xab <= 0.886    // 0.382 - 0.618
-    _abc = abc >= 1.130 and abc <= 2.618    // 1.130 - 2.618
-    _bcd = bcd >= 1.000 and bcd <= 1.382    // 1.27
-    _xad = xad >= 0.500 and xad <= 0.886    // 0.618 - 0.786
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+// محاسبه نسبت‌ها و تشخیص الگوی نخست از گروه مربوطه
+bool DetectPattern(const int mode,const PivotPoint &pivots[],string &pattern,
+                   double &xab,double &xad,double &abc,double &bcd)
+  {
+   pattern="";
+   if(ArraySize(pivots)<5) return false;
+   double x=pivots[0].price, a=pivots[1].price, b=pivots[2].price;
+   double c=pivots[3].price, d=pivots[4].price;
+   double denXA=MathAbs(x-a), denAB=MathAbs(a-b), denBC=MathAbs(b-c);
+   if(denXA<=0.0 || denAB<=0.0 || denBC<=0.0) return false;
+   if(mode==1 && !(d<c)) return false;
+   if(mode==-1 && !(d>c)) return false;
+   xab=MathAbs(b-a)/denXA;
+   xad=MathAbs(a-d)/denXA;
+   abc=MathAbs(b-c)/denAB;
+   bcd=MathAbs(c-d)/denBC;
+   if(mode==1)
+     {
+      if(isABCD(xab,xad,abc,bcd)) pattern="ABCD";
+      else if(isBat(xab,xad,abc,bcd)) pattern="Bat";
+      else if(isAltBat(xab,xad,abc,bcd)) pattern="AltBat";
+      else if(isButterfly(xab,xad,abc,bcd)) pattern="Butterfly";
+      else if(isGartley(xab,xad,abc,bcd)) pattern="Gartley";
+      else if(isCrab(xab,xad,abc,bcd)) pattern="Crab";
+      else if(isShark(xab,xad,abc,bcd)) pattern="Shark";
+      else if(is5o(xab,xad,abc,bcd)) pattern="5o";
+      else if(isWolf(xab,xad,abc,bcd)) pattern="Wolf";
+      else if(isHnS(xab,xad,abc,bcd)) pattern="HnS";
+      else if(isConTria(xab,xad,abc,bcd)) pattern="ConTria";
+      else if(isExpTria(xab,xad,abc,bcd)) pattern="ExpTria";
+      else if(isAntiBat(xab,xad,abc,bcd)) pattern="AntiBat";
+      else if(isAntiButterfly(xab,xad,abc,bcd)) pattern="AntiButterfly";
+      else if(isAntiGartley(xab,xad,abc,bcd)) pattern="AntiGartley";
+      else if(isAntiCrab(xab,xad,abc,bcd)) pattern="AntiCrab";
+      else if(isAntiShark(xab,xad,abc,bcd)) pattern="AntiShark";
+     }
+   else
+     {
+      if(isABCD(xab,xad,abc,bcd)) pattern="ABCD";
+      else if(isBat(xab,xad,abc,bcd)) pattern="Bat";
+      else if(isAltBat(xab,xad,abc,bcd)) pattern="AltBat";
+      else if(isButterfly(xab,xad,abc,bcd)) pattern="Butterfly";
+      else if(isGartley(xab,xad,abc,bcd)) pattern="Gartley";
+      else if(isCrab(xab,xad,abc,bcd)) pattern="Crab";
+      else if(isShark(xab,xad,abc,bcd)) pattern="Shark";
+      else if(is5o(xab,xad,abc,bcd)) pattern="5o";
+      else if(isWolf(xab,xad,abc,bcd)) pattern="Wolf";
+      else if(isHnS(xab,xad,abc,bcd)) pattern="HnS";
+      else if(isConTria(xab,xad,abc,bcd)) pattern="ConTria";
+      else if(isExpTria(xab,xad,abc,bcd)) pattern="ExpTria";
+      else if(isAntiBat(xab,xad,abc,bcd)) pattern="AntiBat";
+      else if(isAntiButterfly(xab,xad,abc,bcd)) pattern="AntiButterfly";
+      else if(isAntiGartley(xab,xad,abc,bcd)) pattern="AntiGartley";
+      else if(isAntiCrab(xab,xad,abc,bcd)) pattern="AntiCrab";
+      else if(isAntiShark(xab,xad,abc,bcd)) pattern="AntiShark";
+     }
+   return (pattern!="");
+  }
 
-isABCD(_mode)=>
-    _abc = abc >= 0.382 and abc <= 0.886
-    _bcd = bcd >= 1.13 and bcd <= 2.618
-    _abc and _bcd and (_mode == 1 ? d < c : d > c)
+// آرایه نقاط برگشتی را از تاریخچه کندل‌ها می‌سازد
+int BuildPivots(const ENUM_TIMEFRAMES timeframe,const bool useHA,PivotPoint &outPivots[])
+  {
+   MqlRates rates[];
+   ArraySetAsSeries(rates,true);
+   int copied=CopyRates(_Symbol,timeframe,0,700,rates);
+   if(copied<6) return 0;
+   double haOpen[],haClose[],haHigh[],haLow[];
+   ArrayResize(haOpen,copied); ArrayResize(haClose,copied);
+   ArrayResize(haHigh,copied); ArrayResize(haLow,copied);
+   ArraySetAsSeries(haOpen,true); ArraySetAsSeries(haClose,true);
+   ArraySetAsSeries(haHigh,true); ArraySetAsSeries(haLow,true);
+   for(int i=copied-1;i>=0;i--)
+     {
+      haClose[i]=(rates[i].open+rates[i].high+rates[i].low+rates[i].close)/4.0;
+      if(i==copied-1) haOpen[i]=(rates[i].open+rates[i].close)/2.0;
+      else haOpen[i]=(haOpen[i+1]+haClose[i+1])/2.0;
+      haHigh[i]=MathMax(rates[i].high,MathMax(haOpen[i],haClose[i]));
+      haLow[i]=MathMin(rates[i].low,MathMin(haOpen[i],haClose[i]));
+     }
+   int direction=0;
+   bool prevUp=false,prevDown=false;
+   double revPrice[];
+   datetime revTime[];
+   ArrayResize(revPrice,0); ArrayResize(revTime,0);
+   // از قدیمی‌ترین کندل کامل به جدیدترین کندل کامل
+   for(int i=copied-1;i>=1;i--)
+     {
+      double op=useHA ? haOpen[i] : rates[i].open;
+      double cl=useHA ? haClose[i] : rates[i].close;
+      bool isUp=(cl>=op), isDown=(cl<=op);
+      bool pivot=false;
+      double pivotPrice=0.0;
+      int pivotIndex=-1;
+      int nextDirection=direction;
+      if(prevUp && isDown)
+        {
+         nextDirection=-1;
+         if(direction!=-1)
+           {
+            int earlier=i+1;
+            double currentHigh=(useHA ? haHigh[i] : rates[i].high);
+            double earlierHigh=(useHA ? haHigh[earlier] : rates[earlier].high);
+            pivotIndex=(currentHigh>=earlierHigh ? i : earlier);
+            pivotPrice=(useHA ? haHigh[pivotIndex] : rates[pivotIndex].high);
+            pivot=true;
+           }
+        }
+      else if(prevDown && isUp)
+        {
+         nextDirection=1;
+         if(direction!=1)
+           {
+            int earlier=i+1;
+            double currentLow=(useHA ? haLow[i] : rates[i].low);
+            double earlierLow=(useHA ? haLow[earlier] : rates[earlier].low);
+            pivotIndex=(currentLow<=earlierLow ? i : earlier);
+            pivotPrice=(useHA ? haLow[pivotIndex] : rates[pivotIndex].low);
+            pivot=true;
+           }
+        }
+      direction=nextDirection;
+      if(pivot)
+        {
+         int n=ArraySize(revPrice);
+         ArrayResize(revPrice,n+1); ArrayResize(revTime,n+1);
+         revPrice[n]=pivotPrice; revTime[n]=rates[pivotIndex].time;
+        }
+      prevUp=isUp; prevDown=isDown;
+     }
+   int total=ArraySize(revPrice);
+   int keep=(total<5 ? total : 5);
+   ArrayResize(outPivots,keep);
+   for(int j=0;j<keep;j++)
+     {
+      int source=total-keep+j;
+      outPivots[j].price=revPrice[source];
+      outPivots[j].time=revTime[source];
+     }
+   return keep;
+  }
 
-isGartley(_mode)=>
-    _xab = xab >= 0.5 and xab <= 0.618 // 0.618
-    _abc = abc >= 0.382 and abc <= 0.886
-    _bcd = bcd >= 1.13 and bcd <= 2.618
-    _xad = xad >= 0.75 and xad <= 0.875 // 0.786
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+// نگهداری خروجی تایم‌فریم جایگزین فقط هنگام آغاز کندل جدید آن
+void RefreshAltPivots()
+  {
+   datetime current=iTime(_Symbol,InpAltTF,0);
+   if(current==0 || current==lastAltBarTime) return;
+   lastAltBarTime=current;
+   PivotPoint pivots[];
+   int count=BuildPivots(InpAltTF,InpUseHA,pivots);
+   cachedAltCount=count;
+   for(int i=0;i<5;i++)
+     {
+      cachedAltPrices[i]=0.0; cachedAltTimes[i]=0;
+      if(i<count) { cachedAltPrices[i]=pivots[i].price; cachedAltTimes[i]=pivots[i].time; }
+     }
+  }
 
-isAntiGartley(_mode)=>
-    _xab = xab >= 0.500 and xab <= 0.886    // 0.618 -> 0.786
-    _abc = abc >= 1.000 and abc <= 2.618    // 1.130 -> 2.618
-    _bcd = bcd >= 1.500 and bcd <= 5.000    // 1.618
-    _xad = xad >= 1.000 and xad <= 5.000    // 1.272
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+// دریافت آخرین پنج پیوت فعال برای منطق جاری
+int GetCurrentPivots(PivotPoint &pivots[])
+  {
+   if(InpUseAltTF)
+     {
+      RefreshAltPivots();
+      ArrayResize(pivots,cachedAltCount);
+      for(int i=0;i<cachedAltCount;i++)
+        { pivots[i].price=cachedAltPrices[i]; pivots[i].time=cachedAltTimes[i]; }
+      return cachedAltCount;
+     }
+   return BuildPivots((ENUM_TIMEFRAMES)_Period,InpUseHA,pivots);
+  }
 
-isCrab(_mode)=>
-    _xab = xab >= 0.500 and xab <= 0.875    // 0.886
-    _abc = abc >= 0.382 and abc <= 0.886    
-    _bcd = bcd >= 2.000 and bcd <= 5.000    // 3.618
-    _xad = xad >= 1.382 and xad <= 5.000    // 1.618
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+double FibPrice(const double d,const double c,const double rate)
+  {
+   double range=MathAbs(d-c);
+   return (d>c ? d-range*rate : d+range*rate);
+  }
 
-isAntiCrab(_mode)=>
-    _xab = xab >= 0.250 and xab <= 0.500    // 0.276 -> 0.446
-    _abc = abc >= 1.130 and abc <= 2.618    // 1.130 -> 2.618
-    _bcd = bcd >= 1.618 and bcd <= 2.618    // 1.618 -> 2.618
-    _xad = xad >= 0.500 and xad <= 0.750    // 0.618
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+double LotNormalize(double lot)
+  {
+   double minimum=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
+   double maximum=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX);
+   double step=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);
+   if(step<=0.0) step=minimum;
+   lot=MathMax(minimum,MathMin(maximum,lot));
+   lot=MathFloor(lot/step+1e-8)*step;
+   int digits=2;
+   if(step<0.1) digits=3;
+   if(step<0.01) digits=4;
+   return NormalizeDouble(lot,digits);
+  }
 
-isShark(_mode)=>
-    _xab = xab >= 0.500 and xab <= 0.875    // 0.5 --> 0.886
-    _abc = abc >= 1.130 and abc <= 1.618    //
-    _bcd = bcd >= 1.270 and bcd <= 2.240    //
-    _xad = xad >= 0.886 and xad <= 1.130    // 0.886 --> 1.13
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+bool HasPosition(const ENUM_POSITION_TYPE wanted,const bool anyDirection=false)
+  {
+   for(int i=PositionsTotal()-1;i>=0;i--)
+     {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0) continue;
+      if(PositionGetString(POSITION_SYMBOL)!=_Symbol) continue;
+      if((long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) continue;
+      ENUM_POSITION_TYPE type=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      if(anyDirection || type==wanted) return true;
+     }
+   return false;
+  }
 
-isAntiShark(_mode)=>
-    _xab = xab >= 0.382 and xab <= 0.875    // 0.446 --> 0.618
-    _abc = abc >= 0.500 and abc <= 1.000    // 0.618 --> 0.886
-    _bcd = bcd >= 1.250 and bcd <= 2.618    // 1.618 --> 2.618
-    _xad = xad >= 0.500 and xad <= 1.250    // 1.130 --> 1.130
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+// مدیریت خروج معامله بر اساس برچسب هدف و جهت پوزیشن
+void ManagePositions(const double high,const double low,const double c,const double d)
+  {
+   double t1tp=FibPrice(d,c,InpT1TpRate), t1sl=FibPrice(d,c,InpT1SlRate);
+   double t2tp=FibPrice(d,c,InpT2TpRate), t2sl=FibPrice(d,c,InpT2SlRate);
+   for(int i=PositionsTotal()-1;i>=0;i--)
+     {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || PositionGetString(POSITION_SYMBOL)!=_Symbol || (long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) continue;
+      string tag=PositionGetString(POSITION_COMMENT);
+      ENUM_POSITION_TYPE type=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      bool closeNow=false;
+      if(StringFind(tag,"02")>=0 && InpT2Active)
+        closeNow=(type==POSITION_TYPE_BUY ? (high>=t2tp || low<=t2sl) : (low<=t2tp || high>=t2sl));
+      else if(StringFind(tag,"01")>=0 && InpT1Active)
+        closeNow=(type==POSITION_TYPE_BUY ? (high>=t1tp || low<=t1sl) : (low<=t1tp || high>=t1sl));
+      if(closeNow && !trade.PositionClose(ticket))
+         Print("خطا در بستن پوزیشن، ticket=",ticket," کد=",trade.ResultRetcode()," ",trade.ResultRetcodeDescription());
+     }
+  }
 
-is5o(_mode)=>
-    _xab = xab >= 1.13 and xab <= 1.618
-    _abc = abc >= 1.618 and abc <= 2.24
-    _bcd = bcd >= 0.5 and bcd <= 0.625 // 0.5
-    _xad = xad >= 0.0 and xad <= 0.236 // negative?
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+void DrawPattern(const PivotPoint &d,const string key,const int mode)
+  {
+   if(!InpShowPatterns) return;
+   string name="ZZPA_"+IntegerToString((long)d.time)+"_"+key;
+   if(ObjectFind(0,name)>=0) return;
+   ENUM_OBJECT objectType=(mode==1 ? OBJ_ARROW_UP : OBJ_ARROW_DOWN);
+   if(!ObjectCreate(0,name,objectType,0,d.time,d.price)) return;
+   ObjectSetInteger(0,name,OBJPROP_COLOR,(mode==1 ? clrLimeGreen : clrTomato));
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
+   ObjectSetString(0,name,OBJPROP_TOOLTIP,key);
+   // پاکسازی نشانه‌های قدیمی‌تر از حدود ۲۰۰۰ کندل
+   datetime cutoff=iTime(_Symbol,(ENUM_TIMEFRAMES)_Period,2000);
+   if(cutoff>0)
+     for(int i=ObjectsTotal(0)-1;i>=0;i--)
+       {
+        string obj=ObjectName(0,i);
+        if(StringFind(obj,"ZZPA_")==0 && (datetime)ObjectGetInteger(0,obj,OBJPROP_TIME)<cutoff) ObjectDelete(0,obj);
+       }
+  }
 
-isWolf(_mode)=>
-    _xab = xab >= 1.27 and xab <= 1.618
-    _abc = abc >= 0 and abc <= 5
-    _bcd = bcd >= 1.27 and bcd <= 1.618
-    _xad = xad >= 0.0 and xad <= 5
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+void TryOpen(const bool isBuy,const int target,const string pattern,const double entryWindow,
+             const double tp,const double sl)
+  {
+   ENUM_POSITION_TYPE desired=(isBuy ? POSITION_TYPE_BUY : POSITION_TYPE_SELL);
+   if(HasPosition(desired)) return;
+   if(!InpAllowHedge && HasPosition(desired==POSITION_TYPE_BUY ? POSITION_TYPE_SELL : POSITION_TYPE_BUY)) return;
+   double lots=LotNormalize(InpLot);
+   string side=(isBuy ? "buy" : "sell");
+   string tag=side+(target==1 ? " 01" : " 02");
+   Print("سیگنال ",pattern," جهت ",side," هدف ",target," | پنجره ورود=",DoubleToString(entryWindow,_Digits),
+         " TP=",DoubleToString(tp,_Digits)," SL=",DoubleToString(sl,_Digits));
+   bool sent=(isBuy ? trade.Buy(lots,_Symbol,0.0,0.0,0.0,tag) : trade.Sell(lots,_Symbol,0.0,0.0,0.0,tag));
+   if(sent)
+      Print("سفارش ارسال شد: ",tag," الگو=",pattern," حجم=",DoubleToString(lots,2)," قیمت بازار");
+   else
+      Print("ارسال سفارش ناموفق: ",tag," کد=",trade.ResultRetcode()," ",trade.ResultRetcodeDescription());
+  }
 
-isHnS(_mode)=>
-    _xab = xab >= 2.0 and xab <= 10
-    _abc = abc >= 0.90 and abc <= 1.1
-    _bcd = bcd >= 0.236 and bcd <= 0.88
-    _xad = xad >= 0.90 and xad <= 1.1
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+void EvaluateStrategy()
+  {
+   PivotPoint pivots[];
+   if(GetCurrentPivots(pivots)<5) { previousPatternKey=""; return; }
+   double xab=0,xad=0,abc=0,bcd=0;
+   string buyPattern="",sellPattern="";
+   bool buyPatternFound=DetectPattern(1,pivots,buyPattern,xab,xad,abc,bcd);
+   double sxab=0,sxad=0,sabc=0,sbcd=0;
+   bool sellPatternFound=DetectPattern(-1,pivots,sellPattern,sxab,sxad,sabc,sbcd);
+   string visualKey="";
+   int visualMode=0;
+   if(buyPatternFound) { visualKey="buy_"+buyPattern; visualMode=1; }
+   else if(sellPatternFound) { visualKey="sell_"+sellPattern; visualMode=-1; }
+   if(visualKey!="" && visualKey!=previousPatternKey) DrawPattern(pivots[4],visualKey,visualMode);
+   previousPatternKey=visualKey;
 
-isConTria(_mode)=>
-    _xab = xab >= 0.382 and xab <= 0.618
-    _abc = abc >= 0.382 and abc <= 0.618
-    _bcd = bcd >= 0.382 and bcd <= 0.618
-    _xad = xad >= 0.236 and xad <= 0.764
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+   double close=iClose(_Symbol,PERIOD_CURRENT,1);
+   double high=iHigh(_Symbol,PERIOD_CURRENT,1);
+   double low=iLow(_Symbol,PERIOD_CURRENT,1);
+   if(close==0 || high==0 || low==0) return;
+   double c=pivots[3].price, d=pivots[4].price;
+   ManagePositions(high,low,c,d);
 
-isExpTria(_mode)=>
-    _xab = xab >= 1.236 and xab <= 1.618
-    _abc = abc >= 1.000 and abc <= 1.618
-    _bcd = bcd >= 1.236 and bcd <= 2.000
-    _xad = xad >= 2.000 and xad <= 2.236
-    _xab and _abc and _bcd and _xad and (_mode == 1 ? d < c : d > c)
+   double t1Entry=FibPrice(d,c,InpT1EwRate), t1TP=FibPrice(d,c,InpT1TpRate), t1SL=FibPrice(d,c,InpT1SlRate);
+   double t2Entry=FibPrice(d,c,InpT2EwRate), t2TP=FibPrice(d,c,InpT2TpRate), t2SL=FibPrice(d,c,InpT2SlRate);
+   // ورود در کندل بعد از سیگنال (معادل رفتار Pine بدون process_orders_on_close)
+   if(InpT1Active && buyPatternFound && close<=t1Entry)
+      TryOpen(true,1,buyPattern,t1Entry,t1TP,t1SL);
+   else if(InpT1Active && sellPatternFound && close>=t1Entry)
+      TryOpen(false,1,sellPattern,t1Entry,t1TP,t1SL);
+   else if(InpT2Active && buyPatternFound && close<=t2Entry)
+      TryOpen(true,2,buyPattern,t2Entry,t2TP,t2SL);
+   else if(InpT2Active && sellPatternFound && close>=t2Entry)
+      TryOpen(false,2,sellPattern,t2Entry,t2TP,t2SL);
+  }
 
-plotshape(not showPatterns ? na : isABCD(-1) and not isABCD(-1)[1], text="\nAB=CD", title='Bear ABCD', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0, offset=-2)
-plotshape(not showPatterns ? na : isBat(-1) and not isBat(-1)[1], text="Bat", title='Bear Bat', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0, offset=-2)
-plotshape(not showPatterns ? na : isAntiBat(-1) and not isAntiBat(-1)[1], text="Anti Bat", title='Bear Anti Bat', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0, offset=-2)
-plotshape(not showPatterns ? na : isAltBat(-1) and not isAltBat(-1)[1], text="Alt Bat", title='Bear Alt Bat', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0)
-plotshape(not showPatterns ? na : isButterfly(-1) and not isButterfly(-1)[1], text="Butterfly", title='Bear Butterfly', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0)
-plotshape(not showPatterns ? na : isAntiButterfly(-1) and not isAntiButterfly(-1)[1], text="Anti Butterfly", title='Bear Anti Butterfly', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0)
-plotshape(not showPatterns ? na : isGartley(-1) and not isGartley(-1)[1], text="Gartley", title='Bear Gartley', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0)
-plotshape(not showPatterns ? na : isAntiGartley(-1) and not isAntiGartley(-1)[1], text="Anti Gartley", title='Bear Anti Gartley', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0)
-plotshape(not showPatterns ? na : isCrab(-1) and not isCrab(-1)[1], text="Crab", title='Bear Crab', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0)
-plotshape(not showPatterns ? na : isAntiCrab(-1) and not isAntiCrab(-1)[1], text="Anti Crab", title='Bear Anti Crab', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0)
-plotshape(not showPatterns ? na : isShark(-1) and not isShark(-1)[1], text="Shark", title='Bear Shark', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0)
-plotshape(not showPatterns ? na : isAntiShark(-1) and not isAntiShark(-1)[1], text="Anti Shark", title='Bear Anti Shark', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0)
-plotshape(not showPatterns ? na : is5o(-1) and not is5o(-1)[1], text="5-O", title='Bear 5-O', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0)
-plotshape(not showPatterns ? na : isWolf(-1) and not isWolf(-1)[1], text="Wolf Wave", title='Bear Wolf Wave', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0)
-plotshape(not showPatterns ? na : isHnS(-1) and not isHnS(-1)[1], text="Head and Shoulders", title='Bear Head and Shoulders', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0)
-plotshape(not showPatterns ? na : isConTria(-1) and not isConTria(-1)[1], text="Contracting Triangle", title='Bear Contracting triangle', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0)
-plotshape(not showPatterns ? na : isExpTria(-1) and not isExpTria(-1)[1], text="Expanding Triangle", title='Bear Expanding Triangle', style=shape.labeldown, color=maroon, textcolor=white, location=location.top, transp=0)
+int OnInit()
+  {
+   trade.SetExpertMagicNumber((ulong)InpMagic);
+   trade.SetDeviationInPoints((ulong)MathMax(0.0,InpSlippagePoints));
+   trade.SetTypeFillingBySymbol(_Symbol);
+   lastBarTime=iTime(_Symbol,PERIOD_CURRENT,0);
+   if(InpUseAltTF) RefreshAltPivots();
+   return INIT_SUCCEEDED;
+  }
 
-plotshape(not showPatterns ? na : isABCD(1) and not isABCD(1)[1], text="AB=CD\n", title='Bull ABCD', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isBat(1) and not isBat(1)[1], text="Bat", title='Bull Bat', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isAntiBat(1) and not isAntiBat(1)[1], text="Anti Bat", title='Bull Anti Bat', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isAltBat(1) and not isAltBat(1)[1], text="Alt Bat", title='Bull Alt Bat', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isButterfly(1) and not isButterfly(1)[1], text="Butterfly", title='Bull Butterfly', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isAntiButterfly(1) and not isAntiButterfly(1)[1], text="Anti Butterfly", title='Bull Anti Butterfly', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isGartley(1) and not isGartley(1)[1], text="Gartley", title='Bull Gartley', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isAntiGartley(1) and not isAntiGartley(1)[1], text="Anti Gartley", title='Bull Anti Gartley', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isCrab(1) and not isCrab(1)[1], text="Crab", title='Bull Crab', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isAntiCrab(1) and not isAntiCrab(1)[1], text="Anti Crab", title='Bull Anti Crab', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isShark(1) and not isShark(1)[1], text="Shark", title='Bull Shark', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isAntiShark(1) and not isAntiShark(1)[1], text="Anti Shark", title='Bull Anti Shark', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : is5o(1) and not is5o(1)[1], text="5-O", title='Bull 5-O', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isWolf(1) and not isWolf(1)[1], text="Wolf Wave", title='Bull Wolf Wave', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isHnS(1) and not isHnS(1)[1], text="Head and Shoulders", title='Bull Head and Shoulders', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isConTria(1) and not isConTria(1)[1], text="Contracting Triangle", title='Bull Contracting Triangle', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
-plotshape(not showPatterns ? na : isExpTria(1) and not isExpTria(1)[1], text="Expanding Triangle", title='Bull Expanding Triangle', style=shape.labelup, color=green, textcolor=white, location=location.bottom, transp=0)
+void OnTick()
+  {
+   datetime current=iTime(_Symbol,PERIOD_CURRENT,0);
+   if(current==0 || current==lastBarTime) return;
+   lastBarTime=current;
+   EvaluateStrategy();
+  }
 
-//-------------------------------------------------------------------------------------------------------------------------------------------------------------
-fib_range = abs(d-c)
-fib_0000 = not showFib0000 ? na : d > c ? d-(fib_range*0.000):d+(fib_range*0.000)
-fib_0236 = not showFib0236 ? na : d > c ? d-(fib_range*0.236):d+(fib_range*0.236)
-fib_0382 = not showFib0382 ? na : d > c ? d-(fib_range*0.382):d+(fib_range*0.382)
-fib_0500 = not showFib0500 ? na : d > c ? d-(fib_range*0.500):d+(fib_range*0.500)
-fib_0618 = not showFib0618 ? na : d > c ? d-(fib_range*0.618):d+(fib_range*0.618)
-fib_0764 = not showFib0764 ? na : d > c ? d-(fib_range*0.764):d+(fib_range*0.764)
-fib_1000 = not showFib1000 ? na : d > c ? d-(fib_range*1.000):d+(fib_range*1.000)
-plot(title='Fib 0.000', series=fib_0000, color=fib_0000 != fib_0000[1] ? na : black)
-plot(title='Fib 0.236', series=fib_0236, color=fib_0236 != fib_0236[1] ? na : red)
-plot(title='Fib 0.382', series=fib_0382, color=fib_0382 != fib_0382[1] ? na : olive)
-plot(title='Fib 0.500', series=fib_0500, color=fib_0500 != fib_0500[1] ? na : lime)
-plot(title='Fib 0.618', series=fib_0618, color=fib_0618 != fib_0618[1] ? na : teal)
-plot(title='Fib 0.764', series=fib_0764, color=fib_0764 != fib_0764[1] ? na : blue)
-plot(title='Fib 1.000', series=fib_1000, color=fib_1000 != fib_1000[1] ? na : black)
+void OnDeinit(const int reason)
+  {
+   for(int i=ObjectsTotal(0)-1;i>=0;i--)
+     {
+      string name=ObjectName(0,i);
+      if(StringFind(name,"ZZPA_")==0) ObjectDelete(0,name);
+     }
+  }
 
-bgcolor(not useAltTF ? na : change(time(tf))!=0?black:na)
-f_last_fib(_rate)=>d > c ? d-(fib_range*_rate):d+(fib_range*_rate)
-
-target01_trade_size = input(title='Target 1 - Trade size:', type=float, defval=10000.00)
-target01_ew_rate = input(title='Target 1 - Fib. Rate to use for Entry Window:', type=float, defval=0.236)
-target01_tp_rate = input(title='Target 1 - Fib. Rate to use for TP:', type=float, defval=0.618)
-target01_sl_rate = input(title='Target 1 - Fib. Rate to use for SL:', type=float, defval=-0.236)
-target02_active = input(title='Target 2 - Active?', type=bool, defval=false)
-target02_trade_size = input(title='Target 2 - Trade size:', type=float, defval=10000.00)
-target02_ew_rate = input(title='Target 2 - Fib. Rate to use for Entry Window:', type=float, defval=0.236)
-target02_tp_rate = input(title='Target 2 - Fib. Rate to use for TP:', type=float, defval=1.618)
-target02_sl_rate = input(title='Target 2 - Fib. Rate to use for SL:', type=float, defval=-0.236)
-
-buy_patterns_00 = isABCD(1) or isBat(1) or isAltBat(1) or isButterfly(1) or isGartley(1) or isCrab(1) or isShark(1) or is5o(1) or isWolf(1) or isHnS(1) or isConTria(1) or isExpTria(1)
-buy_patterns_01 = isAntiBat(1) or isAntiButterfly(1) or isAntiGartley(1) or isAntiCrab(1) or isAntiShark(1)
-sel_patterns_00 = isABCD(-1) or isBat(-1) or isAltBat(-1) or isButterfly(-1) or isGartley(-1) or isCrab(-1) or isShark(-1) or is5o(-1) or isWolf(-1) or isHnS(-1) or isConTria(-1) or isExpTria(-1)
-sel_patterns_01 = isAntiBat(-1) or isAntiButterfly(-1) or isAntiGartley(-1) or isAntiCrab(-1) or isAntiShark(-1)
-
-target01_buy_entry = (buy_patterns_00 or buy_patterns_01) and close <= f_last_fib(target01_ew_rate)
-target01_buy_close = high >= f_last_fib(target01_tp_rate) or low <= f_last_fib(target01_sl_rate)
-target01_sel_entry = (sel_patterns_00 or sel_patterns_01) and close >= f_last_fib(target01_ew_rate)
-target01_sel_close = low <= f_last_fib(target01_tp_rate) or high >= f_last_fib(target01_sl_rate)
-
-strategy.entry('target01_buy', long=strategy.long, qty=target01_trade_size, comment='buy 01', when=target01_buy_entry)
-strategy.close('target01_buy', when=target01_buy_close)
-strategy.entry('target01_sell', long=strategy.short, qty=target01_trade_size, comment='sell 01', when=target01_sel_entry)
-strategy.close('target01_sell', when=target01_sel_close)
-
-target02_buy_entry = target02_active and (buy_patterns_00 or buy_patterns_01) and close <= f_last_fib(target02_ew_rate)
-target02_buy_close = target02_active and high >= f_last_fib(target02_tp_rate) or low <= f_last_fib(target02_sl_rate)
-target02_sel_entry = target02_active and (sel_patterns_00 or sel_patterns_01) and close >= f_last_fib(target02_ew_rate)
-target02_sel_close = target02_active and low <= f_last_fib(target02_tp_rate) or high >= f_last_fib(target02_sl_rate)
-
-strategy.entry('target02_buy', long=strategy.long, qty=target02_trade_size, comment='buy 02', when=target02_buy_entry)
-strategy.close('target02_buy', when=target02_buy_close)
-strategy.entry('target02_sell', long=strategy.short, qty=target02_trade_size, comment='sell 02', when=target02_sel_entry)
-strategy.close('target02_sell', when=target02_sel_close)
+/*
+راهنمای نصب:
+۱) این فایل را در پوشه MQL5/Experts کپی کنید و در MetaEditor با کلید F7 کامپایل کنید.
+۲) حجم معامله ثابت و پیش‌فرض آن ۰٫۰۳ لات است؛ مقدار ورودی را می‌توان تغییر داد.
+۳) ورود در قیمت آغاز کندل بعد از کندلی انجام می‌شود که سیگنال آن در بسته‌شدن ارزیابی شده است.
+۴) باگ تقدم عملگرهای شرط بستن هدف دوم اصلاح شده و شرط‌های TP/SL داخل پرانتز هستند.
+۵) هدف دوم به‌صورت پیش‌فرض خاموش است.
+*/
