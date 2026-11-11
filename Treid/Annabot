@@ -1,829 +1,154 @@
 //+------------------------------------------------------------------+
-//| AnnaBot EURUSD_o compatible fixed-risk EA                                            |
-//| اکسپرت آنا: شکست بدنه کندل مرجع نیویورک و تأیید FVG/پین‌بار     |
+//|                                  Mirror_Both_AutoGMT_EURUSD_o.mq5|
+//|                                  Copyright 2026, Pedram Strategy |
+//|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
-#property strict
-#property version   "1.09"
-#property description "AnnaBot strategy; symbol-property validated, fixed USD risk, RR 2 compatible with EURUSD_o"
+#property copyright "Copyright 2026, Pedram"
+#property link      "https://www.mql5.com"
+#property version   "1.00"
 
 #include <Trade\Trade.mqh>
 CTrade trade;
 
-//--- تنظیمات اصلی استراتژی و مدیریت ریسک
-input double InpRiskUSD               = 2.0;        // ریسک اسمی هر معامله؛ ارز حساب باید USD باشد
-input double InpMaxLot                = 1.0;        // سقف ایمنی حجم لات
-input double InpMinLotGuard           = 0.01;       // حداقل مجاز محافظتی؛ در صورت نیاز با حداقل بروکر تطبیق داده می‌شود
-input double InpRiskReward            = 2.0;        // نسبت سود به زیان برای حد سود
-input int    InpNYHour                = 10;         // ساعت کندل مرجع در نیویورک
-input bool   InpAutoNYOffset          = true;       // محاسبه خودکار آفست نیویورک با درنظرگرفتن DST
-input int    InpServerOffsetFromNY    = 7;          // فقط در صورت خاموش‌بودن آفست خودکار استفاده می‌شود
-input int    InpSessionWindowHours    = 3;          // مدت اعتبار ستاپ پس از کندل مرجع
-input int    InpSlippage              = 3;          // انحراف مجاز بر حسب پوینت
-input int    InpSLBufferPoints        = 50;         // فاصله حدضرر از مرز بدنه کندل مرجع
-input int    InpFvgSLBufferPoints     = 30;         // فاصله حدضرر از ناحیه FVG/پین‌بار
-input bool   InpDebugLog              = true;       // ثبت گزارش تشخیصی
-input bool   InpDiagMode              = true;       // حالت تشخیصی: گزارش کامل شرایط هر کندل M5
-input bool   InpIgnoreInsideBarRef    = false;      // نادیده‌گرفتن شرط inside-bar کندل مرجع (تست)
-input bool   InpIgnorePinbarConfirm   = false;      // نادیده‌گرفتن شرط پین‌بار (تست)
-input double InpMinPinBodyRatio       = 2.0;        // حداقل نسبت سایه به بدنه برای پین‌بار
-input double InpPinCloseRatio         = 0.65;       // حداقل بسته‌شدن در انتهای کندل پین‌بار
-input bool   InpUseM5CloseBreakout    = true;       // شکست با بسته‌شدن M5 (اگر false: شکست لحظه‌ای قیمت)
-input long   InpMagic                 = 123456;     // مجیک نامبر معاملات اکسپرت
+//--- Inputs
+input group "=== Trading Settings ==="
+input string   InpSymbol        = "EURUSD_o"; // نماد معاملاتی
+input double   InpLotSize       = 0.05;       // حجم معامله (Lot)
+input int      InpStopLoss      = 50;         // حد ضرر (پوینت)
+input int      InpTakeProfit    = 100;        // حد سود (پوینت)
 
-//--- وضعیت روز جاری و کندل مرجع
-datetime g_lastM5BarTime = 0;
-int      g_diagBarCount = 0;
-int      g_sessionDateKey = -1;
-int      g_nyOffset = 7;
-int      g_nyOffsetDateKey = -1;
-double   g_bodyTop = 0.0;
-double   g_bodyBottom = 0.0;
-bool     g_referenceReady = false;
-bool     g_tradeAttemptedToday = false;
-bool     g_anyTradeAttempted = false;
+input group "=== Indicator Settings ==="
+input int      InpEMAPeriod     = 50;         // دوره میانگین متحرک EMA
+input int      InpADXPeriod     = 14;         // دوره ADX (برای فیلتر Both)
+input double   InpADXThreshold  = 25.0;       // حد نصاب ADX
 
-//--- Validated properties for the attached symbol (never use chart g_symbolPoint).
-double g_symbolPoint=0.0, g_tickSize=0.0, g_tickValueLoss=0.0;
-int g_symbolDigits=0;
-double g_volumeMin=0.0, g_volumeMax=0.0, g_volumeStep=0.0, g_contractSize=0.0;
-long g_stopsLevel=0, g_freezeLevel=0;
+//--- Global Variables
+int    ema_handle;
+int    adx_handle;
+datetime last_bar_time;
+int    auto_gmt_offset = 0;
 
 //+------------------------------------------------------------------+
-//| پیام تشخیصی فارسی/انگلیسی                                        |
-//+------------------------------------------------------------------+
-void LogMessage(const string message)
-{
-   if(InpDebugLog)
-      Print("AnnaBot: ", message);
-}
-
-void DiagPrint(const string msg)
-{
-   if(InpDiagMode)
-      Print("DIAG | ", msg);
-}
-
-//+------------------------------------------------------------------+
-//| آخرین یکشنبه ماه (ساعت ۰۰:۰۰)                                    |
-//+------------------------------------------------------------------+
-datetime LastSundayOfMonth(const int year,const int month)
-{
-   MqlDateTime nextMonth;
-   nextMonth.year = year;
-   nextMonth.mon = month + 1;
-   if(nextMonth.mon > 12)
-   {
-      nextMonth.mon = 1;
-      nextMonth.year++;
-   }
-   nextMonth.day = 1;
-   nextMonth.hour = 0;
-   nextMonth.min = 0;
-   nextMonth.sec = 0;
-   datetime firstOfNextMonth = StructToTime(nextMonth);
-   datetime lastDay = firstOfNextMonth - 86400;
-   MqlDateTime lastParts;
-   if(!TimeToStruct(lastDay, lastParts))
-      return 0;
-   return lastDay - (datetime)(lastParts.day_of_week * 86400);
-}
-
-//+------------------------------------------------------------------+
-//| האם UTC time داخل دوره ساعت تابستانی نیویورک است؟               |
-//+------------------------------------------------------------------+
-bool IsNYSummerTime(datetime utcTime)
-{
-   MqlDateTime utcParts;
-   if(!TimeToStruct(utcTime, utcParts))
-      return false;
-
-   // شروع: دومین یکشنبه مارس، ساعت ۰۷:۰۰ UTC (۰۲:۰۰ EST).
-   MqlDateTime marchFirst;
-   marchFirst.year = utcParts.year;
-   marchFirst.mon = 3;
-   marchFirst.day = 1;
-   marchFirst.hour = 0;
-   marchFirst.min = 0;
-   marchFirst.sec = 0;
-   datetime marchFirstTime = StructToTime(marchFirst);
-   MqlDateTime marchFirstParts;
-   if(!TimeToStruct(marchFirstTime, marchFirstParts))
-      return false;
-   int secondSunday = 1 + ((7 - marchFirstParts.day_of_week) % 7) + 7;
-   MqlDateTime dstStartParts;
-   dstStartParts.year = utcParts.year;
-   dstStartParts.mon = 3;
-   dstStartParts.day = secondSunday;
-   dstStartParts.hour = 7;
-   dstStartParts.min = 0;
-   dstStartParts.sec = 0;
-   datetime dstStart = StructToTime(dstStartParts);
-
-   // پایان: اولین یکشنبه نوامبر، ساعت ۰۶:۰۰ UTC (۰۲:۰۰ EDT).
-   MqlDateTime novemberFirst;
-   novemberFirst.year = utcParts.year;
-   novemberFirst.mon = 11;
-   novemberFirst.day = 1;
-   novemberFirst.hour = 0;
-   novemberFirst.min = 0;
-   novemberFirst.sec = 0;
-   datetime novemberFirstTime = StructToTime(novemberFirst);
-   MqlDateTime novemberFirstParts;
-   if(!TimeToStruct(novemberFirstTime, novemberFirstParts))
-      return false;
-   int firstSunday = 1 + ((7 - novemberFirstParts.day_of_week) % 7);
-   MqlDateTime dstEndParts;
-   dstEndParts.year = utcParts.year;
-   dstEndParts.mon = 11;
-   dstEndParts.day = firstSunday;
-   dstEndParts.hour = 6;
-   dstEndParts.min = 0;
-   dstEndParts.sec = 0;
-   datetime dstEnd = StructToTime(dstEndParts);
-   return (utcTime >= dstStart && utcTime < dstEnd);
-}
-
-//+------------------------------------------------------------------+
-//| محاسبه اختلاف ساعت سرور و نیویورک                                |
-//+------------------------------------------------------------------+
-int NYOffsetAuto()
-{
-   int nyUtcOffset = IsNYSummerTime(TimeGMT()) ? -4 : -5;
-   int serverUtcOffset = (int)MathRound((TimeTradeServer() - TimeGMT()) / 3600.0);
-   return serverUtcOffset - nyUtcOffset;
-}
-
-//+------------------------------------------------------------------+
-//| انتخاب آفست خودکار یا آفست دستی                                  |
-//+------------------------------------------------------------------+
-int CurrentNYOffset()
-{
-   return InpAutoNYOffset ? NYOffsetAuto() : InpServerOffsetFromNY;
-}
-
-//+------------------------------------------------------------------+
-//| تبدیل ساعت سرور به ساعت نیویورک با آفست دستی ورودی               |
-//+------------------------------------------------------------------+
-int ServerHourToNYHour(const int serverHour)
-{
-   int hour = (serverHour - CurrentNYOffset()) % 24;
-   if(hour < 0)
-      hour += 24;
-   return hour;
-}
-
-//+------------------------------------------------------------------+
-//| کلید تاریخ به شکل YYYYMMDD                                       |
-//+------------------------------------------------------------------+
-int DateKey(const datetime value)
-{
-   MqlDateTime parts;
-   if(!TimeToStruct(value, parts))
-      return -1;
-   return parts.year * 10000 + parts.mon * 100 + parts.day;
-}
-
-//+------------------------------------------------------------------+
-//| ارزش زیان هر تیک برای یک لات؛ در نبود فیلد اختصاصی از مقدار کلی استفاده می‌شود |
-double LossTickValue()
-{
-   double value=0.0;
-   if(!SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE_LOSS,value) || !MathIsValidNumber(value) || value<=0.0)
-      return 0.0;
-   return value;
-}
-
-// Round prices to the symbol tick grid in the risk-conservative direction.
-double RoundPriceToTick(const double price,const bool roundUp)
-{
-   if(g_tickSize<=0.0 || g_symbolDigits<0) return 0.0;
-   double units=price/g_tickSize;
-   double rounded=(roundUp ? MathCeil(units-1e-10) : MathFloor(units+1e-10))*g_tickSize;
-   return NormalizeDouble(rounded,g_symbolDigits);
-}
-
-bool ValidateOrderStops(const bool isBuy,const double sl,const double tp)
-{
-   MqlTick q;
-   if(!SymbolInfoTick(_Symbol,q) || q.bid<=0.0 || q.ask<=0.0)
-   { LogMessage("قیمت جاری نماد در دسترس نیست؛ سفارش لغو شد."); return false; }
-   double required=(double)MathMax(g_stopsLevel,g_freezeLevel)*g_symbolPoint;
-   double tol=g_tickSize*1e-6;
-   bool valid=isBuy ? (sl<q.bid && tp>q.bid && q.bid-sl+tol>=required && tp-q.bid+tol>=required)
-                    : (sl>q.ask && tp<q.ask && sl-q.ask+tol>=required && q.ask-tp+tol>=required);
-   if(!valid)
-      PrintFormat("AnnaBot: intended SL/TP violates direction or broker stops/freeze; no price distortion. side=%s bid=%.*f ask=%.*f SL=%.*f TP=%.*f minDistance=%.*f (stops=%d freeze=%d points)",
-                  isBuy?"BUY":"SELL",g_symbolDigits,q.bid,g_symbolDigits,q.ask,g_symbolDigits,sl,g_symbolDigits,tp,g_symbolDigits,required,(int)g_stopsLevel,(int)g_freezeLevel);
-   return valid;
-}
-
-//+------------------------------------------------------------------+
-//| فاصله استاپ به پیپ؛ پیپ فارکس ۳/۵ رقمی برابر ۱۰ پوینت است       |
-double SLDistancePips(const double distance)
-{
-   double point=g_symbolPoint;
-   int digits=g_symbolDigits;
-   if(point<=0.0) return 0.0;
-   double pip=((digits==3 || digits==5) ? 10.0*point : point);
-   return MathAbs(distance)/pip;
-}
-
-//+------------------------------------------------------------------+
-//| گرد کردن حجم فقط به سمت پایین و تعداد اعشار لازم                |
-double NormalizeVolumeDown(const double volume,const double step)
-{
-   if(step<=0.0 || volume<=0.0) return 0.0;
-   int digits=0; double scaled=step;
-   while(digits<8 && MathAbs(scaled-MathRound(scaled))>1e-8) { scaled*=10.0; digits++; }
-   return NormalizeDouble(MathFloor((volume+step*1e-10)/step)*step,digits);
-}
-
-//+------------------------------------------------------------------+
-//| ریسک تقریبی پولی برای حجم مشخص با اندازه استاپ داده‌شده           |
-double RiskForVolume(const double distance,const double volume)
-{
-   if(g_tickSize<=0.0 || g_tickValueLoss<=0.0) return 0.0;
-   return (MathAbs(distance)/g_tickSize)*g_tickValueLoss*volume;
-}
-
-//+------------------------------------------------------------------+
-//| حجم ریسک ثابت، محدود به گام/حد نماد/سقف کاربر/حجم مجاز و مارجین |
-double PickLot(const double entry,const double sl,const ENUM_ORDER_TYPE orderType)
-{
-   if(AccountInfoString(ACCOUNT_CURRENCY)!="USD")
-   { LogMessage("حساب با ارز غیر USD است؛ ریسک ثابت دلاری قابل تضمین نیست و معامله رد شد."); return 0.0; }
-   double liveLoss=LossTickValue(), liveProfit=0.0, liveGeneric=0.0;
-   SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE_PROFIT,liveProfit);
-   SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE,liveGeneric);
-   if(liveLoss<=0.0 || g_tickSize<=0.0 || !MathIsValidNumber(liveLoss))
-   { LogMessage("مقدار معتبر cash SYMBOL_TRADE_TICK_VALUE_LOSS یا tick size موجود نیست؛ معامله رد شد."); return 0.0; }
-   // Broker profit/loss conversions may differ modestly; extreme disagreement is unsafe for a fixed cash risk.
-   if((liveProfit>0.0 && (liveLoss/liveProfit<0.5 || liveLoss/liveProfit>2.0)) ||
-      (liveGeneric>0.0 && (liveLoss/liveGeneric<0.5 || liveLoss/liveGeneric>2.0)))
-   { PrintFormat("AnnaBot: inconsistent cash tick values (loss=%.10g profit=%.10g generic=%.10g); trade refused.",liveLoss,liveProfit,liveGeneric); return 0.0; }
-   g_tickValueLoss=liveLoss;
-   double distance=MathAbs(entry-sl);
-   if(g_volumeMin<=0.0 || g_volumeMax<=0.0 || g_volumeStep<=0.0 || distance<=0.0 || InpRiskUSD<=0.0)
-   { LogMessage("اطلاعات حجم/تیک/ریسک نامعتبر است؛ معامله لغو شد."); return 0.0; }
-   double riskPerLot=(distance/g_tickSize)*g_tickValueLoss;
-   if(!MathIsValidNumber(riskPerLot) || riskPerLot<=0.0) return 0.0;
-   double requested=InpRiskUSD/riskPerLot;
-   double permitted=MathMin(g_volumeMax,InpMaxLot);
-   if(g_volumeMin>permitted) { LogMessage("حداقل حجم نماد از سقف مجاز بیشتر است."); return 0.0; }
-   if(g_symbolDigits<0) return 0.0;
-   // Keep existing directional symbol volume-limit accounting.
-   double vlimit=0.0; SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_LIMIT,vlimit);
-   if(vlimit>0.0)
-   {
-      double used=0.0;
-      for(int i=PositionsTotal()-1;i>=0;--i)
-      {
-         ulong ticket=PositionGetTicket(i); if(ticket==0 || PositionGetString(POSITION_SYMBOL)!=_Symbol) continue;
-         ENUM_POSITION_TYPE pt=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-         if((orderType==ORDER_TYPE_BUY && pt==POSITION_TYPE_BUY) || (orderType==ORDER_TYPE_SELL && pt==POSITION_TYPE_SELL)) used+=PositionGetDouble(POSITION_VOLUME);
-      }
-      for(int j=OrdersTotal()-1;j>=0;--j)
-      {
-         ulong ticket=OrderGetTicket(j); if(ticket==0 || OrderGetString(ORDER_SYMBOL)!=_Symbol) continue;
-         ENUM_ORDER_TYPE ot=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
-         bool buyOrder=(ot==ORDER_TYPE_BUY_LIMIT || ot==ORDER_TYPE_BUY_STOP || ot==ORDER_TYPE_BUY_STOP_LIMIT);
-         bool sellOrder=(ot==ORDER_TYPE_SELL_LIMIT || ot==ORDER_TYPE_SELL_STOP || ot==ORDER_TYPE_SELL_STOP_LIMIT);
-         if((orderType==ORDER_TYPE_BUY && buyOrder) || (orderType==ORDER_TYPE_SELL && sellOrder)) used+=OrderGetDouble(ORDER_VOLUME_CURRENT);
-      }
-      permitted=MathMin(permitted,MathMax(0.0,vlimit-used));
-   }
-   permitted=NormalizeVolumeDown(permitted,g_volumeStep);
-   if(permitted<g_volumeMin) { LogMessage("محدودیت حجم نماد/سقف ورودی اجازه حداقل لات را نمی‌دهد."); return 0.0; }
-   double guard=MathMax(g_volumeMin,InpMinLotGuard);
-   double lots=NormalizeVolumeDown(MathMin(requested,permitted),g_volumeStep);
-   if(lots<guard-1e-10)
-   { PrintFormat("AnnaBot: target risk %.2f USD requires %.8f lots, below configured/broker minimum %.8f; refuse rather than exceed risk.",InpRiskUSD,requested,guard); return 0.0; }
-   if(lots<g_volumeMin || lots>permitted) return 0.0;
-   double freeMargin=AccountInfoDouble(ACCOUNT_MARGIN_FREE), margin=0.0;
-   while(lots>=g_volumeMin-1e-10)
-   {
-      if(OrderCalcMargin(orderType,_Symbol,lots,entry,margin) && margin<=freeMargin) break;
-      lots=NormalizeVolumeDown(lots-g_volumeStep,g_volumeStep);
-   }
-   if(lots<guard-1e-10) { LogMessage("مارجین آزاد کافی نیست بدون آنکه از حداقل حجم/گارد عبور شود؛ معامله لغو شد."); return 0.0; }
-   double actualRisk=RiskForVolume(distance,lots);
-   if(actualRisk>InpRiskUSD+MathMax(0.000001,InpRiskUSD*1e-8))
-   { PrintFormat("AnnaBot: computed risk %.8f exceeds target %.8f USD; trade refused.",actualRisk,InpRiskUSD); return 0.0; }
-   PrintFormat("SL distance = %.2f pips | calculated lot = %.8f | estimated loss = %.4f USD",SLDistancePips(distance),lots,actualRisk);
-   return lots;
-}
-
-//+------------------------------------------------------------------+
-//| بررسی اینکه برای همین نماد و مجیک پوزیشن باز وجود دارد یا نه     |
-//+------------------------------------------------------------------+
-bool HasOpenPosition()
-{
-   for(int i = PositionsTotal() - 1; i >= 0; --i)
-   {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket == 0)
-         continue;
-      if(PositionGetString(POSITION_SYMBOL) == _Symbol &&
-         (long)PositionGetInteger(POSITION_MAGIC) == InpMagic)
-         return true;
-   }
-   return false;
-}
-
-// Find this EA's position ticket; symbol-only modification can target another hedging position.
-bool FindOwnPositionTicket(ulong &ticket)
-{
-   ticket = 0;
-   for(int i = PositionsTotal() - 1; i >= 0; --i)
-   {
-      ulong current = PositionGetTicket(i);
-      if(current == 0)
-         continue;
-      if(PositionGetString(POSITION_SYMBOL) == _Symbol &&
-         (long)PositionGetInteger(POSITION_MAGIC) == InpMagic)
-      {
-         ticket = current;
-         return true;
-      }
-   }
-   return false;
-}
-
-//+------------------------------------------------------------------+
-//| ارسال سفارش خرید با حدضرر و حدسود مبتنی بر ریسک                 |
-//+------------------------------------------------------------------+
-bool OpenBuy(const double stopLoss)
-{
-   double ask = 0.0;
-   if(!SymbolInfoDouble(_Symbol, SYMBOL_ASK, ask) || ask <= 0.0)
-      return false;
-   int digits = g_symbolDigits;
-   double sl = RoundPriceToTick(stopLoss, false);
-   if(sl >= ask)
-   {
-      LogMessage("حدضرر خرید بالاتر از قیمت ورود است.");
-      return false;
-   }
-   double riskDistance = ask - sl;
-   double tp = RoundPriceToTick(ask + riskDistance * InpRiskReward, true);
-   if(!ValidateOrderStops(true,sl,tp)) return false;
-   double lots = PickLot(ask, sl, ORDER_TYPE_BUY);
-   if(lots <= 0.0)
-      return false;
-
-   trade.SetExpertMagicNumber((ulong)InpMagic);
-   trade.SetDeviationInPoints(InpSlippage);
-   bool sent = trade.Buy(lots, _Symbol, 0.0, sl, tp, "AnnaBot EURUSD_o compatible buy");
-   if(!sent)
-   {
-      LogMessage("ارسال خرید ناموفق: " + trade.ResultRetcodeDescription());
-      return false;
-   }
-
-   ulong positionTicket = 0;
-   double fill = trade.ResultPrice();
-   if(FindOwnPositionTicket(positionTicket))
-   {
-      if(fill <= 0.0)
-      {
-         PositionSelectByTicket(positionTicket);
-         fill = PositionGetDouble(POSITION_PRICE_OPEN);
-      }
-   }
-   if(fill <= 0.0 || sl >= fill)
-   {
-      LogMessage("خرید ارسال شد اما قیمت پرشدن/SL برای اصلاح RR معتبر نیست؛ " + trade.ResultRetcodeDescription());
-      return true;
-   }
-   double actualRisk = fill - sl;
-   double correctedTP = RoundPriceToTick(fill + actualRisk * InpRiskReward, true);
-   double rr = MathAbs(correctedTP - fill) / actualRisk;
-   if(MathAbs(rr - InpRiskReward) > 1e-8)
-   {
-      if(positionTicket == 0 || !ValidateOrderStops(true,sl,correctedTP) || !trade.PositionModify(positionTicket, sl, correctedTP) ||
-         (trade.ResultRetcode() != TRADE_RETCODE_DONE && trade.ResultRetcode() != TRADE_RETCODE_NO_CHANGES))
-         LogMessage("اصلاح TP خرید ناموفق؛ " + trade.ResultRetcodeDescription());
-      else
-         tp = correctedTP;
-   }
-   LogMessage(StringFormat("BUY fill=%.*f SL=%.*f TP=%.*f | SLdist=%.*f TPdist=%.*f RR=%.5f | retcode=%s",
-                           digits, fill, digits, sl, digits, tp,
-                           digits, MathAbs(fill-sl), digits, MathAbs(tp-fill),
-                           MathAbs(tp-fill)/MathAbs(fill-sl), trade.ResultRetcodeDescription()));
-   return true;
-}
-
-//+------------------------------------------------------------------+
-//| ارسال سفارش فروش با حدضرر و حدسود مبتنی بر ریسک                 |
-//+------------------------------------------------------------------+
-bool OpenSell(const double stopLoss)
-{
-   double bid = 0.0;
-   if(!SymbolInfoDouble(_Symbol, SYMBOL_BID, bid) || bid <= 0.0)
-      return false;
-   int digits = g_symbolDigits;
-   double sl = RoundPriceToTick(stopLoss, true);
-   if(sl <= bid)
-   {
-      LogMessage("حدضرر فروش پایین‌تر از قیمت ورود است.");
-      return false;
-   }
-   double riskDistance = sl - bid;
-   double tp = RoundPriceToTick(bid - riskDistance * InpRiskReward, false);
-   if(!ValidateOrderStops(false,sl,tp)) return false;
-   double lots = PickLot(bid, sl, ORDER_TYPE_SELL);
-   if(lots <= 0.0)
-      return false;
-
-   trade.SetExpertMagicNumber((ulong)InpMagic);
-   trade.SetDeviationInPoints(InpSlippage);
-   bool sent = trade.Sell(lots, _Symbol, 0.0, sl, tp, "AnnaBot EURUSD_o compatible sell");
-   if(!sent)
-   {
-      LogMessage("ارسال فروش ناموفق: " + trade.ResultRetcodeDescription());
-      return false;
-   }
-
-   ulong positionTicket = 0;
-   double fill = trade.ResultPrice();
-   if(FindOwnPositionTicket(positionTicket))
-   {
-      if(fill <= 0.0)
-      {
-         PositionSelectByTicket(positionTicket);
-         fill = PositionGetDouble(POSITION_PRICE_OPEN);
-      }
-   }
-   if(fill <= 0.0 || sl <= fill)
-   {
-      LogMessage("فروش ارسال شد اما قیمت پرشدن/SL برای اصلاح RR معتبر نیست؛ " + trade.ResultRetcodeDescription());
-      return true;
-   }
-   double actualRisk = sl - fill;
-   double correctedTP = RoundPriceToTick(fill - actualRisk * InpRiskReward, false);
-   double rr = MathAbs(fill - correctedTP) / actualRisk;
-   if(MathAbs(rr - InpRiskReward) > 1e-8)
-   {
-      if(positionTicket == 0 || !ValidateOrderStops(false,sl,correctedTP) || !trade.PositionModify(positionTicket, sl, correctedTP) ||
-         (trade.ResultRetcode() != TRADE_RETCODE_DONE && trade.ResultRetcode() != TRADE_RETCODE_NO_CHANGES))
-         LogMessage("اصلاح TP فروش ناموفق؛ " + trade.ResultRetcodeDescription());
-      else
-         tp = correctedTP;
-   }
-   LogMessage(StringFormat("SELL fill=%.*f SL=%.*f TP=%.*f | SLdist=%.*f TPdist=%.*f RR=%.5f | retcode=%s",
-                           digits, fill, digits, sl, digits, tp,
-                           digits, MathAbs(fill-sl), digits, MathAbs(tp-fill),
-                           MathAbs(tp-fill)/MathAbs(fill-sl), trade.ResultRetcodeDescription()));
-   return true;
-}
-
-//+------------------------------------------------------------------+
-//| بارگذاری کندل مرجع H1 ساعت ۱۰ نیویورک و ذخیره بدنه آن            |
-//+------------------------------------------------------------------+
-bool LoadReferenceCandle(const int todayKey)
-{
-   MqlRates h1[];
-   ArraySetAsSeries(h1, true);
-   int copied = CopyRates(_Symbol, PERIOD_H1, 0, 72, h1);
-   if(copied < 3)
-   {
-      DiagPrint(StringFormat("Reference not found: H1 bars scanned=%d (CopyRates returned too few bars)", copied));
-      return false;
-   }
-
-   bool nyHourSeen[24];
-   ArrayInitialize(nyHourSeen,false);
-   bool referenceHourSeen=false;
-   bool insideOnlyFailure=false;
-   int scanned=0;
-   string hoursSeen="";
-   for(int i = 1; i < copied; ++i) // فقط کندل‌های بسته‌شده
-   {
-      scanned++;
-      MqlDateTime serverParts;
-      if(!TimeToStruct(h1[i].time, serverParts))
-         continue;
-      datetime nyTime = h1[i].time - (datetime)(CurrentNYOffset() * 3600);
-      MqlDateTime nyParts;
-      if(!TimeToStruct(nyTime, nyParts))
-         continue;
-      if(!nyHourSeen[nyParts.hour])
-      {
-         nyHourSeen[nyParts.hour]=true;
-         if(hoursSeen!="") hoursSeen += ",";
-         hoursSeen += IntegerToString(nyParts.hour);
-      }
-      int key = nyParts.year * 10000 + nyParts.mon * 100 + nyParts.day;
-      if(key != todayKey || nyParts.hour != InpNYHour || nyParts.min != 0)
-         continue;
-      referenceHourSeen=true;
-
-      // کندل مرجع باید داخل دامنه کندل H1 قبلی باشد؛ آرایه سری است و i+1 قدیمی‌تر است.
-      bool insideBar=(i+1<copied && h1[i].high<h1[i+1].high && h1[i].low>h1[i+1].low);
-      if(!insideBar && !InpIgnoreInsideBarRef)
-      {
-         insideOnlyFailure=true;
-         LogMessage("کندل ساعت ۱۰ نیویورک شرط inside-bar را ندارد.");
-         DiagPrint(StringFormat("Reference candidate failed only inside-bar: refHigh=%.*f refLow=%.*f prevHigh=%.*f prevLow=%.*f",g_symbolDigits,h1[i].high,g_symbolDigits,h1[i].low,g_symbolDigits,(i+1<copied?h1[i+1].high:0.0),g_symbolDigits,(i+1<copied?h1[i+1].low:0.0)));
-         continue;
-      }
-      if(!insideBar && InpIgnoreInsideBarRef)
-         DiagPrint(StringFormat("Inside-bar condition SKIPPED by InpIgnoreInsideBarRef=true: refHigh=%.*f refLow=%.*f",g_symbolDigits,h1[i].high,g_symbolDigits,h1[i].low));
-
-      g_bodyTop = MathMax(h1[i].open, h1[i].close);
-      g_bodyBottom = MathMin(h1[i].open, h1[i].close);
-      g_referenceReady = true;
-      LogMessage(StringFormat("کندل مرجع یافت شد: بدنه بالا=%.*f پایین=%.*f",
-                              g_symbolDigits, g_bodyTop,
-                              g_symbolDigits, g_bodyBottom));
-      return true;
-   }
-   DiagPrint(StringFormat("Reference not found: H1 bars scanned=%d; unique NY hours seen=[%s]; target NY date=%d hour=%d; target hour exists=%s; inside-bar-only failure=%s",scanned,hoursSeen,todayKey,InpNYHour,referenceHourSeen?"yes":"no",insideOnlyFailure?"yes":"no"));
-   return false;
-}
-
-//+------------------------------------------------------------------+
-//| جست‌وجوی شکست ناحیه FVG با نفوذ سایه و تأیید پین‌بار در M5       |
-//| خروجی: جهت +1 خرید، -1 فروش، صفر بدون ستاپ؛ stopPrice مقدار SL   |
-//+------------------------------------------------------------------+
-int CheckM5FvgAndPinbar(const int breakoutDirection, double &stopPrice)
-{
-   stopPrice = 0.0;
-   if(breakoutDirection != 1 && breakoutDirection != -1)
-      return 0;
-
-   MqlRates m5[];
-   ArraySetAsSeries(m5, true);
-   int copied = CopyRates(_Symbol, PERIOD_M5, 0, 40, m5);
-   if(copied < 6)
-   {
-      DiagPrint(StringFormat("FVG/pin check skipped: only %d M5 bars copied",copied));
-      return 0;
-   }
-
-   const MqlRates signal = m5[1]; // آخرین کندل تکمیل‌شده برای پین‌بار
-   if(g_symbolPoint <= 0.0)
-      return 0;
-   double body = MathAbs(signal.close - signal.open);
-   double effectiveBody = MathMax(body, g_symbolPoint);
-   double upperWick = signal.high - MathMax(signal.open, signal.close);
-   double lowerWick = MathMin(signal.open, signal.close) - signal.low;
-   double range = signal.high - signal.low;
-   if(range <= 0.0)
-      return 0;
-   DiagPrint(StringFormat("Signal m5[1]: O=%.*f H=%.*f L=%.*f C=%.*f body=%.*f range=%.*f upperWick=%.*f lowerWick=%.*f lower/body=%.3f upper/body=%.3f",g_symbolDigits,signal.open,g_symbolDigits,signal.high,g_symbolDigits,signal.low,g_symbolDigits,signal.close,g_symbolDigits,body,g_symbolDigits,range,g_symbolDigits,upperWick,g_symbolDigits,lowerWick,lowerWick/effectiveBody,upperWick/effectiveBody));
-
-   // بررسی FVGهای تازه؛ i>=2 تا کندل تأیید پس از تشکیل شکاف باشد.
-   for(int i = 2; i + 2 < copied && i <= 20; ++i)
-   {
-      double zoneLow = 0.0, zoneHigh = 0.0;
-      bool bullishGap = (m5[i].low > m5[i + 2].high);
-      bool bearishGap = (m5[i].high < m5[i + 2].low);
-      bool selectedGap=(breakoutDirection==1 ? bullishGap : bearishGap);
-      bool wickTouched=false;
-      bool pinbarPass=false;
-      bool closeBeyondBody=(breakoutDirection==1 ? signal.close>g_bodyTop : signal.close<g_bodyBottom);
-
-      if(breakoutDirection == 1 && bullishGap)
-      {
-         zoneLow = m5[i + 2].high;
-         zoneHigh = m5[i].low;
-         wickTouched = (signal.low <= zoneHigh && signal.low >= zoneLow - 2.0 * g_symbolPoint);
-         bool bullishPin = (lowerWick >= InpMinPinBodyRatio * effectiveBody &&
-                            signal.close >= signal.low + InpPinCloseRatio * range &&
-                            signal.close > signal.open);
-         pinbarPass=InpIgnorePinbarConfirm ? (wickTouched && closeBeyondBody) : bullishPin;
-         DiagPrint(StringFormat("FVG i=%d dir=BUY bullishGap=%s bearishGap=%s zoneLow=%.*f zoneHigh=%.*f wickTouched=%s pinbar=%s ignored=%s",i,bullishGap?"yes":"no",bearishGap?"yes":"no",g_symbolDigits,zoneLow,g_symbolDigits,zoneHigh,wickTouched?"yes":"no",pinbarPass?"PASS":"FAIL",InpIgnorePinbarConfirm?"yes":"no"));
-         if(wickTouched && pinbarPass && closeBeyondBody)
-         {
-            stopPrice = MathMin(MathMin(signal.low, zoneLow), g_bodyBottom) -
-                        InpFvgSLBufferPoints * g_symbolPoint - InpSLBufferPoints * g_symbolPoint;
-            return 1;
-         }
-      }
-      else if(breakoutDirection == -1 && bearishGap)
-      {
-         zoneLow = m5[i].high;
-         zoneHigh = m5[i + 2].low;
-         wickTouched = (signal.high >= zoneLow && signal.high <= zoneHigh + 2.0 * g_symbolPoint);
-         bool bearishPin = (upperWick >= InpMinPinBodyRatio * effectiveBody &&
-                            signal.close <= signal.high - InpPinCloseRatio * range &&
-                            signal.close < signal.open);
-         pinbarPass=InpIgnorePinbarConfirm ? (wickTouched && closeBeyondBody) : bearishPin;
-         DiagPrint(StringFormat("FVG i=%d dir=SELL bullishGap=%s bearishGap=%s zoneLow=%.*f zoneHigh=%.*f wickTouched=%s pinbar=%s ignored=%s",i,bullishGap?"yes":"no",bearishGap?"yes":"no",g_symbolDigits,zoneLow,g_symbolDigits,zoneHigh,wickTouched?"yes":"no",pinbarPass?"PASS":"FAIL",InpIgnorePinbarConfirm?"yes":"no"));
-         if(wickTouched && pinbarPass && closeBeyondBody)
-         {
-            stopPrice = MathMax(MathMax(signal.high, zoneHigh), g_bodyTop) +
-                        InpFvgSLBufferPoints * g_symbolPoint + InpSLBufferPoints * g_symbolPoint;
-            return -1;
-         }
-      }
-      else
-      {
-         if(breakoutDirection==1 && bearishGap) { zoneLow=m5[i].high; zoneHigh=m5[i+2].low; }
-         if(breakoutDirection==-1 && bullishGap) { zoneLow=m5[i+2].high; zoneHigh=m5[i].low; }
-         DiagPrint(StringFormat("FVG i=%d dir=%s bullishGap=%s bearishGap=%s zoneLow=%.*f zoneHigh=%.*f wickTouched=no pinbar=FAIL (not matching directional gap)",i,breakoutDirection==1?"BUY":"SELL",bullishGap?"yes":"no",bearishGap?"yes":"no",g_symbolDigits,zoneLow,g_symbolDigits,zoneHigh));
-      }
-   }
-   return 0;
-}
-
-//+------------------------------------------------------------------+
-//| منطق روزانه شکست بدنه و اجرای ستاپ FVG/پین‌بار                   |
-//+------------------------------------------------------------------+
-void RunAnnaStrategy()
-{
-   g_diagBarCount++;
-   int offsetDateKey = DateKey(TimeGMT());
-   if(offsetDateKey < 0)
-      return;
-   if(offsetDateKey != g_nyOffsetDateKey)
-   {
-      g_nyOffset = CurrentNYOffset();
-      g_nyOffsetDateKey = offsetDateKey;
-   }
-
-   datetime nowServer = TimeCurrent();
-   datetime nowNY = nowServer - (datetime)(g_nyOffset * 3600);
-   int todayKey = DateKey(nowNY);
-   if(todayKey < 0)
-      return;
-
-   if(todayKey != g_sessionDateKey)
-   {
-      g_sessionDateKey = todayKey;
-      g_referenceReady = false;
-      g_tradeAttemptedToday = false;
-      g_bodyTop = 0.0;
-      g_bodyBottom = 0.0;
-   }
-
-   MqlDateTime nyParts;
-   if(!TimeToStruct(nowNY, nyParts))
-      return;
-   int nowMinutes = nyParts.hour * 60 + nyParts.min;
-   int windowStart = InpNYHour * 60 + 60; // کندل مرجع باید کامل بسته شود
-   int windowEnd = windowStart + MathMax(0, InpSessionWindowHours) * 60;
-
-   if(!g_referenceReady)
-      LoadReferenceCandle(todayKey);
-
-   static datetime lastDiagBar=0;
-   datetime diagBar=iTime(_Symbol,PERIOD_M5,0);
-   if(InpDiagMode && diagBar>0 && diagBar!=lastDiagBar)
-   {
-      lastDiagBar=diagBar;
-      bool inWindow=(nowMinutes>=windowStart && nowMinutes<windowEnd);
-      DiagPrint(StringFormat("M5 bar | NY=%02d:%02d windowStart=%02d:%02d windowEnd=%02d:%02d referenceReady=%s bodyTop=%.*f bodyBottom=%.*f tradeAttemptedToday=%s HasOpenPosition=%s insideWindow=%s",nyParts.hour,nyParts.min,windowStart/60,windowStart%60,windowEnd/60,windowEnd%60,g_referenceReady?"true":"false",g_symbolDigits,g_bodyTop,g_symbolDigits,g_bodyBottom,g_tradeAttemptedToday?"true":"false",HasOpenPosition()?"true":"false",inWindow?"true":"false"));
-   }
-
-   if(!g_referenceReady || nowMinutes < windowStart || nowMinutes >= windowEnd || g_tradeAttemptedToday)
-      return;
-   if(HasOpenPosition())
-      return;
-
-   MqlRates m5[];
-   ArraySetAsSeries(m5, true);
-   if(CopyRates(_Symbol, PERIOD_M5, 0, 4, m5) < 3)
-   {
-      DiagPrint("Breakout check skipped: unable to copy enough M5 bars");
-      return;
-   }
-
-   // شکست بدنه با بسته‌شدن کندل پنج‌دقیقه‌ای بیرون از مرز بدنه H1؛ حالت جایگزین قیمت جاری.
-   int direction = 0;
-   double breakoutPrice=m5[1].close;
-   double currentAsk=0.0,currentBid=0.0;
-   if(InpUseM5CloseBreakout)
-   {
-      if(m5[1].close > g_bodyTop)
-         direction = 1;
-      else if(m5[1].close < g_bodyBottom)
-         direction = -1;
-   }
-   else
-   {
-      if(SymbolInfoDouble(_Symbol,SYMBOL_ASK,currentAsk) && SymbolInfoDouble(_Symbol,SYMBOL_BID,currentBid))
-      {
-         if(currentAsk > g_bodyTop) { direction=1; breakoutPrice=currentAsk; }
-         else if(currentBid < g_bodyBottom) { direction=-1; breakoutPrice=currentBid; }
-      }
-      DiagPrint(StringFormat("Instant breakout mode: Ask=%.*f vs bodyTop=%.*f; Bid=%.*f vs bodyBottom=%.*f",g_symbolDigits,currentAsk,g_symbolDigits,g_bodyTop,g_symbolDigits,currentBid,g_symbolDigits,g_bodyBottom));
-   }
-   if(direction == 0)
-   {
-      double close=m5[1].close;
-      double topDist=MathAbs(close-g_bodyTop)/g_symbolPoint;
-      double bottomDist=MathAbs(close-g_bodyBottom)/g_symbolPoint;
-      DiagPrint(StringFormat("No breakout: last closed M5 close=%.*f; bodyTop=%.*f distance=%.1f points; bodyBottom=%.*f distance=%.1f points; mode=%s",g_symbolDigits,close,g_symbolDigits,g_bodyTop,topDist,g_symbolDigits,g_bodyBottom,bottomDist,InpUseM5CloseBreakout?"M5 close":"instant price"));
-      return;
-   }
-   DiagPrint(StringFormat("Breakout direction=%s using %s price=%.*f",direction==1?"BUY":"SELL",InpUseM5CloseBreakout?"M5 close":"current",g_symbolDigits,breakoutPrice));
-
-   double stopPrice = 0.0;
-   int confirmation = CheckM5FvgAndPinbar(direction, stopPrice);
-   if(confirmation == 0)
-   {
-      DiagPrint("Breakout found but no matching FVG/wick/pinbar confirmation");
-      return;
-   }
-
-   bool opened = (confirmation > 0) ? OpenBuy(stopPrice) : OpenSell(stopPrice);
-   // از تکرار سفارش پس از تأیید جلوگیری می‌شود؛ خطای ارسال نیز در همان ستاپ دوباره‌کاری نمی‌کند.
-   if(opened)
-   {
-      g_tradeAttemptedToday = true;
-      g_anyTradeAttempted = true;
-   }
-}
-
-//+------------------------------------------------------------------+
-//| مقداردهی اولیه اکسپرت                                            |
+//| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   if(InpNYHour < 0 || InpNYHour > 23 || InpSessionWindowHours < 0 ||
-      InpRiskUSD <= 0.0 || InpRiskReward <= 0.0 || InpMaxLot <= 0.0 || InpMinLotGuard <= 0.0 || InpSlippage < 0 ||
-      InpSLBufferPoints < 0 || InpFvgSLBufferPoints < 0 || InpMinPinBodyRatio <= 0.0 || InpPinCloseRatio <= 0.0 || InpPinCloseRatio > 1.0)
+   trade.SetExpertMagicNumber(20261111);
+   
+   // تشخیص خودکار ساعت بروکر
+   auto_gmt_offset = CalculateBrokerGMTOffset();
+   Print("Auto-detected Broker GMT Offset: ", auto_gmt_offset, " hours");
+
+   // ایجاد هندل اندیکاتورها
+   ema_handle = iMA(InpSymbol, PERIOD_CURRENT, InpEMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   if(ema_handle == INVALID_HANDLE)
    {
-      Print("AnnaBot: invalid strategy/risk input values.");
-      return INIT_PARAMETERS_INCORRECT;
+      Print("Error creating EMA handle.");
+      return(INIT_FAILED);
    }
-   long digitsLong=0;
-   if(!SymbolInfoInteger(_Symbol,SYMBOL_DIGITS,digitsLong) || digitsLong<0 || digitsLong>8 ||
-      !SymbolInfoDouble(_Symbol,SYMBOL_POINT,g_symbolPoint) || g_symbolPoint<=0.0 ||
-      !SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE,g_tickSize) || g_tickSize<=0.0 ||
-      !SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN,g_volumeMin) || g_volumeMin<=0.0 ||
-      !SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX,g_volumeMax) || g_volumeMax<g_volumeMin ||
-      !SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP,g_volumeStep) || g_volumeStep<=0.0 ||
-      !SymbolInfoDouble(_Symbol,SYMBOL_TRADE_CONTRACT_SIZE,g_contractSize) || g_contractSize<=0.0)
+
+   adx_handle = iADX(InpSymbol, PERIOD_CURRENT, InpADXPeriod);
+   if(adx_handle == INVALID_HANDLE)
    {
-      PrintFormat("AnnaBot: required symbol properties unavailable/invalid for %s; initialization aborted.",_Symbol);
-      return INIT_FAILED;
+      Print("Error creating ADX handle.");
+      return(INIT_FAILED);
    }
-   g_symbolDigits=(int)digitsLong;
-   SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL,g_stopsLevel);
-   SymbolInfoInteger(_Symbol,SYMBOL_TRADE_FREEZE_LEVEL,g_freezeLevel);
-   g_tickValueLoss=LossTickValue();
-   double tickValueProfit=0.0, tickValueGeneric=0.0;
-   SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE_PROFIT,tickValueProfit);
-   SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE,tickValueGeneric);
-   string accountCurrency=AccountInfoString(ACCOUNT_CURRENCY);
-   double tickRatio=g_tickSize/g_symbolPoint;
-   if(!MathIsValidNumber(tickRatio) || tickRatio < 1.0-1e-8 || MathAbs(tickRatio-MathRound(tickRatio))>1e-6)
-   {
-      PrintFormat("AnnaBot: tick-size %.12g inconsistent with point %.12g; initialization aborted.",g_tickSize,g_symbolPoint);
-      return INIT_FAILED;
-   }
-   PrintFormat("AnnaBot symbol report | symbol=%s chartTF=%s digits=%d point=%.10g pip=%.10g tickSize=%.10g tickValueLoss=%.10g tickValueProfit=%.10g tickValueGeneric=%.10g contractSize=%.2f volumeMin=%.8f volumeMax=%.8f volumeStep=%.8f stops=%d freeze=%d accountCurrency=%s",
-               _Symbol,EnumToString((ENUM_TIMEFRAMES)_Period),g_symbolDigits,g_symbolPoint,
-               ((g_symbolDigits==3 || g_symbolDigits==5)?10.0*g_symbolPoint:g_symbolPoint),g_tickSize,
-               g_tickValueLoss,tickValueProfit,tickValueGeneric,g_contractSize,g_volumeMin,g_volumeMax,g_volumeStep,
-               (int)g_stopsLevel,(int)g_freezeLevel,accountCurrency);
-   if(g_tickValueLoss<=0.0 || !MathIsValidNumber(g_tickValueLoss))
-      Print("AnnaBot: WARNING loss tick value unavailable/invalid; all trades will be refused.");
-   if(accountCurrency!="USD")
-      PrintFormat("AnnaBot: WARNING account currency is %s, not USD; fixed USD risk trades will be refused.",accountCurrency);
-   if(tickValueProfit>0.0 && g_tickValueLoss>0.0 &&
-      (tickValueProfit/g_tickValueLoss>2.0 || tickValueProfit/g_tickValueLoss<0.5))
-      Print("AnnaBot: WARNING profit/loss cash tick values differ by >2x; all trades will be refused until broker properties are consistent.");
-   if(_Symbol!="EURUSD_o")
-      PrintFormat("AnnaBot: built for compatibility with EURUSD_o specifications but uses attached symbol %s (_Symbol), no symbol is hardcoded.",_Symbol);
-   trade.SetExpertMagicNumber((ulong)InpMagic);
-   trade.SetDeviationInPoints(InpSlippage);
-   if(!trade.SetTypeFillingBySymbol(_Symbol))
-      PrintFormat("AnnaBot: could not determine symbol filling mode for %s; trade server may reject orders.",_Symbol);
-   g_lastM5BarTime = 0;
-   g_nyOffset = CurrentNYOffset();
-   g_nyOffsetDateKey = DateKey(TimeGMT());
-   int serverUtcOffset = (int)MathRound((TimeTradeServer() - TimeGMT()) / 3600.0);
-   bool nyDst = IsNYSummerTime(TimeGMT());
-   PrintFormat("AnnaBot: NY offset=%d | server UTC offset=%d | NY DST=%s | Magic=%I64d | slippage=%d points",
-               g_nyOffset, serverUtcOffset, nyDst ? "ON" : "OFF",InpMagic,InpSlippage);
-   LogMessage("EA آماده است؛ استراتژی و محاسبه DST نیویورک حفظ شده‌اند.");
-   PrintFormat("AnnaBot diagnostic settings | InpNYHour=%d InpSessionWindowHours=%d InpDiagMode=%s InpIgnoreInsideBarRef=%s InpIgnorePinbarConfirm=%s InpUseM5CloseBreakout=%s computedNYOffset=%d hours",InpNYHour,InpSessionWindowHours,InpDiagMode?"true":"false",InpIgnoreInsideBarRef?"true":"false",InpIgnorePinbarConfirm?"true":"false",InpUseM5CloseBreakout?"true":"false",g_nyOffset);
-   Print("AnnaBot WARNING: InpDiagMode should be turned off in production to reduce log volume.");
-   return INIT_SUCCEEDED;
+
+   last_bar_time = 0;
+   return(INIT_SUCCEEDED);
 }
 
 //+------------------------------------------------------------------+
-//| آزادسازی منابع هنگام توقف                                        |
+//| Expert deinitialization function                                 |
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   PrintFormat("AnnaBot diagnostic summary | M5 bars processed=%d | any trade attempted=%s",g_diagBarCount,g_anyTradeAttempted?"yes":"no");
-   LogMessage(StringFormat("اکسپرت متوقف شد؛ reason=%d", reason));
+   IndicatorRelease(ema_handle);
+   IndicatorRelease(adx_handle);
 }
 
 //+------------------------------------------------------------------+
-//| اجرای استراتژی فقط با شروع کندل جدید M5                          |
+//| Expert tick function                                             |
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   datetime currentM5 = iTime(_Symbol, PERIOD_M5, 0);
-   if(currentM5 <= 0 || currentM5 == g_lastM5BarTime)
-      return;
-   g_lastM5BarTime = currentM5;
-   RunAnnaStrategy();
+   // بررسی تشکیل کندل جدید
+   datetime current_bar_time = iTime(InpSymbol, PERIOD_CURRENT, 0);
+   if(current_bar_time == last_bar_time) return;
+
+   // دریافت قیمت‌های EMA و ADX برای کندل بسته شده (Index 1)
+   double ema_values[];
+   double adx_values[];
+   
+   ArraySetAsSeries(ema_values, true);
+   ArraySetAsSeries(adx_values, true);
+
+   if(CopyBuffer(ema_handle, 0, 1, 2, ema_values) <= 0) return;
+   if(CopyBuffer(adx_handle, 0, 1, 2, adx_values) <= 0) return;
+
+   double close_price_1 = iClose(InpSymbol, PERIOD_CURRENT, 1);
+   double close_price_2 = iClose(InpSymbol, PERIOD_CURRENT, 2);
+   
+   // منطق اصلی استراتژی (تقاطع EMA)
+   bool original_buy_signal  = (close_price_2 < ema_values[1] && close_price_1 > ema_values[1]);
+   bool original_sell_signal = (close_price_2 > ema_values[1] && close_price_1 < ema_values[1]);
+   
+   // فیلتر ADX (حالت Both)
+   bool trend_strong = (adx_values[1] > InpADXThreshold);
+
+   // اعمال منطق معکوس (Mirror Strategy):
+   // اگر سیگنال اصلی خرید باشد، ما فروش می‌زنیم و برعکس!
+   bool mirror_sell = original_buy_signal && trend_strong;
+   bool mirror_buy  = original_sell_signal && trend_strong;
+
+   // اجرای معامله در صورت عدم وجود پوزیشن باز در این ماجول
+   if(PositionsTotal() == 0)
+   {
+      MqlTick latest_tick;
+      if(!SymbolInfoTick(InpSymbol, latest_tick)) return;
+
+      if(mirror_buy)
+      {
+         double ask = latest_tick.ask;
+         double sl = ask - InpStopLoss * _Point;
+         double tp = ask + InpTakeProfit * _Point;
+         
+         if(trade.Buy(InpLotSize, InpSymbol, ask, sl, tp, "Mirror Both Buy"))
+         {
+            last_bar_time = current_bar_time;
+            Print("Mirror BUY executed at: ", ask);
+         }
+      }
+      else if(mirror_sell)
+      {
+         double bid = latest_tick.bid;
+         double sl = bid + InpStopLoss * _Point;
+         double tp = bid - InpTakeProfit * _Point;
+         
+         if(trade.Sell(InpLotSize, InpSymbol, bid, sl, tp, "Mirror Both Sell"))
+         {
+            last_bar_time = current_bar_time;
+            Print("Mirror SELL executed at: ", bid);
+         }
+      }
+   }
 }
+
 //+------------------------------------------------------------------+
+//| Auto-detect Broker GMT Offset                                    |
+//+------------------------------------------------------------------+
+int CalculateBrokerGMTOffset()
+{
+   datetime server_time = TimeCurrent();
+   datetime gmt_time    = TimeGMT();
+   
+   int diff_seconds = (int)(server_time - gmt_time);
+   int diff_hours   = diff_seconds / 3600;
+   
+   // گرد کردن به نزدیک‌ترین ساعت استاندارد
+   if(diff_seconds % 3600 >= 1800) diff_hours++;
+   if(diff_seconds % 3600 <= -1800) diff_hours--;
+   
+   return diff_hours;
+}
+ 
