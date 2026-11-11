@@ -1,154 +1,148 @@
 //+------------------------------------------------------------------+
-//|                                  Mirror_Both_AutoGMT_EURUSD_o.mq5|
-//|                                  Copyright 2026, Pedram Strategy |
-//|                                             https://www.mql5.com |
+//|                             EMA50_EMA200_DynamicSL_RR2_v3.mq5    |
+//|                     Entry @ close of breakout candle, SL @ EMA20 |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2026, Pedram"
-#property link      "https://www.mql5.com"
-#property version   "1.00"
+#property copyright "Copyright 2026, GapGPT"
+#property version   "3.00"
+#property strict
 
 #include <Trade\Trade.mqh>
-CTrade trade;
 
-//--- Inputs
+// --- Trading ---
 input group "=== Trading Settings ==="
-input string   InpSymbol        = "EURUSD_o"; // نماد معاملاتی
-input double   InpLotSize       = 0.05;       // حجم معامله (Lot)
-input int      InpStopLoss      = 50;         // حد ضرر (پوینت)
-input int      InpTakeProfit    = 100;        // حد سود (پوینت)
+input double   InpLot            = 0.05;      // Lot Size
+input double   InpRiskReward     = 2.0;       // RR (TP = SL * RR)
+input int      InpMinSLPoints    = 10;        // Min SL (points): M1=10 M5=20 M15=40
+input int      InpMaxSLPoints    = 800;       // Max SL (points)
+input double   InpMaxSlippage    = 5.0;       // Max slippage vs close (points)
+input ulong    InpMagicNumber    = 20261111;  // Magic Number
 
+// --- Indicators ---
 input group "=== Indicator Settings ==="
-input int      InpEMAPeriod     = 50;         // دوره میانگین متحرک EMA
-input int      InpADXPeriod     = 14;         // دوره ADX (برای فیلتر Both)
-input double   InpADXThreshold  = 25.0;       // حد نصاب ADX
+input int      InpFastPeriod     = 50;
+input int      InpSlowPeriod     = 200;
+input int      InpSLPeriod       = 20;
 
-//--- Global Variables
-int    ema_handle;
-int    adx_handle;
-datetime last_bar_time;
-int    auto_gmt_offset = 0;
+// --- Globals ---
+CTrade   trade;
+int      hFast, hSlow, hSL;
+datetime g_lastBar = 0;
 
-//+------------------------------------------------------------------+
-//| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   trade.SetExpertMagicNumber(20261111);
-   
-   // تشخیص خودکار ساعت بروکر
-   auto_gmt_offset = CalculateBrokerGMTOffset();
-   Print("Auto-detected Broker GMT Offset: ", auto_gmt_offset, " hours");
+   trade.SetExpertMagicNumber(InpMagicNumber);
+   trade.SetDeviationInPoints(20);
+   trade.SetTypeFillingBySymbol(_Symbol);
 
-   // ایجاد هندل اندیکاتورها
-   ema_handle = iMA(InpSymbol, PERIOD_CURRENT, InpEMAPeriod, 0, MODE_EMA, PRICE_CLOSE);
-   if(ema_handle == INVALID_HANDLE)
+   hFast = iMA(_Symbol, _Period, InpFastPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   hSlow = iMA(_Symbol, _Period, InpSlowPeriod, 0, MODE_EMA, PRICE_CLOSE);
+   hSL   = iMA(_Symbol, _Period, InpSLPeriod,  0, MODE_EMA, PRICE_CLOSE);
+
+   if(hFast == INVALID_HANDLE || hSlow == INVALID_HANDLE || hSL == INVALID_HANDLE)
    {
-      Print("Error creating EMA handle.");
+      Print("Indicator handle error");
       return(INIT_FAILED);
    }
-
-   adx_handle = iADX(InpSymbol, PERIOD_CURRENT, InpADXPeriod);
-   if(adx_handle == INVALID_HANDLE)
-   {
-      Print("Error creating ADX handle.");
-      return(INIT_FAILED);
-   }
-
-   last_bar_time = 0;
    return(INIT_SUCCEEDED);
 }
 
 //+------------------------------------------------------------------+
-//| Expert deinitialization function                                 |
-//+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   IndicatorRelease(ema_handle);
-   IndicatorRelease(adx_handle);
+   IndicatorRelease(hFast);
+   IndicatorRelease(hSlow);
+   IndicatorRelease(hSL);
 }
 
 //+------------------------------------------------------------------+
-//| Expert tick function                                             |
+bool HasOpenPosition()
+{
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(!PositionSelectByTicket(PositionGetTicket(i))) continue;
+      if(PositionGetString(POSITION_SYMBOL) == _Symbol &&
+         PositionGetInteger(POSITION_MAGIC) == (long)InpMagicNumber)
+         return true;
+   }
+   return false;
+}
+
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // بررسی تشکیل کندل جدید
-   datetime current_bar_time = iTime(InpSymbol, PERIOD_CURRENT, 0);
-   if(current_bar_time == last_bar_time) return;
+   datetime barTime = iTime(_Symbol, _Period, 0);
+   if(barTime == g_lastBar) return;          // only once per new bar
+   g_lastBar = barTime;
 
-   // دریافت قیمت‌های EMA و ADX برای کندل بسته شده (Index 1)
-   double ema_values[];
-   double adx_values[];
-   
-   ArraySetAsSeries(ema_values, true);
-   ArraySetAsSeries(adx_values, true);
+   if(HasOpenPosition()) return;
 
-   if(CopyBuffer(ema_handle, 0, 1, 2, ema_values) <= 0) return;
-   if(CopyBuffer(adx_handle, 0, 1, 2, adx_values) <= 0) return;
+   // ---- Data: shift=1 => index 0 is the JUST-CLOSED breakout candle ----
+   double e50[], e200[], e20[];
+   ArraySetAsSeries(e50,  true);
+   ArraySetAsSeries(e200, true);
+   ArraySetAsSeries(e20,  true);
 
-   double close_price_1 = iClose(InpSymbol, PERIOD_CURRENT, 1);
-   double close_price_2 = iClose(InpSymbol, PERIOD_CURRENT, 2);
-   
-   // منطق اصلی استراتژی (تقاطع EMA)
-   bool original_buy_signal  = (close_price_2 < ema_values[1] && close_price_1 > ema_values[1]);
-   bool original_sell_signal = (close_price_2 > ema_values[1] && close_price_1 < ema_values[1]);
-   
-   // فیلتر ADX (حالت Both)
-   bool trend_strong = (adx_values[1] > InpADXThreshold);
+   if(CopyBuffer(hFast, 0, 1, 3, e50)  < 3) return;
+   if(CopyBuffer(hSlow, 0, 1, 3, e200) < 3) return;
+   if(CopyBuffer(hSL,   0, 1, 1, e20)  < 1) return;
 
-   // اعمال منطق معکوس (Mirror Strategy):
-   // اگر سیگنال اصلی خرید باشد، ما فروش می‌زنیم و برعکس!
-   bool mirror_sell = original_buy_signal && trend_strong;
-   bool mirror_buy  = original_sell_signal && trend_strong;
+   MqlRates r[];
+   ArraySetAsSeries(r, true);
+   if(CopyRates(_Symbol, _Period, 1, 1, r) < 1) return;
 
-   // اجرای معامله در صورت عدم وجود پوزیشن باز در این ماجول
-   if(PositionsTotal() == 0)
+   double sigClose = r[0].close;   // close of the breakout candle
+   double sigHigh  = r[0].high;
+   double sigLow   = r[0].low;
+   double ema20    = e20[0];       // EMA20 of the SAME breakout candle
+
+   // ---- Cross detection on the breakout candle ----
+   // e50[0] / e200[0] = breakout candle
+   // e50[1] / e200[1] = candle before it
+   bool crossUp   = (e50[1] <= e200[1] && e50[0] > e200[0]);
+   bool crossDown = (e50[1] >= e200[1] && e50[0] < e200[0]);
+   if(!crossUp && !crossDown) return;
+
+   double pt     = _Point;
+   double ask    = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double bid    = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double maxSlp = InpMaxSlippage * pt;
+
+   if(crossUp)
    {
-      MqlTick latest_tick;
-      if(!SymbolInfoTick(InpSymbol, latest_tick)) return;
+      // FILTER: EMA20 must be BELOW the breakout candle low
+      if(ema20 >= sigLow) return;
 
-      if(mirror_buy)
-      {
-         double ask = latest_tick.ask;
-         double sl = ask - InpStopLoss * _Point;
-         double tp = ask + InpTakeProfit * _Point;
-         
-         if(trade.Buy(InpLotSize, InpSymbol, ask, sl, tp, "Mirror Both Buy"))
-         {
-            last_bar_time = current_bar_time;
-            Print("Mirror BUY executed at: ", ask);
-         }
-      }
-      else if(mirror_sell)
-      {
-         double bid = latest_tick.bid;
-         double sl = bid + InpStopLoss * _Point;
-         double tp = bid - InpTakeProfit * _Point;
-         
-         if(trade.Sell(InpLotSize, InpSymbol, bid, sl, tp, "Mirror Both Sell"))
-         {
-            last_bar_time = current_bar_time;
-            Print("Mirror SELL executed at: ", bid);
-         }
-      }
+      // SL = EMA20 of the breakout candle
+      double sl   = ema20;
+      double dist = sigClose - sl;          // measured from the CLOSE
+      if(dist < InpMinSLPoints * pt || dist > InpMaxSLPoints * pt) return;
+
+      // Guard: market must not have run too far past the close
+      if(ask - sigClose > maxSlp) return;
+
+      double tp = sigClose + dist * InpRiskReward;
+
+      if(trade.Buy(InpLot, _Symbol, ask, sl, tp, "EMA50/200 BUY"))
+         PrintFormat("BUY  close=%.5f SL=%.5f TP=%.5f dist=%.1f pts slip=%.1f",
+                     sigClose, sl, tp, dist/pt, (ask - sigClose)/pt);
+   }
+   else
+   {
+      // FILTER: EMA20 must be ABOVE the breakout candle high
+      if(ema20 <= sigHigh) return;
+
+      double sl   = ema20;
+      double dist = sl - sigClose;          // measured from the CLOSE
+      if(dist < InpMinSLPoints * pt || dist > InpMaxSLPoints * pt) return;
+
+      if(sigClose - bid > maxSlp) return;
+
+      double tp = sigClose - dist * InpRiskReward;
+
+      if(trade.Sell(InpLot, _Symbol, bid, sl, tp, "EMA50/200 SELL"))
+         PrintFormat("SELL close=%.5f SL=%.5f TP=%.5f dist=%.1f pts slip=%.1f",
+                     sigClose, sl, tp, dist/pt, (sigClose - bid)/pt);
    }
 }
-
 //+------------------------------------------------------------------+
-//| Auto-detect Broker GMT Offset                                    |
-//+------------------------------------------------------------------+
-int CalculateBrokerGMTOffset()
-{
-   datetime server_time = TimeCurrent();
-   datetime gmt_time    = TimeGMT();
-   
-   int diff_seconds = (int)(server_time - gmt_time);
-   int diff_hours   = diff_seconds / 3600;
-   
-   // گرد کردن به نزدیک‌ترین ساعت استاندارد
-   if(diff_seconds % 3600 >= 1800) diff_hours++;
-   if(diff_seconds % 3600 <= -1800) diff_hours--;
-   
-   return diff_hours;
-}
- 
