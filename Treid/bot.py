@@ -1,423 +1,413 @@
-#property strict
+//+------------------------------------------------------------------+
+//| AnnaBot.mq5                                                      |
+//| راهبرد: نواحی Order Block در H1 و شکست ساختار CHoCH در M1.       |
+//| همه محاسبات بر پایه کندل‌های بسته‌شده و داده CopyRates هستند.     |
+//| هر معامله مستقل است؛ اکسپرت فقط پوزیشن‌های دارای مجیک خود را می‌شمارد.|
+//+------------------------------------------------------------------+
 #property version   "1.00"
-#property copyright "Pedram"
-#property description "استراتژی الگوهای هارمونیک ZigZag PA"
+#property description "H1 Order Block zones with M1 external structure entries"
 
-#include <Trade\Trade.mqh>
+#include <Trade/Trade.mqh>
 
-input group "تنظیمات عمومی"
-input bool InpUseHA = false;                 // استفاده از کندل‌های هیکن‌آشی
-input bool InpUseAltTF = true;               // استفاده از تایم‌فریم جایگزین
-input ENUM_TIMEFRAMES InpAltTF = PERIOD_H1;  // تایم‌فریم جایگزین
-input bool InpShowPatterns = true;            // نمایش الگوها
-input double InpLot = 0.03;                   // حجم ثابت
-input bool InpCloseOnOpposite = true;         // رزرو برای سازگاری؛ خروج با قوانین هدف انجام می‌شود
-input bool InpAllowHedge = false;             // اجازه داشتن معاملات دوطرفه
+input group "General"
+input string InpSymbol="EURUSD_o";
+input ulong  InpMagic=51425001;
+input int    InpMaxOpenTrades=0;       // 0 = unlimited
+input bool   InpOneTradePerZone=false;
+input bool   InpRequireCHoCH=true;
 
-input group "هدف اول"
-input bool InpT1Active = true;
-input double InpT1EwRate = 0.236;
-input double InpT1TpRate = 0.618;
-input double InpT1SlRate = -0.236;
+input group "Risk and execution"
+input double InpLots=0.03;
+input int    InpSwingLookback=3;       // Selects the M1 swing pivot (1 = most recent).
+input double InpRR=4.0;
 
-input group "هدف دوم"
-input bool InpT2Active = false;
-input double InpT2EwRate = 0.236;
-input double InpT2TpRate = 1.618;
-input double InpT2SlRate = -0.236;
+#define ZONE_MAX 200
+#define OB_LEN 5
+#define EXT_LEN 25
 
-input group "معامله"
-input long InpMagic = 20261110;
-input double InpSlippagePoints = 20;
-
-CTrade trade;
-datetime lastBarTime = 0;
-datetime lastAltBarTime = 0;
-double cachedAltPrices[5];
-datetime cachedAltTimes[5];
-int cachedAltCount = 0;
-string previousPatternKey = "";
-
-struct PivotPoint
+struct Zone
   {
-   double price;
-   datetime time;
+   double top;
+   double bottom;
+   double average;
+   datetime startTime;
+   bool bullish;
+   bool used;
   };
 
-// بررسی قرارگرفتن نسبت در بازه مجاز
-bool InRange(const double value,const double minimum,const double maximum)
-  {
-   return (value>=minimum && value<=maximum);
-  }
+CTrade trade;
+string g_symbol="";
+Zone g_zones[ZONE_MAX];
+int g_zoneCount=0;
+datetime g_lastM1Bar=0;
+datetime g_lastH1Bar=0;
 
-// هر تابع الگو نسبت‌های XAB، XAD، ABC و BCD را دریافت می‌کند
-bool isBat(double xab,double xad,double abc,double bcd)
-  { return InRange(xab,0.382,0.5) && InRange(abc,0.382,0.886) && InRange(bcd,1.618,2.618) && xad<=0.618; }
-bool isAntiBat(double xab,double xad,double abc,double bcd)
-  { return InRange(xab,0.5,0.886) && InRange(abc,1.0,2.618) && InRange(bcd,1.618,2.618) && InRange(xad,0.886,1.0); }
-bool isAltBat(double xab,double xad,double abc,double bcd)
-  { return xab<=0.382 && InRange(abc,0.382,0.886) && InRange(bcd,2.0,3.618) && xad<=1.13; }
-bool isButterfly(double xab,double xad,double abc,double bcd)
-  { return xab<=0.786 && InRange(abc,0.382,0.886) && InRange(bcd,1.618,2.618) && InRange(xad,1.27,1.618); }
-bool isAntiButterfly(double xab,double xad,double abc,double bcd)
-  { return InRange(xab,0.236,0.886) && InRange(abc,1.13,2.618) && InRange(bcd,1.0,1.382) && InRange(xad,0.5,0.886); }
-bool isABCD(double xab,double xad,double abc,double bcd)
-  { return InRange(abc,0.382,0.886) && InRange(bcd,1.13,2.618); }
-bool isGartley(double xab,double xad,double abc,double bcd)
-  { return InRange(xab,0.5,0.618) && InRange(abc,0.382,0.886) && InRange(bcd,1.13,2.618) && InRange(xad,0.75,0.875); }
-bool isAntiGartley(double xab,double xad,double abc,double bcd)
-  { return InRange(xab,0.5,0.886) && InRange(abc,1.0,2.618) && InRange(bcd,1.5,5.0) && InRange(xad,1.0,5.0); }
-bool isCrab(double xab,double xad,double abc,double bcd)
-  { return InRange(xab,0.5,0.875) && InRange(abc,0.382,0.886) && InRange(bcd,2.0,5.0) && InRange(xad,1.382,5.0); }
-bool isAntiCrab(double xab,double xad,double abc,double bcd)
-  { return InRange(xab,0.25,0.5) && InRange(abc,1.13,2.618) && InRange(bcd,1.618,2.618) && InRange(xad,0.5,0.75); }
-bool isShark(double xab,double xad,double abc,double bcd)
-  { return InRange(xab,0.5,0.875) && InRange(abc,1.13,1.618) && InRange(bcd,1.27,2.24) && InRange(xad,0.886,1.13); }
-bool isAntiShark(double xab,double xad,double abc,double bcd)
-  { return InRange(xab,0.382,0.875) && InRange(abc,0.5,1.0) && InRange(bcd,1.25,2.618) && InRange(xad,0.5,1.25); }
-bool is5o(double xab,double xad,double abc,double bcd)
-  { return InRange(xab,1.13,1.618) && InRange(abc,1.618,2.24) && InRange(bcd,0.5,0.625) && InRange(xad,0.0,0.236); }
-bool isWolf(double xab,double xad,double abc,double bcd)
-  { return InRange(xab,1.27,1.618) && InRange(abc,0.0,5.0) && InRange(bcd,1.27,1.618) && InRange(xad,0.0,5.0); }
-bool isHnS(double xab,double xad,double abc,double bcd)
-  { return InRange(xab,2.0,10.0) && InRange(abc,0.9,1.1) && InRange(bcd,0.236,0.88) && InRange(xad,0.9,1.1); }
-bool isConTria(double xab,double xad,double abc,double bcd)
-  { return InRange(xab,0.382,0.618) && InRange(abc,0.382,0.618) && InRange(bcd,0.382,0.618) && InRange(xad,0.236,0.764); }
-bool isExpTria(double xab,double xad,double abc,double bcd)
-  { return InRange(xab,1.236,1.618) && InRange(abc,1.0,1.618) && InRange(bcd,1.236,2.0) && InRange(xad,2.0,2.236); }
-
-// محاسبه نسبت‌ها و تشخیص الگوی نخست از گروه مربوطه
-bool DetectPattern(const int mode,const PivotPoint &pivots[],string &pattern,
-                   double &xab,double &xad,double &abc,double &bcd)
+//+------------------------------------------------------------------+
+//| Utilities                                                        |
+//+------------------------------------------------------------------+
+bool IsNewBar(const ENUM_TIMEFRAMES period)
   {
-   pattern="";
-   if(ArraySize(pivots)<5) return false;
-   double x=pivots[0].price, a=pivots[1].price, b=pivots[2].price;
-   double c=pivots[3].price, d=pivots[4].price;
-   double denXA=MathAbs(x-a), denAB=MathAbs(a-b), denBC=MathAbs(b-c);
-   if(denXA<=0.0 || denAB<=0.0 || denBC<=0.0) return false;
-   if(mode==1 && !(d<c)) return false;
-   if(mode==-1 && !(d>c)) return false;
-   xab=MathAbs(b-a)/denXA;
-   xad=MathAbs(a-d)/denXA;
-   abc=MathAbs(b-c)/denAB;
-   bcd=MathAbs(c-d)/denBC;
-   if(mode==1)
+   datetime t=iTime(g_symbol,period,0);
+   if(t<=0) return false;
+   if(period==PERIOD_M1)
      {
-      if(isABCD(xab,xad,abc,bcd)) pattern="ABCD";
-      else if(isBat(xab,xad,abc,bcd)) pattern="Bat";
-      else if(isAltBat(xab,xad,abc,bcd)) pattern="AltBat";
-      else if(isButterfly(xab,xad,abc,bcd)) pattern="Butterfly";
-      else if(isGartley(xab,xad,abc,bcd)) pattern="Gartley";
-      else if(isCrab(xab,xad,abc,bcd)) pattern="Crab";
-      else if(isShark(xab,xad,abc,bcd)) pattern="Shark";
-      else if(is5o(xab,xad,abc,bcd)) pattern="5o";
-      else if(isWolf(xab,xad,abc,bcd)) pattern="Wolf";
-      else if(isHnS(xab,xad,abc,bcd)) pattern="HnS";
-      else if(isConTria(xab,xad,abc,bcd)) pattern="ConTria";
-      else if(isExpTria(xab,xad,abc,bcd)) pattern="ExpTria";
-      else if(isAntiBat(xab,xad,abc,bcd)) pattern="AntiBat";
-      else if(isAntiButterfly(xab,xad,abc,bcd)) pattern="AntiButterfly";
-      else if(isAntiGartley(xab,xad,abc,bcd)) pattern="AntiGartley";
-      else if(isAntiCrab(xab,xad,abc,bcd)) pattern="AntiCrab";
-      else if(isAntiShark(xab,xad,abc,bcd)) pattern="AntiShark";
+      if(t==g_lastM1Bar) return false;
+      g_lastM1Bar=t;
+      return true;
      }
-   else
+   if(period==PERIOD_H1)
      {
-      if(isABCD(xab,xad,abc,bcd)) pattern="ABCD";
-      else if(isBat(xab,xad,abc,bcd)) pattern="Bat";
-      else if(isAltBat(xab,xad,abc,bcd)) pattern="AltBat";
-      else if(isButterfly(xab,xad,abc,bcd)) pattern="Butterfly";
-      else if(isGartley(xab,xad,abc,bcd)) pattern="Gartley";
-      else if(isCrab(xab,xad,abc,bcd)) pattern="Crab";
-      else if(isShark(xab,xad,abc,bcd)) pattern="Shark";
-      else if(is5o(xab,xad,abc,bcd)) pattern="5o";
-      else if(isWolf(xab,xad,abc,bcd)) pattern="Wolf";
-      else if(isHnS(xab,xad,abc,bcd)) pattern="HnS";
-      else if(isConTria(xab,xad,abc,bcd)) pattern="ConTria";
-      else if(isExpTria(xab,xad,abc,bcd)) pattern="ExpTria";
-      else if(isAntiBat(xab,xad,abc,bcd)) pattern="AntiBat";
-      else if(isAntiButterfly(xab,xad,abc,bcd)) pattern="AntiButterfly";
-      else if(isAntiGartley(xab,xad,abc,bcd)) pattern="AntiGartley";
-      else if(isAntiCrab(xab,xad,abc,bcd)) pattern="AntiCrab";
-      else if(isAntiShark(xab,xad,abc,bcd)) pattern="AntiShark";
-     }
-   return (pattern!="");
-  }
-
-// آرایه نقاط برگشتی را از تاریخچه کندل‌ها می‌سازد
-int BuildPivots(const ENUM_TIMEFRAMES timeframe,const bool useHA,PivotPoint &outPivots[])
-  {
-   MqlRates rates[];
-   ArraySetAsSeries(rates,true);
-   int copied=CopyRates(_Symbol,timeframe,0,700,rates);
-   if(copied<6) return 0;
-   double haOpen[],haClose[],haHigh[],haLow[];
-   ArrayResize(haOpen,copied); ArrayResize(haClose,copied);
-   ArrayResize(haHigh,copied); ArrayResize(haLow,copied);
-   ArraySetAsSeries(haOpen,true); ArraySetAsSeries(haClose,true);
-   ArraySetAsSeries(haHigh,true); ArraySetAsSeries(haLow,true);
-   for(int i=copied-1;i>=0;i--)
-     {
-      haClose[i]=(rates[i].open+rates[i].high+rates[i].low+rates[i].close)/4.0;
-      if(i==copied-1) haOpen[i]=(rates[i].open+rates[i].close)/2.0;
-      else haOpen[i]=(haOpen[i+1]+haClose[i+1])/2.0;
-      haHigh[i]=MathMax(rates[i].high,MathMax(haOpen[i],haClose[i]));
-      haLow[i]=MathMin(rates[i].low,MathMin(haOpen[i],haClose[i]));
-     }
-   int direction=0;
-   bool prevUp=false,prevDown=false;
-   double revPrice[];
-   datetime revTime[];
-   ArrayResize(revPrice,0); ArrayResize(revTime,0);
-   // از قدیمی‌ترین کندل کامل به جدیدترین کندل کامل
-   for(int i=copied-1;i>=1;i--)
-     {
-      double op=useHA ? haOpen[i] : rates[i].open;
-      double cl=useHA ? haClose[i] : rates[i].close;
-      bool isUp=(cl>=op), isDown=(cl<=op);
-      bool pivot=false;
-      double pivotPrice=0.0;
-      int pivotIndex=-1;
-      int nextDirection=direction;
-      if(prevUp && isDown)
-        {
-         nextDirection=-1;
-         if(direction!=-1)
-           {
-            int earlier=i+1;
-            double currentHigh=(useHA ? haHigh[i] : rates[i].high);
-            double earlierHigh=(useHA ? haHigh[earlier] : rates[earlier].high);
-            pivotIndex=(currentHigh>=earlierHigh ? i : earlier);
-            pivotPrice=(useHA ? haHigh[pivotIndex] : rates[pivotIndex].high);
-            pivot=true;
-           }
-        }
-      else if(prevDown && isUp)
-        {
-         nextDirection=1;
-         if(direction!=1)
-           {
-            int earlier=i+1;
-            double currentLow=(useHA ? haLow[i] : rates[i].low);
-            double earlierLow=(useHA ? haLow[earlier] : rates[earlier].low);
-            pivotIndex=(currentLow<=earlierLow ? i : earlier);
-            pivotPrice=(useHA ? haLow[pivotIndex] : rates[pivotIndex].low);
-            pivot=true;
-           }
-        }
-      direction=nextDirection;
-      if(pivot)
-        {
-         int n=ArraySize(revPrice);
-         ArrayResize(revPrice,n+1); ArrayResize(revTime,n+1);
-         revPrice[n]=pivotPrice; revTime[n]=rates[pivotIndex].time;
-        }
-      prevUp=isUp; prevDown=isDown;
-     }
-   int total=ArraySize(revPrice);
-   int keep=(total<5 ? total : 5);
-   ArrayResize(outPivots,keep);
-   for(int j=0;j<keep;j++)
-     {
-      int source=total-keep+j;
-      outPivots[j].price=revPrice[source];
-      outPivots[j].time=revTime[source];
-     }
-   return keep;
-  }
-
-// نگهداری خروجی تایم‌فریم جایگزین فقط هنگام آغاز کندل جدید آن
-void RefreshAltPivots()
-  {
-   datetime current=iTime(_Symbol,InpAltTF,0);
-   if(current==0 || current==lastAltBarTime) return;
-   lastAltBarTime=current;
-   PivotPoint pivots[];
-   int count=BuildPivots(InpAltTF,InpUseHA,pivots);
-   cachedAltCount=count;
-   for(int i=0;i<5;i++)
-     {
-      cachedAltPrices[i]=0.0; cachedAltTimes[i]=0;
-      if(i<count) { cachedAltPrices[i]=pivots[i].price; cachedAltTimes[i]=pivots[i].time; }
-     }
-  }
-
-// دریافت آخرین پنج پیوت فعال برای منطق جاری
-int GetCurrentPivots(PivotPoint &pivots[])
-  {
-   if(InpUseAltTF)
-     {
-      RefreshAltPivots();
-      ArrayResize(pivots,cachedAltCount);
-      for(int i=0;i<cachedAltCount;i++)
-        { pivots[i].price=cachedAltPrices[i]; pivots[i].time=cachedAltTimes[i]; }
-      return cachedAltCount;
-     }
-   return BuildPivots((ENUM_TIMEFRAMES)_Period,InpUseHA,pivots);
-  }
-
-double FibPrice(const double d,const double c,const double rate)
-  {
-   double range=MathAbs(d-c);
-   return (d>c ? d-range*rate : d+range*rate);
-  }
-
-double LotNormalize(double lot)
-  {
-   double minimum=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
-   double maximum=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX);
-   double step=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);
-   if(step<=0.0) step=minimum;
-   lot=MathMax(minimum,MathMin(maximum,lot));
-   lot=MathFloor(lot/step+1e-8)*step;
-   int digits=2;
-   if(step<0.1) digits=3;
-   if(step<0.01) digits=4;
-   return NormalizeDouble(lot,digits);
-  }
-
-bool HasPosition(const ENUM_POSITION_TYPE wanted,const bool anyDirection=false)
-  {
-   for(int i=PositionsTotal()-1;i>=0;i--)
-     {
-      ulong ticket=PositionGetTicket(i);
-      if(ticket==0) continue;
-      if(PositionGetString(POSITION_SYMBOL)!=_Symbol) continue;
-      if((long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) continue;
-      ENUM_POSITION_TYPE type=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-      if(anyDirection || type==wanted) return true;
+      if(t==g_lastH1Bar) return false;
+      g_lastH1Bar=t;
+      return true;
      }
    return false;
   }
 
-// مدیریت خروج معامله بر اساس برچسب هدف و جهت پوزیشن
-void ManagePositions(const double high,const double low,const double c,const double d)
+// SMA of true range, including the indexed H1 bar.
+double ATR_H1(MqlRates &r[],const int index,const int length)
   {
-   double t1tp=FibPrice(d,c,InpT1TpRate), t1sl=FibPrice(d,c,InpT1SlRate);
-   double t2tp=FibPrice(d,c,InpT2TpRate), t2sl=FibPrice(d,c,InpT2SlRate);
+   if(length<1 || index-length+1<1) return 0.0;
+   double sum=0.0;
+   for(int k=index-length+1;k<=index;k++)
+     {
+      double a=r[k].high-r[k].low;
+      double b=MathAbs(r[k].high-r[k-1].close);
+      double c=MathAbs(r[k].low-r[k-1].close);
+      sum+=MathMax(a,MathMax(b,c));
+     }
+   return sum/(double)length;
+  }
+
+bool IsPivotHigh(MqlRates &r[],const int j,const int length)
+  {
+   if(j-length<0 || j+length>=ArraySize(r)) return false;
+   for(int k=1;k<=length;k++)
+     {
+      if(r[j].high<=r[j-k].high || r[j].high<r[j+k].high) return false;
+     }
+   return true;
+  }
+
+bool IsPivotLow(MqlRates &r[],const int j,const int length)
+  {
+   if(j-length<0 || j+length>=ArraySize(r)) return false;
+   for(int k=1;k<=length;k++)
+     {
+      if(r[j].low>=r[j-k].low || r[j].low>r[j+k].low) return false;
+     }
+   return true;
+  }
+
+bool WasZoneUsed(Zone &oldZones[],const int oldCount,const datetime t,const bool bull)
+  {
+   for(int q=0;q<oldCount;q++)
+      if(oldZones[q].startTime==t && oldZones[q].bullish==bull)
+         return oldZones[q].used;
+   return false;
+  }
+
+void AddZone(const double top,const double bottom,const datetime start,
+             const bool bull,Zone &oldZones[],const int oldCount)
+  {
+   if(top<bottom || top<=0.0 || bottom<=0.0) return;
+   if(g_zoneCount>=ZONE_MAX)
+     {
+      for(int q=1;q<g_zoneCount;q++) g_zones[q-1]=g_zones[q];
+      g_zoneCount--;
+     }
+   g_zones[g_zoneCount].top=top;
+   g_zones[g_zoneCount].bottom=bottom;
+   g_zones[g_zoneCount].average=(top+bottom)*0.5;
+   g_zones[g_zoneCount].startTime=start;
+   g_zones[g_zoneCount].bullish=bull;
+   g_zones[g_zoneCount].used=WasZoneUsed(oldZones,oldCount,start,bull);
+   g_zoneCount++;
+  }
+
+// Rebuild all active H1 zones from recent history; mitigation is by candle body.
+void BuildZones()
+  {
+   Zone oldZones[ZONE_MAX];
+   int oldCount=g_zoneCount;
+   if(oldCount>ZONE_MAX) oldCount=ZONE_MAX;
+   for(int q=0;q<oldCount;q++) oldZones[q]=g_zones[q];
+   g_zoneCount=0;
+
+   MqlRates r[];
+   ArraySetAsSeries(r,false);
+   int copied=CopyRates(g_symbol,PERIOD_H1,0,300,r);
+   if(copied<=3*OB_LEN+2)
+     {
+      Print("BuildZones: insufficient H1 history.");
+      return;
+     }
+   int last=copied-2; // newest completed candle; final element is forming
+   int direction=0;
+   for(int i=0;i<=last;i++)
+     {
+      if(i>=OB_LEN*3-1)
+        {
+         int target=i-OB_LEN;
+         // Compare the delayed bar against the five candles preceding it.
+         // Including target itself in highest/lowest makes both strict tests
+         // mathematically impossible, so exclude it to preserve the intended
+         // direction-change behavior of the Order Block construction.
+         double highest=r[target-OB_LEN].high;
+         double lowest=r[target-OB_LEN].low;
+         for(int x=target-OB_LEN+1;x<target;x++)
+           {
+            if(r[x].high>highest) highest=r[x].high;
+            if(r[x].low<lowest) lowest=r[x].low;
+           }
+         if(r[target].high>highest) direction=-1;
+         else if(r[target].low<lowest) direction=1;
+        }
+
+      double bodyLow=MathMin(r[i].open,r[i].close);
+      double bodyHigh=MathMax(r[i].open,r[i].close);
+      for(int z=g_zoneCount-1;z>=0;z--)
+        {
+         bool remove=(g_zones[z].bullish && bodyLow<g_zones[z].bottom) ||
+                     (!g_zones[z].bullish && bodyHigh>g_zones[z].top);
+         if(remove)
+           {
+            for(int m=z+1;m<g_zoneCount;m++) g_zones[m-1]=g_zones[m];
+            g_zoneCount--;
+           }
+        }
+
+      int j=i-OB_LEN;
+      if(j<OB_LEN || j+OB_LEN>i || direction==0) continue;
+      bool pivot=true;
+      for(int k=1;k<=OB_LEN;k++)
+        {
+         // Pine-style volume pivot: strict on left, non-strict on right.
+         if(r[j].tick_volume<=r[j-k].tick_volume ||
+            r[j].tick_volume<r[j+k].tick_volume)
+           { pivot=false; break; }
+        }
+      if(!pivot) continue;
+      double atr=ATR_H1(r,j,OB_LEN);
+      if(atr<=0.0) continue;
+      if(direction==1)
+        {
+         double top=MathMin(r[j].low+atr,r[j].high);
+         AddZone(top,r[j].low,r[j].time,true,oldZones,oldCount);
+        }
+      else if(direction==-1)
+        {
+         double bottom=MathMax(r[j].high-atr,r[j].low);
+         AddZone(r[j].high,bottom,r[j].time,false,oldZones,oldCount);
+        }
+     }
+   Print("BuildZones: active zones=",g_zoneCount);
+  }
+
+// Return a signal only when the newest completed M1 bar makes a qualifying break.
+bool DetectM1Signal(int &side,bool &isChoch,double &barLow,double &barHigh,
+                    int &signalIndex,MqlRates &rates[])
+  {
+   side=0; isChoch=false; barLow=0.0; barHigh=0.0; signalIndex=-1;
+   ArraySetAsSeries(rates,false);
+   int copied=CopyRates(g_symbol,PERIOD_M1,0,400,rates);
+   if(copied<=2*EXT_LEN+3) return false;
+   int last=copied-2;
+   double upAxis=0.0,dnAxis=0.0;
+   bool upArmed=false,dnArmed=false;
+   int moving=0;
+   int eventSide=0;
+   bool eventChoch=false;
+   for(int i=0;i<=last;i++)
+     {
+      int j=i-EXT_LEN;
+      if(j>=EXT_LEN && j+EXT_LEN<=i)
+        {
+         bool ph=true,pl=true;
+         for(int k=1;k<=EXT_LEN;k++)
+           {
+            if(rates[j].high<=rates[j-k].high || rates[j].high<rates[j+k].high) ph=false;
+            if(rates[j].low>=rates[j-k].low || rates[j].low>rates[j+k].low) pl=false;
+           }
+         if(ph) { upAxis=rates[j].high; upArmed=true; }
+         if(pl) { dnAxis=rates[j].low; dnArmed=true; }
+        }
+      eventSide=0; eventChoch=false;
+      if(i>0 && upArmed && upAxis>0.0 &&
+         rates[i-1].close<=upAxis && rates[i].close>upAxis)
+        {
+         eventSide=1; eventChoch=(moving<0); moving=1; upArmed=false;
+        }
+      else if(i>0 && dnArmed && dnAxis>0.0 &&
+              rates[i-1].close>=dnAxis && rates[i].close<dnAxis)
+        {
+         eventSide=-1; eventChoch=(moving>0); moving=-1; dnArmed=false;
+        }
+     }
+   if(eventSide==0) return false;
+   if(InpRequireCHoCH && !eventChoch) return false;
+   side=eventSide; isChoch=eventChoch;
+   barLow=rates[last].low; barHigh=rates[last].high;
+   signalIndex=last;
+   return true;
+  }
+
+// Find the extreme of the latest confirmed external swing pivots.
+double CalcSL(const int side,const int signalIndex,const double fallback,
+              MqlRates &rates[])
+  {
+   int wanted=InpSwingLookback;
+   if(wanted<1) wanted=1;
+   double swings[];
+   ArrayResize(swings,0);
+   int lastPivot=signalIndex-EXT_LEN;
+   for(int j=EXT_LEN;j<=lastPivot;j++)
+     {
+      bool pivot=(side>0 ? IsPivotLow(rates,j,EXT_LEN) : IsPivotHigh(rates,j,EXT_LEN));
+      if(!pivot) continue;
+      int n=ArraySize(swings);
+      ArrayResize(swings,n+1);
+      swings[n]=(side>0 ? rates[j].low : rates[j].high);
+     }
+   double result=fallback;
+   int count=ArraySize(swings);
+   if(count>0)
+     {
+      int start=count-wanted;
+      if(start<0) start=0;
+      result=swings[start];
+      for(int q=start+1;q<count;q++)
+        {
+         if(side>0 && swings[q]<result) result=swings[q];
+         if(side<0 && swings[q]>result) result=swings[q];
+        }
+     }
+   return NormalizeDouble(result,(int)SymbolInfoInteger(g_symbol,SYMBOL_DIGITS));
+  }
+
+double CalcTP(const int side,const double entry,const double sl)
+  {
+   double distance=MathAbs(entry-sl);
+   double tp=(side>0 ? entry+InpRR*distance : entry-InpRR*distance);
+   return NormalizeDouble(tp,(int)SymbolInfoInteger(g_symbol,SYMBOL_DIGITS));
+  }
+
+double NormalizeLots(const double requested)
+  {
+   double minimum=SymbolInfoDouble(g_symbol,SYMBOL_VOLUME_MIN);
+   double maximum=SymbolInfoDouble(g_symbol,SYMBOL_VOLUME_MAX);
+   double step=SymbolInfoDouble(g_symbol,SYMBOL_VOLUME_STEP);
+   if(step<=0.0) step=minimum;
+   double lots=MathMax(minimum,MathMin(maximum,requested));
+   lots=MathFloor(lots/step+0.5)*step;
+   int digits=0;
+   double test=step;
+   while(digits<8 && MathAbs(test-MathRound(test))>1e-8)
+     { test*=10.0; digits++; }
+   return NormalizeDouble(MathMax(minimum,MathMin(maximum,lots)),digits);
+  }
+
+int CountOwnPositions()
+  {
+   int count=0;
    for(int i=PositionsTotal()-1;i>=0;i--)
      {
       ulong ticket=PositionGetTicket(i);
-      if(ticket==0 || PositionGetString(POSITION_SYMBOL)!=_Symbol || (long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) continue;
-      string tag=PositionGetString(POSITION_COMMENT);
-      ENUM_POSITION_TYPE type=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-      bool closeNow=false;
-      if(StringFind(tag,"02")>=0 && InpT2Active)
-        closeNow=(type==POSITION_TYPE_BUY ? (high>=t2tp || low<=t2sl) : (low<=t2tp || high>=t2sl));
-      else if(StringFind(tag,"01")>=0 && InpT1Active)
-        closeNow=(type==POSITION_TYPE_BUY ? (high>=t1tp || low<=t1sl) : (low<=t1tp || high>=t1sl));
-      if(closeNow && !trade.PositionClose(ticket))
-         Print("خطا در بستن پوزیشن، ticket=",ticket," کد=",trade.ResultRetcode()," ",trade.ResultRetcodeDescription());
+      if(ticket==0) continue;
+      if(PositionGetString(POSITION_SYMBOL)==g_symbol &&
+         (ulong)PositionGetInteger(POSITION_MAGIC)==InpMagic) count++;
      }
+   return count;
   }
 
-void DrawPattern(const PivotPoint &d,const string key,const int mode)
+bool ZoneInteracts(const Zone &z,const double lo,const double hi,const double cl)
   {
-   if(!InpShowPatterns) return;
-   string name="ZZPA_"+IntegerToString((long)d.time)+"_"+key;
-   if(ObjectFind(0,name)>=0) return;
-   ENUM_OBJECT objectType=(mode==1 ? OBJ_ARROW_UP : OBJ_ARROW_DOWN);
-   if(!ObjectCreate(0,name,objectType,0,d.time,d.price)) return;
-   ObjectSetInteger(0,name,OBJPROP_COLOR,(mode==1 ? clrLimeGreen : clrTomato));
-   ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
-   ObjectSetString(0,name,OBJPROP_TOOLTIP,key);
-   // پاکسازی نشانه‌های قدیمی‌تر از حدود ۲۰۰۰ کندل
-   datetime cutoff=iTime(_Symbol,(ENUM_TIMEFRAMES)_Period,2000);
-   if(cutoff>0)
-     for(int i=ObjectsTotal(0)-1;i>=0;i--)
-       {
-        string obj=ObjectName(0,i);
-        if(StringFind(obj,"ZZPA_")==0 && (datetime)ObjectGetInteger(0,obj,OBJPROP_TIME)<cutoff) ObjectDelete(0,obj);
-       }
+   return ((lo<=z.top && hi>=z.bottom) || (cl>=z.bottom && cl<=z.top));
   }
 
-void TryOpen(const bool isBuy,const int target,const string pattern,const double entryWindow,
-             const double tp,const double sl)
+void TryEntry()
   {
-   ENUM_POSITION_TYPE desired=(isBuy ? POSITION_TYPE_BUY : POSITION_TYPE_SELL);
-   if(HasPosition(desired)) return;
-   if(!InpAllowHedge && HasPosition(desired==POSITION_TYPE_BUY ? POSITION_TYPE_SELL : POSITION_TYPE_BUY)) return;
-   double lots=LotNormalize(InpLot);
-   string side=(isBuy ? "buy" : "sell");
-   string tag=side+(target==1 ? " 01" : " 02");
-   Print("سیگنال ",pattern," جهت ",side," هدف ",target," | پنجره ورود=",DoubleToString(entryWindow,_Digits),
-         " TP=",DoubleToString(tp,_Digits)," SL=",DoubleToString(sl,_Digits));
-   bool sent=(isBuy ? trade.Buy(lots,_Symbol,0.0,0.0,0.0,tag) : trade.Sell(lots,_Symbol,0.0,0.0,0.0,tag));
-   if(sent)
-      Print("سفارش ارسال شد: ",tag," الگو=",pattern," حجم=",DoubleToString(lots,2)," قیمت بازار");
+   MqlRates m1[];
+   int side=0,signalIndex=-1;
+   bool choch=false;
+   double barLow=0.0,barHigh=0.0;
+   if(!DetectM1Signal(side,choch,barLow,barHigh,signalIndex,m1)) return;
+   if(InpMaxOpenTrades>0 && CountOwnPositions()>=InpMaxOpenTrades) return;
+   double closePrice=m1[signalIndex].close;
+   int zoneIndex=-1;
+   for(int z=0;z<g_zoneCount;z++)
+     {
+      if(g_zones[z].bullish!=(side>0)) continue;
+      if(InpOneTradePerZone && g_zones[z].used) continue;
+      if(!ZoneInteracts(g_zones[z],barLow,barHigh,closePrice)) continue;
+      // The structure shift candle must itself touch/reach the zone edge.
+      if(side>0 && barLow>g_zones[z].top) continue;
+      if(side<0 && barHigh<g_zones[z].bottom) continue;
+      zoneIndex=z; break;
+     }
+   if(zoneIndex<0) return;
+
+   MqlTick tick;
+   if(!SymbolInfoTick(g_symbol,tick)) return;
+   double entry=(side>0 ? tick.ask : tick.bid);
+   double sl=CalcSL(side,signalIndex,(side>0 ? barLow : barHigh),m1);
+   if((side>0 && sl>=entry) || (side<0 && sl<=entry))
+     { Print("Signal skipped: invalid SL side."); return; }
+   double tp=CalcTP(side,entry,sl);
+   double lots=NormalizeLots(InpLots);
+   string comment=(side>0 ? "AnnaBot-L" : "AnnaBot-S");
+   bool sent=(side>0 ? trade.Buy(lots,g_symbol,0.0,sl,tp,comment)
+                     : trade.Sell(lots,g_symbol,0.0,sl,tp,comment));
+   if(sent && (trade.ResultRetcode()==TRADE_RETCODE_DONE ||
+               trade.ResultRetcode()==TRADE_RETCODE_PLACED))
+     {
+      g_zones[zoneIndex].used=true;
+      Print("Trade opened: ",comment," lots=",DoubleToString(lots,2),
+            " SL=",DoubleToString(sl,_Digits)," TP=",DoubleToString(tp,_Digits),
+            " zone=",TimeToString(g_zones[zoneIndex].startTime));
+     }
    else
-      Print("ارسال سفارش ناموفق: ",tag," کد=",trade.ResultRetcode()," ",trade.ResultRetcodeDescription());
+      Print("Trade failed: retcode=",trade.ResultRetcode()," ",trade.ResultRetcodeDescription());
   }
 
-void EvaluateStrategy()
-  {
-   PivotPoint pivots[];
-   if(GetCurrentPivots(pivots)<5) { previousPatternKey=""; return; }
-   double xab=0,xad=0,abc=0,bcd=0;
-   string buyPattern="",sellPattern="";
-   bool buyPatternFound=DetectPattern(1,pivots,buyPattern,xab,xad,abc,bcd);
-   double sxab=0,sxad=0,sabc=0,sbcd=0;
-   bool sellPatternFound=DetectPattern(-1,pivots,sellPattern,sxab,sxad,sabc,sbcd);
-   string visualKey="";
-   int visualMode=0;
-   if(buyPatternFound) { visualKey="buy_"+buyPattern; visualMode=1; }
-   else if(sellPatternFound) { visualKey="sell_"+sellPattern; visualMode=-1; }
-   if(visualKey!="" && visualKey!=previousPatternKey) DrawPattern(pivots[4],visualKey,visualMode);
-   previousPatternKey=visualKey;
-
-   double close=iClose(_Symbol,PERIOD_CURRENT,1);
-   double high=iHigh(_Symbol,PERIOD_CURRENT,1);
-   double low=iLow(_Symbol,PERIOD_CURRENT,1);
-   if(close==0 || high==0 || low==0) return;
-   double c=pivots[3].price, d=pivots[4].price;
-   ManagePositions(high,low,c,d);
-
-   double t1Entry=FibPrice(d,c,InpT1EwRate), t1TP=FibPrice(d,c,InpT1TpRate), t1SL=FibPrice(d,c,InpT1SlRate);
-   double t2Entry=FibPrice(d,c,InpT2EwRate), t2TP=FibPrice(d,c,InpT2TpRate), t2SL=FibPrice(d,c,InpT2SlRate);
-   // ورود در کندل بعد از سیگنال (معادل رفتار Pine بدون process_orders_on_close)
-   if(InpT1Active && buyPatternFound && close<=t1Entry)
-      TryOpen(true,1,buyPattern,t1Entry,t1TP,t1SL);
-   else if(InpT1Active && sellPatternFound && close>=t1Entry)
-      TryOpen(false,1,sellPattern,t1Entry,t1TP,t1SL);
-   else if(InpT2Active && buyPatternFound && close<=t2Entry)
-      TryOpen(true,2,buyPattern,t2Entry,t2TP,t2SL);
-   else if(InpT2Active && sellPatternFound && close>=t2Entry)
-      TryOpen(false,2,sellPattern,t2Entry,t2TP,t2SL);
-  }
-
+//+------------------------------------------------------------------+
+//| Expert lifecycle                                                 |
+//+------------------------------------------------------------------+
 int OnInit()
   {
-   trade.SetExpertMagicNumber((ulong)InpMagic);
-   trade.SetDeviationInPoints((ulong)MathMax(0.0,InpSlippagePoints));
-   trade.SetTypeFillingBySymbol(_Symbol);
-   lastBarTime=iTime(_Symbol,PERIOD_CURRENT,0);
-   if(InpUseAltTF) RefreshAltPivots();
+   g_symbol=(InpSymbol=="" ? _Symbol : InpSymbol);
+   if(!SymbolSelect(g_symbol,true))
+     {
+      Print("Initialization failed: symbol is unavailable: ",g_symbol);
+      return INIT_FAILED;
+     }
+   if(InpLots<=0.0 || InpRR<=0.0 || InpSwingLookback<1)
+     {
+      Print("Initialization failed: invalid risk inputs.");
+      return INIT_PARAMETERS_INCORRECT;
+     }
+   trade.SetExpertMagicNumber(InpMagic);
+   trade.SetDeviationInPoints(30);
+   if(!trade.SetTypeFillingBySymbol(g_symbol))
+      Print("Warning: unable to set symbol filling mode automatically.");
+   g_zoneCount=0;
+   g_lastM1Bar=0;
+   g_lastH1Bar=0;
+   Print("AnnaBot initialized. Symbol=",g_symbol," Lots=",DoubleToString(InpLots,2),
+         " RR=",DoubleToString(InpRR,2)," MaxOpen=",InpMaxOpenTrades);
    return INIT_SUCCEEDED;
-  }
-
-void OnTick()
-  {
-   datetime current=iTime(_Symbol,PERIOD_CURRENT,0);
-   if(current==0 || current==lastBarTime) return;
-   lastBarTime=current;
-   EvaluateStrategy();
   }
 
 void OnDeinit(const int reason)
   {
-   for(int i=ObjectsTotal(0)-1;i>=0;i--)
-     {
-      string name=ObjectName(0,i);
-      if(StringFind(name,"ZZPA_")==0) ObjectDelete(0,name);
-     }
+   Print("AnnaBot stopped. Reason=",reason);
   }
 
-/*
-راهنمای نصب:
-۱) این فایل را در پوشه MQL5/Experts کپی کنید و در MetaEditor با کلید F7 کامپایل کنید.
-۲) حجم معامله ثابت و پیش‌فرض آن ۰٫۰۳ لات است؛ مقدار ورودی را می‌توان تغییر داد.
-۳) ورود در قیمت آغاز کندل بعد از کندلی انجام می‌شود که سیگنال آن در بسته‌شدن ارزیابی شده است.
-۴) باگ تقدم عملگرهای شرط بستن هدف دوم اصلاح شده و شرط‌های TP/SL داخل پرانتز هستند.
-۵) هدف دوم به‌صورت پیش‌فرض خاموش است.
-*/
+void OnTick()
+  {
+   bool newH1=IsNewBar(PERIOD_H1);
+   bool newM1=IsNewBar(PERIOD_M1);
+   if(newH1) BuildZones();
+   if(newM1) TryEntry();
+  }
+//+------------------------------------------------------------------+
