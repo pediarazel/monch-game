@@ -1,422 +1,423 @@
 //+------------------------------------------------------------------+
-//| AnnaBot Expert Advisor                                           |
-//| توضیح فارسی ورودی‌ها و نگاشت به Pine:                             |
-//| InpOBLen: طول پیوت/ATR بلوک سفارش (Pine: len؛ بازه ۱ تا ۲۰).       |
-//| InpOBMode: ساخت محدوده با ATR یا کل کندل (Pine: OB mode).          |
-//| InpMitigation: روش مصرف محدوده، سایه/بسته‌شدن/میانه (Pine: mit).    |
-//| InpOverlap: حذف بلوک‌های هم‌پوشان (Pine: overlap).                  |
-//| InpExtSens / InpIntSens: حساسیت ساختار خارجی/داخلی (Pine: sens).   |
-//| InpShowExt / InpShowInt: فعال‌سازی لایه‌های ساختار (Pine: show).    |
-//| InpDrawStructure: رسم خطوط ساختار (Pine: نمایش خطوط/برچسب‌ها).      |
-//| InpUseCHoCHFilter: فیلتر جهت CHoCH (افزوده‌شده برای اجرای معامله). |
-//| InpLots, InpMagic, InpSlippage: حجم، شناسه و لغزش سفارش MT5.        |
-//| InpMaxSpread: بیشینه اسپرد مجاز؛ صفر یعنی غیرفعال.                  |
-//| InpOnePositionPerSymbol: جلوگیری از سفارش/پوزیشن تکراری نماد.      |
-//| InpUseLimit: ورود لیمیت در میانه بلوک، یا ورود بازار.               |
-//| InpSLBufferATR / InpRR: بافر حدضرر ATR و نسبت سود به ریسک.          |
-//| InpMaxBars: سقف تاریخچه درخواستی برای محاسبه.                       |
-//|                                                                      |
-//| English summary:                                                   |
-//| Detects order blocks with Wilder ATR and volume pivots.              |
-//| Tracks external and internal market structure and draws breaks.     |
-//| Provides a configurable, placeholder bullish order execution layer.  |
+//|                                                  AnnaBot_v4.mq5  |
+//|  H1 Order Block (one-time use) + M1 CHoCH entry, axis SL, RR TP  |
 //+------------------------------------------------------------------+
-#property copyright "AnnaBot"
-#property version   "1.10"
-#property description "Order Blocks (Andicator-1H) + Dual Market Structure (Andicator1min)"
+#property copyright "Pedram Strategy"
+#property version   "4.00"
+#property description "H1 OB zones consumed on first reaction; M1 CHoCH entry; SL on broken axis; TP by RR"
+
 #include <Trade/Trade.mqh>
 
-enum ENUM_OB_MODE { OB_MODE_LENGTH=0, OB_MODE_FULL=1 };
-enum ENUM_MITIGATION { MIT_CLOSE=0, MIT_WICK=1, MIT_AVG=2 };
+input group "General"
+input string InpSymbol           = "EURUSD_o";
+input ulong  InpMagic            = 51425001;
+input int    InpMaxOpenTrades    = 0;      // 0 = unlimited
+input bool   InpOneTradePerZone  = true;   // zone is one-time use
+input bool   InpRequireCHoCH     = true;
 
-input int             InpOBLen            = 5;      // OB: pivot/ATR length (1..20)
-input ENUM_OB_MODE    InpOBMode           = OB_MODE_LENGTH;
-input ENUM_MITIGATION InpMitigation       = MIT_WICK;
-input bool            InpOverlap          = true;
-input int             InpExtSens          = 25;     // External structure sensitivity (any int>=2)
-input int             InpIntSens          = 3;      // Internal structure sensitivity (any int>=2)
-input bool            InpShowExt          = true;
-input bool            InpShowInt          = true;
-input bool            InpDrawStructure    = true;
-input bool            InpUseCHoCHFilter   = false;
-input double          InpLots             = 0.01;
-input long            InpMagic            = 250501;
-input int             InpSlippage         = 10;
-input int             InpMaxSpread        = 0;      // 0 = disabled
-input bool            InpOnePositionPerSymbol = true;
-input bool            InpUseLimit         = true;
-input double          InpSLBufferATR      = 0.25;
-input double          InpRR               = 2.0;
-input int             InpMaxBars          = 3000;   // history bars loaded
+input group "Risk and execution"
+input double InpLots             = 0.03;   // fixed lot for EURUSD_o
+input int    InpSwingLookback    = 3;      // M1 swing length AND pivot length
+input double InpRR               = 4.0;
 
-struct OBZone { int type; double top; double bottom; double mid; datetime time; long volume; };
-struct StructureLayer { int sens; int intra; int moving; int upFlag; int dnFlag; double upaxis; double dnaxis; datetime upTime; datetime dnTime; int lastDir; datetime lastTime; };
+#define ZONE_MAX 200
+#define OB_LEN   5
+#define SWING_LEN 3
 
-OBZone gBull[]; OBZone gBear[];
-StructureLayer gExt; StructureLayer gInt;
-CTrade gTrade;
-datetime gLastBar = 0;
-int gOBDir = 0;          // persistent OB direction state (-1/0/1) — MUST be saved/loaded
-bool gChanged = false;
-double gATR = 0.0;
-ulong gOrderTicketForZone[]; // parallel array NOT used; instead use order comment = zone id string
+//--- zone states
+#define Z_ARMED   0      // waiting for first reaction
+#define Z_CONSUMED 1     // reacted once -> dead forever
 
-void AddFront(OBZone &arr[], const OBZone &z)
-{
-   int count=ArraySize(arr);
-   if(ArrayResize(arr,count+1)!=count+1) return;
-   for(int i=count;i>0;i--) arr[i]=arr[i-1];
-   arr[0]=z;
-}
+struct Zone
+  {
+   double   top;
+   double   bottom;
+   double   average;
+   datetime startTime;
+   bool     bullish;
+   int      state;     // Z_ARMED / Z_CONSUMED
+  };
 
-void RemoveAtIdx(OBZone &arr[], int idx)
-{
-   int count=ArraySize(arr);
-   if(idx<0 || idx>=count) return;
-   for(int i=idx;i<count-1;i++) arr[i]=arr[i+1];
-   ArrayResize(arr,count-1);
-}
+CTrade   trade;
+string   g_symbol    = "";
+Zone     g_zones[ZONE_MAX];
+int      g_zoneCount = 0;
+datetime g_lastM1Bar = 0;
+datetime g_lastH1Bar = 0;
+int      g_swingLen  = SWING_LEN;
 
-string ZoneId(const OBZone &z)
-{
-   return IntegerToString((long)z.time) + "_" + IntegerToString(z.type);
-}
+//+------------------------------------------------------------------+
+//| Helpers                                                          |
+//+------------------------------------------------------------------+
+bool IsNewBar(const ENUM_TIMEFRAMES period)
+  {
+   datetime t = iTime(g_symbol, period, 0);
+   if(t <= 0) return false;
+   if(period == PERIOD_M1)
+     {
+      if(t == g_lastM1Bar) return false;
+      g_lastM1Bar = t;
+      return true;
+     }
+   if(period == PERIOD_H1)
+     {
+      if(t == g_lastH1Bar) return false;
+      g_lastH1Bar = t;
+      return true;
+     }
+   return false;
+  }
 
-string StateFileName()
-{
-   return "AnnaBot_" + _Symbol + ".state";
-}
+double ATR_H1(MqlRates &r[], const int index, const int length)
+  {
+   if(length < 1 || index - length + 1 < 1) return 0.0;
+   double sum = 0.0;
+   for(int k = index - length + 1; k <= index; k++)
+     {
+      double a = r[k].high - r[k].low;
+      double b = MathAbs(r[k].high - r[k-1].close);
+      double c = MathAbs(r[k].low  - r[k-1].close);
+      sum += MathMax(a, MathMax(b, c));
+     }
+   return sum / (double)length;
+  }
 
-void SaveState()
-{
-   int fh=FileOpen(StateFileName(),FILE_WRITE|FILE_CSV|FILE_ANSI,';');
-   if(fh==INVALID_HANDLE) return;
-   // Reverse order pairs with AddFront during loading, preserving newest-first arrays.
-   for(int i=ArraySize(gBull)-1;i>=0;i--)
-   {
-      OBZone z=gBull[i];
-      FileWrite(fh,"OB",IntegerToString(z.type),DoubleToString(z.top,_Digits),DoubleToString(z.bottom,_Digits),DoubleToString(z.mid,_Digits),IntegerToString((long)z.time),IntegerToString(z.volume));
-   }
-   for(int i=ArraySize(gBear)-1;i>=0;i--)
-   {
-      OBZone z=gBear[i];
-      FileWrite(fh,"OB",IntegerToString(z.type),DoubleToString(z.top,_Digits),DoubleToString(z.bottom,_Digits),DoubleToString(z.mid,_Digits),IntegerToString((long)z.time),IntegerToString(z.volume));
-   }
-   FileWrite(fh,"ST","EXT",DoubleToString(gExt.upaxis,_Digits),DoubleToString(gExt.dnaxis,_Digits),IntegerToString(gExt.moving),IntegerToString(gExt.upFlag),IntegerToString(gExt.dnFlag),IntegerToString(gExt.intra),IntegerToString((long)gExt.upTime),IntegerToString((long)gExt.dnTime),IntegerToString(gExt.lastDir),IntegerToString((long)gExt.lastTime));
-   FileWrite(fh,"ST","INT",DoubleToString(gInt.upaxis,_Digits),DoubleToString(gInt.dnaxis,_Digits),IntegerToString(gInt.moving),IntegerToString(gInt.upFlag),IntegerToString(gInt.dnFlag),IntegerToString(gInt.intra),IntegerToString((long)gInt.upTime),IntegerToString((long)gInt.dnTime),IntegerToString(gInt.lastDir),IntegerToString((long)gInt.lastTime));
-   FileWrite(fh,"DIR",IntegerToString(gOBDir));
-   FileClose(fh);
-}
-
-void LoadState()
-{
-   int fh=FileOpen(StateFileName(),FILE_READ|FILE_CSV|FILE_ANSI,';');
-   if(fh==INVALID_HANDLE) return;
-   ArrayResize(gBull,0); ArrayResize(gBear,0);
-   while(!FileIsEnding(fh))
-   {
-      string tag=FileReadString(fh);
-      if(FileIsEnding(fh) && tag=="") break;
-      if(tag=="OB")
-      {
-         OBZone z;
-         z.type=(int)StringToInteger(FileReadString(fh));
-         z.top=StringToDouble(FileReadString(fh));
-         z.bottom=StringToDouble(FileReadString(fh));
-         z.mid=StringToDouble(FileReadString(fh));
-         z.time=(datetime)StringToInteger(FileReadString(fh));
-         z.volume=(long)StringToInteger(FileReadString(fh));
-         if(z.type==1) AddFront(gBull,z); else if(z.type==-1) AddFront(gBear,z);
-      }
-      else if(tag=="ST")
-      {
-         string layer=FileReadString(fh);
-         double up=StringToDouble(FileReadString(fh));
-         double dn=StringToDouble(FileReadString(fh));
-         int moving=(int)StringToInteger(FileReadString(fh));
-         int upFlag=(int)StringToInteger(FileReadString(fh));
-         int dnFlag=(int)StringToInteger(FileReadString(fh));
-         int intra=(int)StringToInteger(FileReadString(fh));
-         datetime upTime=(datetime)StringToInteger(FileReadString(fh));
-         datetime dnTime=(datetime)StringToInteger(FileReadString(fh));
-         int lastDir=(int)StringToInteger(FileReadString(fh));
-         datetime lastTime=(datetime)StringToInteger(FileReadString(fh));
-         if(layer=="EXT") { gExt.upaxis=up; gExt.dnaxis=dn; gExt.moving=moving; gExt.upFlag=upFlag; gExt.dnFlag=dnFlag; gExt.intra=intra; gExt.upTime=upTime; gExt.dnTime=dnTime; gExt.lastDir=lastDir; gExt.lastTime=lastTime; }
-         else if(layer=="INT") { gInt.upaxis=up; gInt.dnaxis=dn; gInt.moving=moving; gInt.upFlag=upFlag; gInt.dnFlag=dnFlag; gInt.intra=intra; gInt.upTime=upTime; gInt.dnTime=dnTime; gInt.lastDir=lastDir; gInt.lastTime=lastTime; }
-      }
-      else if(tag=="DIR") gOBDir=(int)StringToInteger(FileReadString(fh));
-      else
-      {
-         // Unknown tags are ignored through the end of their CSV record.
-         while(!FileIsEnding(fh) && !FileIsLineEnding(fh)) FileReadString(fh);
-      }
-   }
-   FileClose(fh);
-}
-
-double TrueRangeAt(const MqlRates &r[], int i, int n)
-{
-   if(i<0 || i+1>=n) return 0.0;
-   double priorClose=r[i+1].close;
-   double a=r[i].high-r[i].low;
-   double b=MathAbs(r[i].high-priorClose);
-   double c=MathAbs(r[i].low-priorClose);
-   return MathMax(a,MathMax(b,c));
-}
-
-double WilderATR(const MqlRates &r[], int period, int n)
-{
-   if(period<=0 || n<period+2) return 0.0;
-   // Series bars 1..n-2 are closed bars with an available previous close.
-   double seed=0.0;
-   for(int k=0;k<period;k++)
-   {
-      int idx=n-2-k;
-      seed+=TrueRangeAt(r,idx,n);
-   }
-   double atr=seed/period;
-   for(int idx=n-2-period;idx>=1;idx--)
-      atr=(atr*(period-1)+TrueRangeAt(r,idx,n))/period;
-   return atr;
-}
-
-bool IsVolumePivotHigh(const MqlRates &r[], int idx, int len, int n)
-{
-   if(len<1 || idx-len<0 || idx+len>=n) return false;
-   for(int k=1;k<=len;k++)
-      if(r[idx].tick_volume<=r[idx-k].tick_volume || r[idx].tick_volume<=r[idx+k].tick_volume) return false;
+bool IsPivotHigh(MqlRates &r[], const int j, const int length)
+  {
+   if(length < 1) return false;
+   if(j - length < 0 || j + length >= ArraySize(r)) return false;
+   for(int k = 1; k <= length; k++)
+      if(r[j].high <= r[j-k].high || r[j].high < r[j+k].high) return false;
    return true;
-}
+  }
 
-void RemoveOrdersForZoneId(const string zid)
-{
-   for(int i=OrdersTotal()-1;i>=0;i--)
-   {
-      ulong ticket=OrderGetTicket(i);
-      if(ticket==0) continue;
-      if(OrderGetString(ORDER_SYMBOL)==_Symbol && (long)OrderGetInteger(ORDER_MAGIC)==InpMagic && OrderGetString(ORDER_COMMENT)==zid)
-         gTrade.OrderDelete(ticket);
-   }
-}
+bool IsPivotLow(MqlRates &r[], const int j, const int length)
+  {
+   if(length < 1) return false;
+   if(j - length < 0 || j + length >= ArraySize(r)) return false;
+   for(int k = 1; k <= length; k++)
+      if(r[j].low >= r[j-k].low || r[j].low > r[j+k].low) return false;
+   return true;
+  }
 
-bool ZoneMitigated(const OBZone &z, const MqlRates &r[], int fromBar, int toBar, int n)
-{
-   if(fromBar<0) fromBar=0;
-   if(toBar>=n) toBar=n-1;
-   for(int j=fromBar;j<=toBar;j++)
-   {
-      if(r[j].time==z.time) continue; // Do not mitigate a zone on its own formation bar.
-      if(z.type==1)
-      {
-         // MIT_WICK implements the user's "wick-or-body touch consumes the OB" rule; an exact boundary touch counts.
-         if(InpMitigation==MIT_WICK && r[j].low<=z.bottom) return true;
-         if(InpMitigation==MIT_CLOSE && MathMin(r[j].open,r[j].close)<z.bottom) return true;
-         if(InpMitigation==MIT_AVG && r[j].low<z.mid) return true;
-      }
-      else if(z.type==-1)
-      {
-         // Exact boundary touch also consumes bearish zones in wick mode.
-         if(InpMitigation==MIT_WICK && r[j].high>=z.top) return true;
-         if(InpMitigation==MIT_CLOSE && MathMax(r[j].open,r[j].close)>z.top) return true;
-         if(InpMitigation==MIT_AVG && r[j].high>z.mid) return true;
-      }
-   }
-   return false;
-}
+//--- carry the consumption state across H1 rebuilds: never re-arm
+int WasZoneState(Zone &oldZones[], const int oldCount, const datetime t, const bool bull)
+  {
+   for(int q = 0; q < oldCount; q++)
+      if(oldZones[q].startTime == t && oldZones[q].bullish == bull)
+         return oldZones[q].state;
+   return Z_ARMED;
+  }
 
-void MitigateList(OBZone &arr[], const MqlRates &r[], int n, int fromBar, int toBar)
-{
-   for(int i=ArraySize(arr)-1;i>=0;i--)
-   {
-      if(ZoneMitigated(arr[i],r,fromBar,toBar,n))
-      {
-         RemoveOrdersForZoneId(ZoneId(arr[i]));
-         RemoveAtIdx(arr,i);
-         gChanged=true;
-      }
-   }
-}
+void AddZone(const double top, const double bottom, const datetime start,
+             const bool bull, Zone &oldZones[], const int oldCount)
+  {
+   if(top < bottom || top <= 0.0 || bottom <= 0.0) return;
+   if(g_zoneCount >= ZONE_MAX)
+     {
+      for(int q = 1; q < g_zoneCount; q++) g_zones[q-1] = g_zones[q];
+      g_zoneCount--;
+     }
+   g_zones[g_zoneCount].top       = top;
+   g_zones[g_zoneCount].bottom    = bottom;
+   g_zones[g_zoneCount].average   = (top + bottom) * 0.5;
+   g_zones[g_zoneCount].startTime = start;
+   g_zones[g_zoneCount].bullish   = bull;
+   g_zones[g_zoneCount].state     = WasZoneState(oldZones, oldCount, start, bull);
+   g_zoneCount++;
+  }
 
-void RemoveOverlaps(OBZone &arr[])
-{
-   if(ArraySize(arr)<2) return;
-   OBZone c=arr[0];
-   for(int i=ArraySize(arr)-1;i>=1;i--)
-   {
-      OBZone z=arr[i];
-      bool hit=(z.bottom>c.bottom && z.bottom<c.top)
-            || (z.top<c.top && z.bottom>c.bottom)
-            || (z.top>c.top && z.bottom<c.bottom)
-            || (z.top<c.top && z.top>c.bottom);
-      if(hit) RemoveAtIdx(arr,i);
-   }
-}
+//+------------------------------------------------------------------+
+//| H1 zones                                                         |
+//+------------------------------------------------------------------+
+void BuildZones()
+  {
+   Zone oldZones[ZONE_MAX];
+   int oldCount = g_zoneCount;
+   if(oldCount > ZONE_MAX) oldCount = ZONE_MAX;
+   for(int q = 0; q < oldCount; q++) oldZones[q] = g_zones[q];
+   g_zoneCount = 0;
 
-void DrawStructureLine(const string prefix, const string label, datetime t1, double price, int dir)
-{
-   if(!InpDrawStructure) return;
-   string name="Anna_"+prefix+"_"+IntegerToString((long)t1)+"_"+label;
-   if(ObjectFind(0,name)>=0) return;
-   color lineColor=(dir>0 ? clrLime : clrTomato);
-   if(ObjectCreate(0,name,OBJ_TREND,0,t1,price,TimeCurrent(),price))
-   {
-      ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_DASH);
-      ObjectSetInteger(0,name,OBJPROP_RAY_RIGHT,true);
-      ObjectSetInteger(0,name,OBJPROP_COLOR,lineColor);
-      ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
-   }
-   string textName=name+"_text";
-   if(ObjectCreate(0,textName,OBJ_TEXT,0,t1,price))
-   {
-      ObjectSetString(0,textName,OBJPROP_TEXT,label);
-      ObjectSetInteger(0,textName,OBJPROP_COLOR,lineColor);
-      ObjectSetInteger(0,textName,OBJPROP_FONTSIZE,8);
-      if(ObjectFind(0,textName)>=0) ObjectSetInteger(0,textName,OBJPROP_ANCHOR,ANCHOR_LEFT);
-   }
-}
+   MqlRates r[];
+   ArraySetAsSeries(r, false);
+   int copied = CopyRates(g_symbol, PERIOD_H1, 0, 300, r);
+   if(copied <= 3 * OB_LEN + 2)
+     {
+      Print("BuildZones: insufficient H1 history.");
+      return;
+     }
 
-void ResetLayer(StructureLayer &s, int sens)
-{
-   s.sens=sens; s.intra=0; s.moving=0; s.upFlag=0; s.dnFlag=0;
-   s.upaxis=0.0; s.dnaxis=0.0; s.upTime=0; s.dnTime=0; s.lastDir=0; s.lastTime=0;
-}
+   int last = copied - 2;          // last closed H1 bar
+   int direction = 0;
 
-void ProcessOB(const MqlRates &r[], int n)
-{
-   if(n<2*InpOBLen+3) return;
-   int len=InpOBLen;
-   gATR=WilderATR(r,len,n);
-   double hi=r[1].high, lo=r[1].low;
-   for(int i=1;i<=len;i++) { hi=MathMax(hi,r[i].high); lo=MathMin(lo,r[i].low); }
-   int oldDir=gOBDir;
-   if(r[len].high>hi) gOBDir=-1;
-   else if(r[len].low<lo) gOBDir=1;
-   if(gOBDir!=oldDir) gChanged=true;
-   if(IsVolumePivotHigh(r,len,len,n) && gOBDir!=0)
-   {
-      double btmP,topP;
-      if(InpOBMode==OB_MODE_LENGTH)
-      {
-         btmP=MathMax(r[len].high-gATR,r[len].low);
-         topP=MathMin(r[len].low+gATR,r[len].high);
-      }
-      else { btmP=r[len].low; topP=r[len].high; }
-      OBZone z; z.time=r[len].time; z.volume=(long)r[len].tick_volume;
-      if(gOBDir==1) { z.type=1; z.top=topP; z.bottom=r[len].low; }
-      else { z.type=-1; z.top=r[len].high; z.bottom=btmP; }
-      z.mid=(z.top+z.bottom)/2.0;
-      if(z.top>z.bottom)
-      {
-         if(z.type==1) AddFront(gBull,z); else AddFront(gBear,z);
-         gChanged=true;
-      }
-   }
-   // Evaluate closed bars only; ZoneMitigated excludes the zone's own formation bar.
-   MitigateList(gBull,r,n,1,len);
-   MitigateList(gBear,r,n,1,len);
-   if(InpOverlap) { RemoveOverlaps(gBull); RemoveOverlaps(gBear); }
-}
+   for(int i = 0; i <= last; i++)
+     {
+      if(i >= OB_LEN * 3 - 1)
+        {
+         int target = i - OB_LEN;
+         double highest = r[target - OB_LEN].high;
+         double lowest  = r[target - OB_LEN].low;
+         for(int x = target - OB_LEN + 1; x < target; x++)
+           {
+            if(r[x].high > highest) highest = r[x].high;
+            if(r[x].low  < lowest ) lowest  = r[x].low;
+           }
+         if(r[target].high > highest)      direction = -1;
+         else if(r[target].low < lowest)   direction =  1;
+        }
 
-void UpdateLayer(StructureLayer &s, const MqlRates &r[], int n, bool enabled, const string prefix)
-{
-   if(!enabled) return;
-   int L=s.sens; if(n<L+4) return;
-   double up=r[1].high, dn=r[1].low;
-   for(int i=2;i<=L;i++) { up=MathMax(up,r[i].high); dn=MathMin(dn,r[i].low); }
-   double cHi=r[L+1].high, cLo=r[L+1].low;
-   int prevIntra=s.intra;
-   if(cHi>up) s.intra=0; else if(cLo<dn) s.intra=1;
-   double topSwing=(s.intra==0 && prevIntra!=0) ? cHi : 0.0;
-   double botSwing=(s.intra==1 && prevIntra!=1) ? cLo : 0.0;
-   if(topSwing!=0.0) { s.upaxis=topSwing; s.upFlag=1; s.upTime=r[L+1].time; gChanged=true; }
-   if(botSwing!=0.0) { s.dnaxis=botSwing; s.dnFlag=1; s.dnTime=r[L+1].time; gChanged=true; }
-   double prevClose=r[2].close, close=r[1].close;
-   if(s.upFlag!=0 && prevClose<=s.upaxis && close>s.upaxis)
-   {
-      string label=(s.moving<0 ? "CHoCH" : "BoS");
-      if(label=="CHoCH") { s.lastDir=1; s.lastTime=r[1].time; }
-      DrawStructureLine(prefix,label,s.upTime,s.upaxis,1);
-      s.upFlag=0; s.moving=1; gChanged=true;
-   }
-   if(s.dnFlag!=0 && prevClose>=s.dnaxis && close<s.dnaxis)
-   {
-      string label=(s.moving>0 ? "CHoCH" : "BoS");
-      if(label=="CHoCH") { s.lastDir=-1; s.lastTime=r[1].time; }
-      DrawStructureLine(prefix,label,s.dnTime,s.dnaxis,-1);
-      s.dnFlag=0; s.moving=-1; gChanged=true;
-   }
-   // Labels are one-time consumed via upFlag/dnFlag reset (Pine "upside"/"downside" flags).
-}
+      //--- invalidate zones violated by a closed body
+      double bodyLow  = MathMin(r[i].open, r[i].close);
+      double bodyHigh = MathMax(r[i].open, r[i].close);
+      for(int z = g_zoneCount - 1; z >= 0; z--)
+        {
+         bool remove = ( g_zones[z].bullish && bodyLow  < g_zones[z].bottom) ||
+                       (!g_zones[z].bullish && bodyHigh > g_zones[z].top);
+         if(remove)
+           {
+            for(int m = z + 1; m < g_zoneCount; m++) g_zones[m-1] = g_zones[m];
+            g_zoneCount--;
+           }
+        }
 
-bool IsCHoCHActive(int dir)
-{
-   return (InpShowExt && gExt.lastDir==dir) || (InpShowInt && gInt.lastDir==dir);
-}
+      int j = i - OB_LEN;
+      if(j < OB_LEN || j + OB_LEN > i || direction == 0) continue;
 
-bool HasPositionOrOrder(void)
-{
-   if(!InpOnePositionPerSymbol) return false;
-   for(int i=PositionsTotal()-1;i>=0;i--)
-   {
-      if(PositionGetSymbol(i)==_Symbol && (long)PositionGetInteger(POSITION_MAGIC)==InpMagic) return true;
-   }
-   for(int j=OrdersTotal()-1;j>=0;j--)
-   {
-      ulong ticket=OrderGetTicket(j);
-      if(ticket!=0 && OrderGetString(ORDER_SYMBOL)==_Symbol && (long)OrderGetInteger(ORDER_MAGIC)==InpMagic) return true;
-   }
-   return false;
-}
+      bool pivot = true;
+      for(int k = 1; k <= OB_LEN; k++)
+        {
+         if(r[j].tick_volume <= r[j-k].tick_volume ||
+            r[j].tick_volume <  r[j+k].tick_volume)
+           { pivot = false; break; }
+        }
+      if(!pivot) continue;
 
-// Adjustable placeholder execution layer: currently demonstrates bullish OB entries only.
-void ExecutePlaceholder(const MqlRates &r[], int n)
-{
-   if(n<InpOBLen+4) return;
-   if(HasPositionOrOrder()) return;
-   if(InpMaxSpread>0 && (int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD)>InpMaxSpread) return;
-   if(InpUseCHoCHFilter && !IsCHoCHActive(1)) return;
-   if(ArraySize(gBull)==0) return;
-   OBZone z=gBull[0];
-   double ask=SymbolInfoDouble(_Symbol,SYMBOL_ASK); if(ask<=0) return;
-   if(ask<z.bottom || ask>z.top) return;
-   double atr=gATR; if(atr<=0) atr=WilderATR(r,InpOBLen,n);
-   double sl=NormalizeDouble(z.bottom-InpSLBufferATR*atr,_Digits);
-   double entry=InpUseLimit ? NormalizeDouble(z.mid,_Digits) : ask;
-   if(InpUseLimit && entry>=ask) return;
-   double tp=NormalizeDouble(entry+(entry-sl)*InpRR,_Digits);
-   string zid=ZoneId(z);
-   gTrade.SetExpertMagicNumber(InpMagic); gTrade.SetDeviationInPoints(InpSlippage);
-   if(InpUseLimit) gTrade.BuyLimit(InpLots,entry,_Symbol,sl,tp,ORDER_TIME_GTC,0,zid);
-   else gTrade.Buy(InpLots,_Symbol,0.0,sl,tp,zid);
-}
+      double atr = ATR_H1(r, j, OB_LEN);
+      if(atr <= 0.0) continue;
 
+      if(direction == 1)
+        {
+         double top = MathMin(r[j].low + atr, r[j].high);
+         AddZone(top, r[j].low, r[j].time, true, oldZones, oldCount);
+        }
+      else
+        {
+         double bottom = MathMax(r[j].high - atr, r[j].low);
+         AddZone(r[j].high, bottom, r[j].time, false, oldZones, oldCount);
+        }
+     }
+
+   Print("BuildZones: active zones=", g_zoneCount);
+  }
+
+//+------------------------------------------------------------------+
+//| Zone reaction (first touch consumes the zone permanently)        |
+//+------------------------------------------------------------------+
+bool ZoneInteracts(const Zone &z, const double lo, const double hi, const double cl)
+  {
+   return ((lo <= z.top && hi >= z.bottom) || (cl >= z.bottom && cl <= z.top));
+  }
+
+//+------------------------------------------------------------------+
+//| M1 CHoCH detection                                               |
+//+------------------------------------------------------------------+
+bool DetectM1Signal(int &side, bool &isChoch, double &barLow, double &barHigh,
+                    int &signalIndex, double &axisLevel, MqlRates &rates[])
+  {
+   side = 0; isChoch = false; barLow = 0.0; barHigh = 0.0;
+   signalIndex = -1; axisLevel = 0.0;
+
+   ArraySetAsSeries(rates, false);
+   int need = 4 * g_swingLen + 10;
+   int copied = CopyRates(g_symbol, PERIOD_M1, 0, need, rates);
+   if(copied < 2 * g_swingLen + 4) return false;
+
+   int last   = copied - 2;             // newest closed M1 bar
+   int startI = last - g_swingLen;      // last bar where a pivot can be confirmed
+   double upAxis = 0.0, dnAxis = 0.0;
+   bool upArmed = false, dnArmed = false;
+   int moving = 0;                      // -1 = last break was bearish, +1 bullish
+
+   for(int i = 0; i < startI; i++)
+     {
+      int j = i - g_swingLen;
+      if(j >= g_swingLen)
+        {
+         if(IsPivotHigh(rates, j, g_swingLen)) { upAxis = rates[j].high; upArmed = true; }
+         if(IsPivotLow (rates, j, g_swingLen)) { dnAxis = rates[j].low;  dnArmed = true; }
+        }
+      if(i > 0 && upArmed && rates[i-1].close <= upAxis && rates[i].close > upAxis)
+        { moving = 1;  upArmed = false; }
+      else if(i > 0 && dnArmed && rates[i-1].close >= dnAxis && rates[i].close < dnAxis)
+        { moving = -1; dnArmed = false; }
+     }
+
+   int jp = startI - g_swingLen;
+   if(jp >= g_swingLen)
+     {
+      if(IsPivotHigh(rates, jp, g_swingLen)) { upAxis = rates[jp].high; upArmed = true; }
+      if(IsPivotLow (rates, jp, g_swingLen)) { dnAxis = rates[jp].low;  dnArmed = true; }
+     }
+
+   int i = last;
+   if(upArmed && upAxis > 0.0 && rates[i-1].close <= upAxis && rates[i].close > upAxis)
+     {
+      side = 1; axisLevel = upAxis; isChoch = (moving < 0);
+     }
+   else if(dnArmed && dnAxis > 0.0 && rates[i-1].close >= dnAxis && rates[i].close < dnAxis)
+     {
+      side = -1; axisLevel = dnAxis; isChoch = (moving > 0);
+     }
+
+   if(side == 0) return false;
+   if(InpRequireCHoCH && !isChoch) return false;
+
+   barLow      = rates[last].low;
+   barHigh     = rates[last].high;
+   signalIndex = last;
+   return true;
+  }
+
+double CalcTP(const int side, const double entry, const double sl)
+  {
+   double distance = MathAbs(entry - sl);
+   double tp = (side > 0 ? entry + InpRR * distance : entry - InpRR * distance);
+   return NormalizeDouble(tp, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS));
+  }
+
+double NormalizeLots(const double requested)
+  {
+   double minimum = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
+   double maximum = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MAX);
+   double step    = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
+   if(step <= 0.0) step = minimum;
+   double lots = MathMax(minimum, MathMin(maximum, requested));
+   lots = MathFloor(lots / step + 0.5) * step;
+   int digits = 0;
+   double test = step;
+   while(digits < 8 && MathAbs(test - MathRound(test)) > 1e-8)
+     { test *= 10.0; digits++; }
+   return NormalizeDouble(MathMax(minimum, MathMin(maximum, lots)), digits);
+  }
+
+int CountOwnPositions()
+  {
+   int count = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) == g_symbol &&
+         (ulong)PositionGetInteger(POSITION_MAGIC) == InpMagic) count++;
+     }
+   return count;
+  }
+
+//+------------------------------------------------------------------+
+//| Entry                                                            |
+//+------------------------------------------------------------------+
+void TryEntry()
+  {
+   MqlRates m1[];
+   int side = 0, signalIndex = -1;
+   bool choch = false;
+   double barLow = 0.0, barHigh = 0.0, axisLevel = 0.0;
+   if(!DetectM1Signal(side, choch, barLow, barHigh, signalIndex, axisLevel, m1)) return;
+   if(InpMaxOpenTrades > 0 && CountOwnPositions() >= InpMaxOpenTrades) return;
+
+   double closePrice = m1[signalIndex].close;
+
+   //--- find the first matching zone that has NOT reacted yet
+   int zoneIndex = -1;
+   for(int z = 0; z < g_zoneCount; z++)
+     {
+      if(g_zones[z].bullish != (side > 0)) continue;
+      if(InpOneTradePerZone && g_zones[z].state != Z_ARMED) continue;
+      if(!ZoneInteracts(g_zones[z], barLow, barHigh, closePrice)) continue;
+      if(side > 0 && barLow  > g_zones[z].top)    continue;
+      if(side < 0 && barHigh < g_zones[z].bottom) continue;
+      zoneIndex = z;
+      break;
+     }
+   if(zoneIndex < 0) return;
+
+   //--- first reaction: consume the zone before anything else can use it
+   if(InpOneTradePerZone)
+     {
+      g_zones[zoneIndex].state = Z_CONSUMED;
+      Print("Zone consumed on first reaction: ", TimeToString(g_zones[zoneIndex].startTime),
+            " dir=", (g_zones[zoneIndex].bullish ? "bull" : "bear"));
+     }
+
+   MqlTick tick;
+   if(!SymbolInfoTick(g_symbol, tick)) return;
+   double entry = (side > 0 ? tick.ask : tick.bid);
+   double sl = NormalizeDouble(axisLevel, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS));
+   if((side > 0 && sl >= entry) || (side < 0 && sl <= entry))
+     {
+      Print("Signal skipped: invalid SL side (axis=", DoubleToString(sl, _Digits), ").");
+      return;
+     }
+
+   double tp    = CalcTP(side, entry, sl);
+   double lots  = NormalizeLots(InpLots);
+   string comment = (side > 0 ? "AnnaBot-L" : "AnnaBot-S");
+
+   bool sent = (side > 0 ? trade.Buy (lots, g_symbol, 0.0, sl, tp, comment)
+                         : trade.Sell(lots, g_symbol, 0.0, sl, tp, comment));
+
+   if(sent && (trade.ResultRetcode() == TRADE_RETCODE_DONE ||
+               trade.ResultRetcode() == TRADE_RETCODE_PLACED))
+      Print("Trade opened: ", comment, " lots=", DoubleToString(lots, 2),
+            " SL(axis)=", DoubleToString(sl, _Digits), " TP=", DoubleToString(tp, _Digits),
+            " zone=", TimeToString(g_zones[zoneIndex].startTime));
+   else
+      Print("Trade failed: retcode=", trade.ResultRetcode(), " ",
+            trade.ResultRetcodeDescription());
+  }
+
+//+------------------------------------------------------------------+
 int OnInit()
-{
-   if(InpOBLen<1 || InpOBLen>20) return INIT_PARAMETERS_INCORRECT;
-   if(InpExtSens<2 || InpIntSens<2) return INIT_PARAMETERS_INCORRECT;
-   if(InpLots<=0 || InpRR<=0) return INIT_PARAMETERS_INCORRECT;
-   ResetLayer(gExt,InpExtSens); ResetLayer(gInt,InpIntSens);
-   LoadState();
-   gTrade.SetExpertMagicNumber(InpMagic); gTrade.SetDeviationInPoints(InpSlippage); gTrade.SetTypeFillingBySymbol(_Symbol);
-   Print("AnnaBot initialized: ",_Symbol," / ",EnumToString(_Period),", OB length=",InpOBLen);
+  {
+   g_symbol = (InpSymbol == "" ? _Symbol : InpSymbol);
+   if(!SymbolSelect(g_symbol, true))
+     {
+      Print("Initialization failed: symbol is unavailable: ", g_symbol);
+      return INIT_FAILED;
+     }
+   if(InpLots <= 0.0 || InpRR <= 0.0 || InpSwingLookback < 1)
+     {
+      Print("Initialization failed: invalid risk inputs.");
+      return INIT_PARAMETERS_INCORRECT;
+     }
+
+   g_swingLen = InpSwingLookback;
+   trade.SetExpertMagicNumber(InpMagic);
+   trade.SetDeviationInPoints(30);
+   if(!trade.SetTypeFillingBySymbol(g_symbol))
+      Print("Warning: unable to set symbol filling mode automatically.");
+
+   g_zoneCount = 0;
+   g_lastM1Bar = 0;
+   g_lastH1Bar = 0;
+
+   Print("AnnaBot v4.00 initialized. Symbol=", g_symbol,
+         " Lots=", DoubleToString(InpLots, 2),
+         " RR=", DoubleToString(InpRR, 2),
+         " Swing=", g_swingLen,
+         " MaxOpen=", InpMaxOpenTrades,
+         " OneTradePerZone=", (InpOneTradePerZone ? "true" : "false"));
    return INIT_SUCCEEDED;
-}
+  }
 
 void OnDeinit(const int reason)
-{
-   SaveState();
-   if(reason==REASON_REMOVE) ObjectsDeleteAll(0,"Anna_",-1,-1);
-}
+  {
+   Print("AnnaBot stopped. Reason=", reason);
+  }
 
 void OnTick()
-{
-   datetime bar=iTime(_Symbol,_Period,0); if(bar==0 || bar==gLastBar) return; gLastBar=bar;
-   MqlRates rates[]; ArraySetAsSeries(rates,true);
-   int need=MathMax(InpMaxBars,MathMax(2*InpExtSens,2*InpIntSens)+3*InpOBLen+10);
-   int n=CopyRates(_Symbol,_Period,0,need,rates); if(n<2*InpOBLen+4) return;
-   ProcessOB(rates,n);
-   UpdateLayer(gExt,rates,n,InpShowExt,"EXT");
-   UpdateLayer(gInt,rates,n,InpShowInt,"INT");
-   ExecutePlaceholder(rates,n);
-   if(gChanged) { SaveState(); gChanged=false; }
-}
+  {
+   if(IsNewBar(PERIOD_H1)) BuildZones();
+   if(IsNewBar(PERIOD_M1)) TryEntry();
+  }
+//+------------------------------------------------------------------+
