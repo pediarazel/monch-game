@@ -1,20 +1,15 @@
-﻿//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //| AnnaBot.mq5  -  v1.11                                             |
 //| H1 Order Block zones + M1 CHoCH entries.                          |
-//| Fixes:                                                            |
-//|  1) CHoCH scan uses the newest closed M1 bar only (no duplicate    |
-//|     signals from whole-history scanning).                          |
-//|  2) M1 swing pivots use SWING_LEN = InpSwingLookback (3), so pivots |
-//|     are actually detected on M1.                                   |
-//|  3) SL = exact break axis of the M1 swing (no buffer, no distance).|
-//|  4) Zone lock: a zone is disabled after its first CHoCH entry and   |
-//|     only re-armed after price leaves and touches it again.         |
-//|  5) BuildZones recalculates direction for each local window.        |
-//|  6) M1 pivots preserve the nearest unbroken pending axis.           |
-//|  7) New-bar detection is initialized and guarded against first tick.|
+//| v1.11 fixes:                                                      |
+//|  1) SL is placed on the CHoCH candle WICK (slAnchor),             |
+//|     NOT on the pivot axis level.                                  |
+//|  2) InpSLBufferPoints: optional extra buffer beyond the wick.     |
+//|  3) Kept from v1.10: newest closed M1 bar only, SWING_LEN from    |
+//|     input, zone lock / re-arm logic.                              |
 //+------------------------------------------------------------------+
 #property version   "1.11"
-#property description "H1 Order Block zones with M1 CHoCH entries, axis SL, zone lock"
+#property description "H1 Order Block zones with M1 CHoCH entries, wick SL, zone lock"
 
 #include <Trade/Trade.mqh>
 
@@ -29,6 +24,7 @@ input group "Risk and execution"
 input double InpLots=0.03;
 input int    InpSwingLookback=3;          // M1 swing length AND pivot length
 input double InpRR=4.0;
+input int    InpSLBufferPoints=0;         // extra points beyond the CHoCH wick
 
 #define ZONE_MAX 200
 #define OB_LEN   5
@@ -60,8 +56,6 @@ bool IsNewBar(const ENUM_TIMEFRAMES period)
   {
    datetime t=iTime(g_symbol,period,0);
    if(t<=0) return false;
-   if(period==PERIOD_M1 && g_lastM1Bar==0) { g_lastM1Bar=t; return false; }
-   if(period==PERIOD_H1 && g_lastH1Bar==0) { g_lastH1Bar=t; return false; }
    if(period==PERIOD_M1)
      {
       if(t==g_lastM1Bar) return false;
@@ -156,9 +150,9 @@ void BuildZones()
       return;
      }
    int last=copied-2;
+   int direction=0;
    for(int i=0;i<=last;i++)
      {
-      int direction=0;
       if(i>=OB_LEN*3-1)
         {
          int target=i-OB_LEN;
@@ -214,12 +208,15 @@ void BuildZones()
 
 //+------------------------------------------------------------------+
 //| M1 signal: only the newest CLOSED bar may break an armed axis.    |
-//| axisLevel is the exact broken swing level -> used directly as SL. |
+//| axisLevel  = broken swing level (detection only).                 |
+//| slAnchor   = wick of the CHoCH candle (low for buy, high for sell)|
 //+------------------------------------------------------------------+
 bool DetectM1Signal(int &side,bool &isChoch,double &barLow,double &barHigh,
-                    int &signalIndex,double &axisLevel,MqlRates &rates[])
+                    int &signalIndex,double &axisLevel,double &slAnchor,
+                    MqlRates &rates[])
   {
-   side=0; isChoch=false; barLow=0.0; barHigh=0.0; signalIndex=-1; axisLevel=0.0;
+   side=0; isChoch=false; barLow=0.0; barHigh=0.0;
+   signalIndex=-1; axisLevel=0.0; slAnchor=0.0;
    ArraySetAsSeries(rates,false);
    int need=4*g_swingLen+10;
    int copied=CopyRates(g_symbol,PERIOD_M1,0,need,rates);
@@ -237,8 +234,8 @@ bool DetectM1Signal(int &side,bool &isChoch,double &barLow,double &barHigh,
       int j=i-g_swingLen;
       if(j>=g_swingLen)
         {
-         if(IsPivotHigh(rates,j,g_swingLen) && (!upArmed || rates[j].high>upAxis)) { upAxis=rates[j].high; upArmed=true; }
-         if(IsPivotLow (rates,j,g_swingLen) && (!dnArmed || rates[j].low<dnAxis)) { dnAxis=rates[j].low;  dnArmed=true; }
+         if(IsPivotHigh(rates,j,g_swingLen)) { upAxis=rates[j].high; upArmed=true; }
+         if(IsPivotLow (rates,j,g_swingLen)) { dnAxis=rates[j].low;  dnArmed=true; }
         }
       if(i>0 && upArmed && rates[i-1].close<=upAxis && rates[i].close>upAxis)
         { moving=1;  upArmed=false; }
@@ -250,18 +247,20 @@ bool DetectM1Signal(int &side,bool &isChoch,double &barLow,double &barHigh,
    int j=startI-g_swingLen;
    if(j>=g_swingLen)
      {
-      if(IsPivotHigh(rates,j,g_swingLen) && (!upArmed || rates[j].high>upAxis)) { upAxis=rates[j].high; upArmed=true; }
-      if(IsPivotLow (rates,j,g_swingLen) && (!dnArmed || rates[j].low<dnAxis)) { dnAxis=rates[j].low;  dnArmed=true; }
+      if(IsPivotHigh(rates,j,g_swingLen)) { upAxis=rates[j].high; upArmed=true; }
+      if(IsPivotLow (rates,j,g_swingLen)) { dnAxis=rates[j].low;  dnArmed=true; }
      }
 
    int i=last;
    if(upArmed && upAxis>0.0 && rates[i-1].close<=upAxis && rates[i].close>upAxis)
      {
       side=1; axisLevel=upAxis; isChoch=(moving<0);
+      slAnchor=rates[i].low;          // wick of the CHoCH candle
      }
    else if(dnArmed && dnAxis>0.0 && rates[i-1].close>=dnAxis && rates[i].close<dnAxis)
      {
       side=-1; axisLevel=dnAxis; isChoch=(moving>0);
+      slAnchor=rates[i].high;         // wick of the CHoCH candle
      }
 
    if(side==0) return false;
@@ -342,8 +341,8 @@ void TryEntry()
    MqlRates m1[];
    int side=0,signalIndex=-1;
    bool choch=false;
-   double barLow=0.0,barHigh=0.0,axisLevel=0.0;
-   if(!DetectM1Signal(side,choch,barLow,barHigh,signalIndex,axisLevel,m1)) return;
+   double barLow=0.0,barHigh=0.0,axisLevel=0.0,slAnchor=0.0;
+   if(!DetectM1Signal(side,choch,barLow,barHigh,signalIndex,axisLevel,slAnchor,m1)) return;
    if(InpMaxOpenTrades>0 && CountOwnPositions()>=InpMaxOpenTrades) return;
 
    double closePrice=m1[signalIndex].close;
@@ -362,9 +361,20 @@ void TryEntry()
    MqlTick tick;
    if(!SymbolInfoTick(g_symbol,tick)) return;
    double entry=(side>0 ? tick.ask : tick.bid);
-   double sl=NormalizeDouble(axisLevel,(int)SymbolInfoInteger(g_symbol,SYMBOL_DIGITS));
+
+   // SL on the CHoCH candle wick (+ optional buffer in points).
+   double point=SymbolInfoDouble(g_symbol,SYMBOL_POINT);
+   double buffer=InpSLBufferPoints*point;
+   double sl=(side>0 ? slAnchor-buffer : slAnchor+buffer);
+   sl=NormalizeDouble(sl,(int)SymbolInfoInteger(g_symbol,SYMBOL_DIGITS));
+
    if((side>0 && sl>=entry) || (side<0 && sl<=entry))
-     { Print("Signal skipped: invalid SL side (axis=",DoubleToString(sl,_Digits),")."); return; }
+     {
+      Print("Signal skipped: invalid SL side (wick=",DoubleToString(slAnchor,_Digits),
+            " axis=",DoubleToString(axisLevel,_Digits),").");
+      return;
+     }
+
    double tp=CalcTP(side,entry,sl);
    double lots=NormalizeLots(InpLots);
    string comment=(side>0 ? "AnnaBot-L" : "AnnaBot-S");
@@ -376,7 +386,7 @@ void TryEntry()
       g_zones[zoneIndex].used=true;
       g_zones[zoneIndex].armed=false;
       Print("Trade opened: ",comment," lots=",DoubleToString(lots,2),
-            " SL(axis)=",DoubleToString(sl,_Digits)," TP=",DoubleToString(tp,_Digits),
+            " SL(wick)=",DoubleToString(sl,_Digits)," TP=",DoubleToString(tp,_Digits),
             " zone=",TimeToString(g_zones[zoneIndex].startTime));
      }
    else
@@ -394,7 +404,7 @@ int OnInit()
       Print("Initialization failed: symbol is unavailable: ",g_symbol);
       return INIT_FAILED;
      }
-   if(InpLots<=0.0 || InpRR<=0.0 || InpSwingLookback<1)
+   if(InpLots<=0.0 || InpRR<=0.0 || InpSwingLookback<1 || InpSLBufferPoints<0)
      {
       Print("Initialization failed: invalid risk inputs.");
       return INIT_PARAMETERS_INCORRECT;
@@ -405,12 +415,11 @@ int OnInit()
    if(!trade.SetTypeFillingBySymbol(g_symbol))
       Print("Warning: unable to set symbol filling mode automatically.");
    g_zoneCount=0;
-   datetime t=iTime(g_symbol,PERIOD_M1,0);
-   if(t>0) g_lastM1Bar=t;
-   t=iTime(g_symbol,PERIOD_H1,0);
-   if(t>0) g_lastH1Bar=t;
+   g_lastM1Bar=0;
+   g_lastH1Bar=0;
    Print("AnnaBot v1.11 initialized. Symbol=",g_symbol," Lots=",DoubleToString(InpLots,2),
-         " RR=",DoubleToString(InpRR,2)," Swing=",g_swingLen," MaxOpen=",InpMaxOpenTrades);
+         " RR=",DoubleToString(InpRR,2)," Swing=",g_swingLen,
+         " SLBuffer=",InpSLBufferPoints," MaxOpen=",InpMaxOpenTrades);
    return INIT_SUCCEEDED;
   }
 
