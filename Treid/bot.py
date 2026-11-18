@@ -52,8 +52,8 @@ struct SZone {
    bool used;
 };
 
-SZone m15_demand_zones[];
-SZone h4_supply_zones[];
+SZone m15_supply_zones[];
+SZone h4_demand_zones[];
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -62,21 +62,20 @@ int OnInit()
 {
    trade.SetExpertMagicNumber(InpMagic);
    
-   // Initialize Ichimoku handles
    handleH4_Ichimoku  = iIchimoku(_Symbol, PERIOD_H4, InpTenkan, InpKijun, InpSenkou);
    handleM15_Ichimoku = iIchimoku(_Symbol, PERIOD_M15, InpTenkan, InpKijun, InpSenkou);
    handleM5_Ichimoku  = iIchimoku(_Symbol, PERIOD_M5, InpTenkan, InpKijun, InpSenkou);
    
    if(handleH4_Ichimoku == INVALID_HANDLE || handleM15_Ichimoku == INVALID_HANDLE || handleM5_Ichimoku == INVALID_HANDLE)
    {
-      Print("[AnnaBot v5] Error creating Ichimoku indicator handles.");
+      Print("[AnnaBot v5 Inverted] Error creating Ichimoku indicator handles.");
       return(INIT_FAILED);
    }
 
-   ArrayResize(m15_demand_zones, 0);
-   ArrayResize(h4_supply_zones, 0);
+   ArrayResize(m15_supply_zones, 0);
+   ArrayResize(h4_demand_zones, 0);
 
-   Print("[AnnaBot v5] Initialized successfully.");
+   Print("[AnnaBot v5 Inverted] Initialized successfully.");
    return(INIT_SUCCEEDED);
 }
 
@@ -109,7 +108,6 @@ bool IsNewBar(ENUM_TIMEFRAMES tf, datetime &lastTime)
 //+------------------------------------------------------------------+
 bool FindSwingHigh(ENUM_TIMEFRAMES tf, int shift, int len, double &swHigh)
 {
-   HighRate:
    if(shift + len >= iBars(_Symbol, tf)) return false;
    double h = iHigh(_Symbol, tf, shift);
    for(int i = 1; i <= len; i++)
@@ -138,45 +136,45 @@ bool FindSwingLow(ENUM_TIMEFRAMES tf, int shift, int len, double &swLow)
 }
 
 //+------------------------------------------------------------------+
-//| Detect Bullish CHoCH                                             |
+//| Detect Bearish CHoCH (Inverted)                                  |
 //+------------------------------------------------------------------+
-bool DetectBullishCHoCH(ENUM_TIMEFRAMES tf, int len, int &chochBarIndex, double &brokenHigh, double &originLow)
+bool DetectBearishCHoCH(ENUM_TIMEFRAMES tf, int len, int &chochBarIndex, double &brokenLow, double &originHigh)
 {
    int totalBars = iBars(_Symbol, tf);
    if(totalBars < 100) return false;
    
-   double lastSH = 0;
-   int shShift = -1;
+   double lastSL = 0;
+   int slShift = -1;
    
-   // Find most recent confirmed swing high
+   // Find most recent confirmed swing low
    for(int i = len + 1; i < 50; i++)
    {
       double val = 0;
-      if(FindSwingHigh(tf, i, len, val))
+      if(FindSwingLow(tf, i, len, val))
       {
-         lastSH = val;
-         shShift = i;
+         lastSL = val;
+         slShift = i;
          break;
       }
    }
    
-   if(shShift < 0) return false;
+   if(slShift < 0) return false;
    
-   // Check if any bar from shift 1 to shShift-1 closed above lastSH
-   for(int i = shShift - 1; i >= 1; i--)
+   // Check if any bar from shift 1 to slShift-1 closed below lastSL
+   for(int i = slShift - 1; i >= 1; i--)
    {
-      if(iClose(_Symbol, tf, i) > lastSH)
+      if(iClose(_Symbol, tf, i) < lastSL)
       {
          chochBarIndex = i;
-         brokenHigh = lastSH;
+         brokenLow = lastSL;
          
-         // Origin low is the lowest low between the swing high and the CHoCH bar
-         double minL = iLow(_Symbol, tf, i);
-         for(int j = i; j <= shShift; j++)
+         // Origin high is the highest high between the swing low and the CHoCH bar
+         double maxH = iHigh(_Symbol, tf, i);
+         for(int j = i; j <= slShift; j++)
          {
-            if(iLow(_Symbol, tf, j) < minL) minL = iLow(_Symbol, tf, j);
+            if(iHigh(_Symbol, tf, j) > maxH) maxH = iHigh(_Symbol, tf, j);
          }
-         originLow = minL;
+         originHigh = maxH;
          return true;
       }
    }
@@ -184,9 +182,9 @@ bool DetectBullishCHoCH(ENUM_TIMEFRAMES tf, int len, int &chochBarIndex, double 
 }
 
 //+------------------------------------------------------------------+
-//| Ichimoku Bullish Confirmation (Corrected Senkou Offset)          |
+//| Ichimoku Bearish Confirmation (Inverted)                         |
 //+------------------------------------------------------------------+
-bool CheckIchimokuBullish(ENUM_TIMEFRAMES tf, int handle, int shift)
+bool CheckIchimokuBearish(ENUM_TIMEFRAMES tf, int handle, int shift)
 {
    double tenkan[], kijun[], senkouA[], senkouB[];
    ArraySetAsSeries(tenkan, true);
@@ -194,7 +192,6 @@ bool CheckIchimokuBullish(ENUM_TIMEFRAMES tf, int handle, int shift)
    ArraySetAsSeries(senkouA, true);
    ArraySetAsSeries(senkouB, true);
    
-   // Senkou buffers in MT5 Ichimoku are shifted forward by Kijun periods (InpKijun)
    int dataShift = shift + InpKijun;
    
    if(CopyBuffer(handle, 0, shift, 1, tenkan) <= 0) return false;
@@ -203,15 +200,15 @@ bool CheckIchimokuBullish(ENUM_TIMEFRAMES tf, int handle, int shift)
    if(CopyBuffer(handle, 3, dataShift, 1, senkouB) <= 0) return false;
    
    double c = iClose(_Symbol, tf, shift);
-   double kumoTop = MathMax(senkouA[0], senkouB[0]);
+   double kumoBottom = MathMin(senkouA[0], senkouB[0]);
    
-   // Conditions: Price > Kumo Top, Tenkan > Kijun, Tenkan > Kumo Top
-   if(c > kumoTop && tenkan[0] > kijun[0] && tenkan[0] > kumoTop)
+   // Conditions for Bearish: Price < Kumo Bottom, Tenkan < Kijun, Tenkan < Kumo Bottom
+   if(c < kumoBottom && tenkan[0] < kijun[0] && tenkan[0] < kumoBottom)
    {
       if(InpRequireTimeBreak)
       {
          double oldClose = iClose(_Symbol, tf, shift + InpKijun);
-         if(c <= oldClose) return false; // Temporal violation check
+         if(c >= oldClose) return false;
       }
       return true;
    }
@@ -219,14 +216,13 @@ bool CheckIchimokuBullish(ENUM_TIMEFRAMES tf, int handle, int shift)
 }
 
 //+------------------------------------------------------------------+
-//| Add Demand/Supply Zone                                           |
+//| Add Zone                                                         |
 //+------------------------------------------------------------------+
 void AddZone(SZone &arr[], double top, double bottom, datetime time)
 {
    int size = ArraySize(arr);
    if(size >= InpMaxZones)
    {
-      // Shift array left
       for(int i = 0; i < size - 1; i++) arr[i] = arr[i+1];
       size = InpMaxZones - 1;
       ArrayResize(arr, size);
@@ -246,13 +242,11 @@ bool PriceTouchesZone(ENUM_TIMEFRAMES tf, int shift, const SZone &zone)
    double c = iClose(_Symbol, tf, shift);
    double h = iHigh(_Symbol, tf, shift);
    double l = iLow(_Symbol, tf, shift);
-   
-   // Overlap or close inside
    return ((l <= zone.top && h >= zone.bottom) || (c >= zone.bottom && c <= zone.top));
 }
 
 //+------------------------------------------------------------------+
-//| Calculate Lot Size based on Risk %                               |
+//| Calculate Lot Size                                               |
 //+------------------------------------------------------------------+
 double CalculateLots(double slPoints)
 {
@@ -269,7 +263,6 @@ double CalculateLots(double slPoints)
    if(riskPerLot <= 0) return 0.01;
    
    double lots = riskMoney / riskPerLot;
-   
    double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
    double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
@@ -282,55 +275,53 @@ double CalculateLots(double slPoints)
 }
 
 //+------------------------------------------------------------------+
-//| Get H4 Supply Zone Target (RR between 3 and 5)                   |
+//| Get H4 Demand Zone Target for Sell (Inverted RR 3 to 5)          |
 //+------------------------------------------------------------------+
-bool GetH4SupplyTarget(double entry, double sl, double &outTP, double &outRR)
+bool GetH4DemandTarget(double entry, double sl, double &outTP, double &outRR)
 {
-   double riskDist = entry - sl;
+   double riskDist = sl - entry; // For Sell, SL is above entry
    if(riskDist <= 0) return false;
    
-   double bestSupplyTop = 0;
-   int size = ArraySize(h4_supply_zones);
+   double bestDemandBottom = 0;
+   int size = ArraySize(h4_demand_zones);
    
-   // Find nearest unmitigated H4 supply zone above entry
+   // Find nearest unmitigated H4 demand zone below entry
    for(int i = size - 1; i >= 0; i--)
    {
-      if(!h4_supply_zones[i].used && h4_supply_zones[i].bottom > entry)
+      if(!h4_demand_zones[i].used && h4_demand_zones[i].top < entry)
       {
-         bestSupplyTop = h4_supply_zones[i].bottom; // conservative target at zone bottom
+         bestDemandBottom = h4_demand_zones[i].top; // conservative target at zone top
          break;
       }
    }
    
-   if(bestSupplyTop <= entry)
+   if(bestDemandBottom >= entry || bestDemandBottom == 0)
    {
-      // Fallback if no H4 supply zone stored yet: use InpMinRR * risk
-      outTP = entry + (InpMinRR * riskDist);
+      outTP = entry - (InpMinRR * riskDist);
       outRR = InpMinRR;
       return true;
    }
    
-   double rewardDist = bestSupplyTop - entry;
+   double rewardDist = entry - bestDemandBottom;
    double rr = rewardDist / riskDist;
    
-   if(rr < InpMinRR) return false; // Below min RR, skip trade
+   if(rr < InpMinRR) return false;
    
    if(rr > InpMaxRR)
    {
-      // Clamp TP to Max RR
-      outTP = entry + (InpMaxRR * riskDist);
+      outTP = entry - (InpMaxRR * riskDist);
       outRR = InpMaxRR;
    }
    else
    {
-      outTP = bestSupplyTop;
+      outTP = bestDemandBottom;
       outRR = rr;
    }
    return true;
 }
 
 //+------------------------------------------------------------------+
-//| Count Open Positions for this Magic                              |
+//| Count Open Positions (Sell)                                      |
 //+------------------------------------------------------------------+
 int CountOpenPositions()
 {
@@ -340,7 +331,7 @@ int CountOpenPositions()
       ulong ticket = PositionGetTicket(i);
       if(PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == InpMagic)
       {
-         if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) count++;
+         if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_SELL) count++;
       }
    }
    return count;
@@ -351,101 +342,91 @@ int CountOpenPositions()
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // Check spread filter
    double spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    if(spread > InpMaxSpreadPoints) return;
    
-   // Only allow 1 open position at a time
    if(CountOpenPositions() > 0)
    {
       UpdatePanel("POSITION ACTIVE", 0, 0, 0, 3.0);
       return;
    }
    
-   // --- 1. H4 Bias Check (New H4 bar or periodic check)
+   // --- 1. H4 Bias Check (Bearish)
    if(IsNewBar(PERIOD_H4, lastBarH4))
    {
       int chochBar = 0;
-      double brokenH = 0, originL = 0;
-      if(DetectBullishCHoCH(PERIOD_H4, InpSwingLen, chochBar, brokenH, originL))
+      double brokenL = 0, originH = 0;
+      if(DetectBearishCHoCH(PERIOD_H4, InpSwingLen, chochBar, brokenL, originH))
       {
-         // Add H4 supply zone (from last up leg before CHoCH)
-         double supTop = iHigh(_Symbol, PERIOD_H4, chochBar + 5);
-         double supBot = iLow(_Symbol, PERIOD_H4, chochBar + 1);
-         AddZone(h4_supply_zones, supTop, supBot, iTime(_Symbol, PERIOD_H4, chochBar));
+         double demTop = iHigh(_Symbol, PERIOD_H4, chochBar + 1);
+         double demBot = iLow(_Symbol, PERIOD_H4, chochBar + 5);
+         AddZone(h4_demand_zones, demTop, demBot, iTime(_Symbol, PERIOD_H4, chochBar));
       }
    }
    
-   // --- 2. M15 State & Pullback Check
+   // --- 2. M15 State & Pullback Check (Bearish)
    if(IsNewBar(PERIOD_M15, lastBarM15))
    {
       int chochBarM15 = 0;
-      double brokenHM15 = 0, originLM15 = 0;
+      double brokenLM15 = 0, originHM15 = 0;
       
-      // Check M15 Ichimoku & CHoCH
-      if(CheckIchimokuBullish(PERIOD_M15, handleM15_Ichimoku, 1))
+      if(CheckIchimokuBearish(PERIOD_M15, handleM15_Ichimoku, 1))
       {
-         if(DetectBullishCHoCH(PERIOD_M15, InpSwingLen, chochBarM15, brokenHM15, originLM15))
+         if(DetectBearishCHoCH(PERIOD_M15, InpSwingLen, chochBarM15, brokenLM15, originHM15))
          {
-            // Create M15 demand zone
-            double zoneTop = brokenHM15;
-            double zoneBot = originLM15;
-            AddZone(m15_demand_zones, zoneTop, zoneBot, iTime(_Symbol, PERIOD_M15, chochBarM15));
+            double zoneTop = originHM15;
+            double zoneBot = brokenLM15;
+            AddZone(m15_supply_zones, zoneTop, zoneBot, iTime(_Symbol, PERIOD_M15, chochBarM15));
          }
       }
    }
    
-   // --- 3. M5 Execution Check (Every M5 bar)
+   // --- 3. M5 Execution Check (Sell Setup)
    if(IsNewBar(PERIOD_M5, lastBarM5))
    {
-      // Check M5 Ichimoku
-      if(!CheckIchimokuBullish(PERIOD_M5, handleM5_Ichimoku, 1)) return;
+      if(!CheckIchimokuBearish(PERIOD_M5, handleM5_Ichimoku, 1)) return;
       
-      // Check M5 CHoCH
       int chochBarM5 = 0;
-      double brokenHM5 = 0, originLM5 = 0;
-      if(!DetectBullishCHoCH(PERIOD_M5, InpSwingLen, chochBarM5, brokenHM5, originLM5)) return;
+      double brokenLM5 = 0, originHM5 = 0;
+      if(!DetectBearishCHoCH(PERIOD_M5, InpSwingLen, chochBarM5, brokenLM5, originHM5)) return;
       
-      // Verify price touched an active M15 demand zone
       bool inZone = false;
-      int m15Size = ArraySize(m15_demand_zones);
+      int m15Size = ArraySize(m15_supply_zones);
       for(int i = 0; i < m15Size; i++)
       {
-         if(!m15_demand_zones[i].used && PriceTouchesZone(PERIOD_M5, chochBarM5, m15_demand_zones[i]))
+         if(!m15_supply_zones[i].used && PriceTouchesZone(PERIOD_M5, chochBarM5, m15_supply_zones[i]))
          {
             inZone = true;
-            m15_demand_zones[i].used = true; // Mark zone as tested/used
+            m15_supply_zones[i].used = true;
             break;
          }
       }
       
-      if(!inZone && m15Size > 0) return; // Must respect M15 zone pullback
+      if(!inZone && m15Size > 0) return;
       
-      // Setup Entry, SL and TP
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double sl = originLM5 - (5 * _Point); // SL below M5 swing low origin
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double sl = originHM5 + (5 * _Point); // SL above M5 swing high origin for Sell
       
-      // Validate SL distance
-      double slPoints = (ask - sl) / _Point;
+      double slPoints = (sl - bid) / _Point;
       if(slPoints < InpMinSlPoints || slPoints > InpMaxSlPoints) return;
       
       double tp = 0, rr = 0;
-      if(!GetH4SupplyTarget(ask, sl, tp, rr)) return;
+      if(!GetH4DemandTarget(bid, sl, tp, rr)) return;
       
       double lots = CalculateLots(slPoints);
       
-      // Execute Buy Order
-      if(trade.Buy(lots, _Symbol, ask, sl, tp, "AnnaBot v5 Long"))
+      // Execute Sell Order
+      if(trade.Sell(lots, _Symbol, bid, sl, tp, "AnnaBot v5 Inverted Short"))
       {
-         Print("[AnnaBot v5] Buy order executed successfully. Lots: ", lots, ", SL: ", sl, ", TP: ", tp, ", RR: ", rr);
+         Print("[AnnaBot v5 Inverted] Sell order executed successfully. Lots: ", lots, ", SL: ", sl, ", TP: ", tp, ", RR: ", rr);
       }
       else
       {
-         Print("[AnnaBot v5] Order failed. Error: ", GetLastError());
+         Print("[AnnaBot v5 Inverted] Order failed. Error: ", GetLastError());
       }
    }
    
-   if(InpShowPanel) UpdatePanel("SEARCHING SETUP", 0, 0, 0, 0);
+   if(InpShowPanel) UpdatePanel("SEARCHING SETUP (SHORT)", 0, 0, 0, 0);
 }
 
 //+------------------------------------------------------------------+
@@ -454,13 +435,12 @@ void OnTick()
 void UpdatePanel(string status, double sl, double tp, double rr, double lots)
 {
    string comment = "==============================\n";
-   comment += "       ANNA BOT v5 (MQL5)     \n";
+   comment += "   ANNA BOT v5 INVERTED (SHORT) \n";
    comment += "==============================\n";
    comment += "Status: " + status + "\n";
    comment += "Spread: " + DoubleToString(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD), 0) + " pts\n";
-   comment += "Active Zones M15: " + IntegerToString(ArraySize(m15_demand_zones)) + "\n";
-   comment += "Active Zones H4: " + IntegerToString(ArraySize(h4_supply_zones)) + "\n";
+   comment += "Active Zones M15 Supply: " + IntegerToString(ArraySize(m15_supply_zones)) + "\n";
+   comment += "Active Zones H4 Demand: " + IntegerToString(ArraySize(h4_demand_zones)) + "\n";
    comment += "==============================\n";
    Comment(comment);
 }
-
