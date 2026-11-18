@@ -1,438 +1,466 @@
 //+------------------------------------------------------------------+
-//| AnnaBot.mq5  -  v1.11                                             |
-//| H1 Order Block zones + M1 CHoCH entries.                          |
-//| v1.11 fixes:                                                      |
-//|  1) SL is placed on the CHoCH candle WICK (slAnchor),             |
-//|     NOT on the pivot axis level.                                  |
-//|  2) InpSLBufferPoints: optional extra buffer beyond the wick.     |
-//|  3) Kept from v1.10: newest closed M1 bar only, SWING_LEN from    |
-//|     input, zone lock / re-arm logic.                              |
+//|                                                 AnnaBot_v5.mq5   |
+//|                                  Copyright 2026, Pedram Strategy |
+//|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
-#property version   "1.11"
-#property description "H1 Order Block zones with M1 CHoCH entries, wick SL, zone lock"
+#property copyright "Copyright 2026"
+#property link      "https://www.mql5.com"
+#property version   "5.00"
+#property strict
 
-#include <Trade/Trade.mqh>
+#include <Trade\Trade.mqh>
+CTrade trade;
 
-input group "General"
-input string InpSymbol="EURUSD_o";
-input ulong  InpMagic=51425001;
-input int    InpMaxOpenTrades=0;          // 0 = unlimited
-input bool   InpOneTradePerZone=true;     // zone lock
-input bool   InpRequireCHoCH=true;
+//--- Inputs
+input group "=== Risk & Money Management ==="
+input double   InpRiskPercent    = 2.0;       // Risk Percent per Trade
+input double   InpMinRR          = 3.0;       // Minimum Risk-to-Reward (RR)
+input double   InpMaxRR          = 5.0;       // Maximum Risk-to-Reward (RR - Clamped)
+input ulong    InpMagic          = 20261118;  // Magic Number
 
-input group "Risk and execution"
-input double InpLots=0.03;
-input int    InpSwingLookback=3;          // M1 swing length AND pivot length
-input double InpRR=4.0;
-input int    InpSLBufferPoints=0;         // extra points beyond the CHoCH wick
+input group "=== Strategy Parameters ==="
+input int      InpSwingLen       = 2;         // Fractal/Swing Length (2 bars left/right)
+input int      InpZoneLegLen     = 20;        // Leg length for Demand/Supply zone
+input int      InpMaxZones       = 10;        // Max stored active zones
+input int      InpBiasMaxBars    = 200;       // H4 bias max age in H4 bars
+input int      InpTenkan         = 9;         // Ichimoku Tenkan-sen
+input int      InpKijun          = 26;        // Ichimoku Kijun-sen
+input int      InpSenkou         = 52;        // Ichimoku Senkou-sen B
+input bool     InpRequireTimeBreak = false;   // Optional Temporal Violation filter
 
-#define ZONE_MAX 200
-#define OB_LEN   5
-#define SWING_LEN 3
+input group "=== Execution & Filters ==="
+input int      InpMaxSpreadPoints= 50;        // Max allowed spread in points
+input int      InpMaxSlPoints    = 1000;      // Max SL in points
+input int      InpMinSlPoints    = 50;        // Min SL in points
+input bool     InpShowPanel      = true;      // Show Info Panel on Chart
 
-struct Zone
-  {
-   double   top;
-   double   bottom;
-   double   average;
-   datetime startTime;
-   bool     bullish;
-   bool     used;      // locked after first CHoCH entry
-   bool     armed;     // price has left the zone, so it may fire again
-  };
+//--- Global Handles
+int handleH4_Ichimoku = INVALID_HANDLE;
+int handleM15_Ichimoku = INVALID_HANDLE;
+int handleM5_Ichimoku = INVALID_HANDLE;
 
-CTrade   trade;
-string   g_symbol="";
-Zone     g_zones[ZONE_MAX];
-int      g_zoneCount=0;
-datetime g_lastM1Bar=0;
-datetime g_lastH1Bar=0;
-int      g_swingLen=SWING_LEN;
+//--- Time tracking for New Bar
+datetime lastBarH4  = 0;
+datetime lastBarM15 = 0;
+datetime lastBarM5  = 0;
 
-//+------------------------------------------------------------------+
-//| Utilities                                                        |
-//+------------------------------------------------------------------+
-bool IsNewBar(const ENUM_TIMEFRAMES period)
-  {
-   datetime t=iTime(g_symbol,period,0);
-   if(t<=0) return false;
-   if(period==PERIOD_M1)
-     {
-      if(t==g_lastM1Bar) return false;
-      g_lastM1Bar=t;
-      return true;
-     }
-   if(period==PERIOD_H1)
-     {
-      if(t==g_lastH1Bar) return false;
-      g_lastH1Bar=t;
-      return true;
-     }
-   return false;
-  }
+//--- Zone struct
+struct SZone {
+   double top;
+   double bottom;
+   datetime time;
+   bool used;
+};
 
-double ATR_H1(MqlRates &r[],const int index,const int length)
-  {
-   if(length<1 || index-length+1<1) return 0.0;
-   double sum=0.0;
-   for(int k=index-length+1;k<=index;k++)
-     {
-      double a=r[k].high-r[k].low;
-      double b=MathAbs(r[k].high-r[k-1].close);
-      double c=MathAbs(r[k].low-r[k-1].close);
-      sum+=MathMax(a,MathMax(b,c));
-     }
-   return sum/(double)length;
-  }
-
-bool IsPivotHigh(MqlRates &r[],const int j,const int length)
-  {
-   if(length<1) return false;
-   if(j-length<0 || j+length>=ArraySize(r)) return false;
-   for(int k=1;k<=length;k++)
-      if(r[j].high<=r[j-k].high || r[j].high<r[j+k].high) return false;
-   return true;
-  }
-
-bool IsPivotLow(MqlRates &r[],const int j,const int length)
-  {
-   if(length<1) return false;
-   if(j-length<0 || j+length>=ArraySize(r)) return false;
-   for(int k=1;k<=length;k++)
-      if(r[j].low>=r[j-k].low || r[j].low>r[j+k].low) return false;
-   return true;
-  }
-
-bool WasZoneUsed(Zone &oldZones[],const int oldCount,const datetime t,const bool bull)
-  {
-   for(int q=0;q<oldCount;q++)
-      if(oldZones[q].startTime==t && oldZones[q].bullish==bull)
-         return oldZones[q].used;
-   return false;
-  }
-
-void AddZone(const double top,const double bottom,const datetime start,
-             const bool bull,Zone &oldZones[],const int oldCount)
-  {
-   if(top<bottom || top<=0.0 || bottom<=0.0) return;
-   if(g_zoneCount>=ZONE_MAX)
-     {
-      for(int q=1;q<g_zoneCount;q++) g_zones[q-1]=g_zones[q];
-      g_zoneCount--;
-     }
-   g_zones[g_zoneCount].top=top;
-   g_zones[g_zoneCount].bottom=bottom;
-   g_zones[g_zoneCount].average=(top+bottom)*0.5;
-   g_zones[g_zoneCount].startTime=start;
-   g_zones[g_zoneCount].bullish=bull;
-   g_zones[g_zoneCount].used=WasZoneUsed(oldZones,oldCount,start,bull);
-   g_zones[g_zoneCount].armed=false;
-   g_zoneCount++;
-  }
+SZone m15_demand_zones[];
+SZone h4_supply_zones[];
 
 //+------------------------------------------------------------------+
-//| H1 zones: rebuilt on every new H1 bar, lock state is preserved.   |
-//+------------------------------------------------------------------+
-void BuildZones()
-  {
-   Zone oldZones[ZONE_MAX];
-   int oldCount=g_zoneCount;
-   if(oldCount>ZONE_MAX) oldCount=ZONE_MAX;
-   for(int q=0;q<oldCount;q++) oldZones[q]=g_zones[q];
-   g_zoneCount=0;
-
-   MqlRates r[];
-   ArraySetAsSeries(r,false);
-   int copied=CopyRates(g_symbol,PERIOD_H1,0,300,r);
-   if(copied<=3*OB_LEN+2)
-     {
-      Print("BuildZones: insufficient H1 history.");
-      return;
-     }
-   int last=copied-2;
-   int direction=0;
-   for(int i=0;i<=last;i++)
-     {
-      if(i>=OB_LEN*3-1)
-        {
-         int target=i-OB_LEN;
-         double highest=r[target-OB_LEN].high;
-         double lowest=r[target-OB_LEN].low;
-         for(int x=target-OB_LEN+1;x<target;x++)
-           {
-            if(r[x].high>highest) highest=r[x].high;
-            if(r[x].low<lowest) lowest=r[x].low;
-           }
-         if(r[target].high>highest) direction=-1;
-         else if(r[target].low<lowest) direction=1;
-        }
-
-      double bodyLow=MathMin(r[i].open,r[i].close);
-      double bodyHigh=MathMax(r[i].open,r[i].close);
-      for(int z=g_zoneCount-1;z>=0;z--)
-        {
-         bool remove=(g_zones[z].bullish && bodyLow<g_zones[z].bottom) ||
-                     (!g_zones[z].bullish && bodyHigh>g_zones[z].top);
-         if(remove)
-           {
-            for(int m=z+1;m<g_zoneCount;m++) g_zones[m-1]=g_zones[m];
-            g_zoneCount--;
-           }
-        }
-
-      int j=i-OB_LEN;
-      if(j<OB_LEN || j+OB_LEN>i || direction==0) continue;
-      bool pivot=true;
-      for(int k=1;k<=OB_LEN;k++)
-        {
-         if(r[j].tick_volume<=r[j-k].tick_volume ||
-            r[j].tick_volume<r[j+k].tick_volume)
-           { pivot=false; break; }
-        }
-      if(!pivot) continue;
-      double atr=ATR_H1(r,j,OB_LEN);
-      if(atr<=0.0) continue;
-      if(direction==1)
-        {
-         double top=MathMin(r[j].low+atr,r[j].high);
-         AddZone(top,r[j].low,r[j].time,true,oldZones,oldCount);
-        }
-      else if(direction==-1)
-        {
-         double bottom=MathMax(r[j].high-atr,r[j].low);
-         AddZone(r[j].high,bottom,r[j].time,false,oldZones,oldCount);
-        }
-     }
-   Print("BuildZones: active zones=",g_zoneCount);
-  }
-
-//+------------------------------------------------------------------+
-//| M1 signal: only the newest CLOSED bar may break an armed axis.    |
-//| axisLevel  = broken swing level (detection only).                 |
-//| slAnchor   = wick of the CHoCH candle (low for buy, high for sell)|
-//+------------------------------------------------------------------+
-bool DetectM1Signal(int &side,bool &isChoch,double &barLow,double &barHigh,
-                    int &signalIndex,double &axisLevel,double &slAnchor,
-                    MqlRates &rates[])
-  {
-   side=0; isChoch=false; barLow=0.0; barHigh=0.0;
-   signalIndex=-1; axisLevel=0.0; slAnchor=0.0;
-   ArraySetAsSeries(rates,false);
-   int need=4*g_swingLen+10;
-   int copied=CopyRates(g_symbol,PERIOD_M1,0,need,rates);
-   if(copied<2*g_swingLen+4) return false;
-
-   int last=copied-2;                 // newest closed bar
-   int startI=last-g_swingLen;        // last bar where a pivot can be confirmed
-   double upAxis=0.0,dnAxis=0.0;
-   bool upArmed=false,dnArmed=false;
-   int moving=0;
-
-   // Walk closed history up to (not including) the signal bar.
-   for(int i=0;i<startI;i++)
-     {
-      int j=i-g_swingLen;
-      if(j>=g_swingLen)
-        {
-         if(IsPivotHigh(rates,j,g_swingLen)) { upAxis=rates[j].high; upArmed=true; }
-         if(IsPivotLow (rates,j,g_swingLen)) { dnAxis=rates[j].low;  dnArmed=true; }
-        }
-      if(i>0 && upArmed && rates[i-1].close<=upAxis && rates[i].close>upAxis)
-        { moving=1;  upArmed=false; }
-      else if(i>0 && dnArmed && rates[i-1].close>=dnAxis && rates[i].close<dnAxis)
-        { moving=-1; dnArmed=false; }
-     }
-
-   // Confirm the pivot that the signal bar is allowed to break.
-   int j=startI-g_swingLen;
-   if(j>=g_swingLen)
-     {
-      if(IsPivotHigh(rates,j,g_swingLen)) { upAxis=rates[j].high; upArmed=true; }
-      if(IsPivotLow (rates,j,g_swingLen)) { dnAxis=rates[j].low;  dnArmed=true; }
-     }
-
-   int i=last;
-   if(upArmed && upAxis>0.0 && rates[i-1].close<=upAxis && rates[i].close>upAxis)
-     {
-      side=1; axisLevel=upAxis; isChoch=(moving<0);
-      slAnchor=rates[i].low;          // wick of the CHoCH candle
-     }
-   else if(dnArmed && dnAxis>0.0 && rates[i-1].close>=dnAxis && rates[i].close<dnAxis)
-     {
-      side=-1; axisLevel=dnAxis; isChoch=(moving>0);
-      slAnchor=rates[i].high;         // wick of the CHoCH candle
-     }
-
-   if(side==0) return false;
-   if(InpRequireCHoCH && !isChoch) return false;
-   barLow=rates[last].low;
-   barHigh=rates[last].high;
-   signalIndex=last;
-   return true;
-  }
-
-double CalcTP(const int side,const double entry,const double sl)
-  {
-   double distance=MathAbs(entry-sl);
-   double tp=(side>0 ? entry+InpRR*distance : entry-InpRR*distance);
-   return NormalizeDouble(tp,(int)SymbolInfoInteger(g_symbol,SYMBOL_DIGITS));
-  }
-
-double NormalizeLots(const double requested)
-  {
-   double minimum=SymbolInfoDouble(g_symbol,SYMBOL_VOLUME_MIN);
-   double maximum=SymbolInfoDouble(g_symbol,SYMBOL_VOLUME_MAX);
-   double step=SymbolInfoDouble(g_symbol,SYMBOL_VOLUME_STEP);
-   if(step<=0.0) step=minimum;
-   double lots=MathMax(minimum,MathMin(maximum,requested));
-   lots=MathFloor(lots/step+0.5)*step;
-   int digits=0;
-   double test=step;
-   while(digits<8 && MathAbs(test-MathRound(test))>1e-8)
-     { test*=10.0; digits++; }
-   return NormalizeDouble(MathMax(minimum,MathMin(maximum,lots)),digits);
-  }
-
-int CountOwnPositions()
-  {
-   int count=0;
-   for(int i=PositionsTotal()-1;i>=0;i--)
-     {
-      ulong ticket=PositionGetTicket(i);
-      if(ticket==0) continue;
-      if(PositionGetString(POSITION_SYMBOL)==g_symbol &&
-         (ulong)PositionGetInteger(POSITION_MAGIC)==InpMagic) count++;
-     }
-   return count;
-  }
-
-bool ZoneInteracts(const Zone &z,const double lo,const double hi,const double cl)
-  {
-   return ((lo<=z.top && hi>=z.bottom) || (cl>=z.bottom && cl<=z.top));
-  }
-
-//+------------------------------------------------------------------+
-//| Zone lock: after an entry the zone is disabled until price leaves |
-//| it and comes back (re-arm), then the next CHoCH may fire again.   |
-//+------------------------------------------------------------------+
-void UpdateZoneLocks()
-  {
-   MqlTick tick;
-   if(!SymbolInfoTick(g_symbol,tick)) return;
-   double price=tick.bid;
-   for(int z=0;z<g_zoneCount;z++)
-     {
-      if(!g_zones[z].used) continue;
-      if(!g_zones[z].armed && (price>g_zones[z].top || price<g_zones[z].bottom))
-         g_zones[z].armed=true;
-      if(g_zones[z].armed && price>=g_zones[z].bottom && price<=g_zones[z].top)
-        {
-         g_zones[z].used=false;
-         g_zones[z].armed=false;
-         Print("Zone re-armed: ",TimeToString(g_zones[z].startTime));
-        }
-     }
-  }
-
-void TryEntry()
-  {
-   UpdateZoneLocks();
-
-   MqlRates m1[];
-   int side=0,signalIndex=-1;
-   bool choch=false;
-   double barLow=0.0,barHigh=0.0,axisLevel=0.0,slAnchor=0.0;
-   if(!DetectM1Signal(side,choch,barLow,barHigh,signalIndex,axisLevel,slAnchor,m1)) return;
-   if(InpMaxOpenTrades>0 && CountOwnPositions()>=InpMaxOpenTrades) return;
-
-   double closePrice=m1[signalIndex].close;
-   int zoneIndex=-1;
-   for(int z=0;z<g_zoneCount;z++)
-     {
-      if(g_zones[z].bullish!=(side>0)) continue;
-      if(InpOneTradePerZone && g_zones[z].used) continue;
-      if(!ZoneInteracts(g_zones[z],barLow,barHigh,closePrice)) continue;
-      if(side>0 && barLow>g_zones[z].top) continue;
-      if(side<0 && barHigh<g_zones[z].bottom) continue;
-      zoneIndex=z; break;
-     }
-   if(zoneIndex<0) return;
-
-   MqlTick tick;
-   if(!SymbolInfoTick(g_symbol,tick)) return;
-   double entry=(side>0 ? tick.ask : tick.bid);
-
-   // SL on the CHoCH candle wick (+ optional buffer in points).
-   double point=SymbolInfoDouble(g_symbol,SYMBOL_POINT);
-   double buffer=InpSLBufferPoints*point;
-   double sl=(side>0 ? slAnchor-buffer : slAnchor+buffer);
-   sl=NormalizeDouble(sl,(int)SymbolInfoInteger(g_symbol,SYMBOL_DIGITS));
-
-   if((side>0 && sl>=entry) || (side<0 && sl<=entry))
-     {
-      Print("Signal skipped: invalid SL side (wick=",DoubleToString(slAnchor,_Digits),
-            " axis=",DoubleToString(axisLevel,_Digits),").");
-      return;
-     }
-
-   double tp=CalcTP(side,entry,sl);
-   double lots=NormalizeLots(InpLots);
-   string comment=(side>0 ? "AnnaBot-L" : "AnnaBot-S");
-   bool sent=(side>0 ? trade.Buy(lots,g_symbol,0.0,sl,tp,comment)
-                     : trade.Sell(lots,g_symbol,0.0,sl,tp,comment));
-   if(sent && (trade.ResultRetcode()==TRADE_RETCODE_DONE ||
-               trade.ResultRetcode()==TRADE_RETCODE_PLACED))
-     {
-      g_zones[zoneIndex].used=true;
-      g_zones[zoneIndex].armed=false;
-      Print("Trade opened: ",comment," lots=",DoubleToString(lots,2),
-            " SL(wick)=",DoubleToString(sl,_Digits)," TP=",DoubleToString(tp,_Digits),
-            " zone=",TimeToString(g_zones[zoneIndex].startTime));
-     }
-   else
-      Print("Trade failed: retcode=",trade.ResultRetcode()," ",trade.ResultRetcodeDescription());
-  }
-
-//+------------------------------------------------------------------+
-//| Expert lifecycle                                                 |
+//| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
-  {
-   g_symbol=(InpSymbol=="" ? _Symbol : InpSymbol);
-   if(!SymbolSelect(g_symbol,true))
-     {
-      Print("Initialization failed: symbol is unavailable: ",g_symbol);
-      return INIT_FAILED;
-     }
-   if(InpLots<=0.0 || InpRR<=0.0 || InpSwingLookback<1 || InpSLBufferPoints<0)
-     {
-      Print("Initialization failed: invalid risk inputs.");
-      return INIT_PARAMETERS_INCORRECT;
-     }
-   g_swingLen=InpSwingLookback;
+{
    trade.SetExpertMagicNumber(InpMagic);
-   trade.SetDeviationInPoints(30);
-   if(!trade.SetTypeFillingBySymbol(g_symbol))
-      Print("Warning: unable to set symbol filling mode automatically.");
-   g_zoneCount=0;
-   g_lastM1Bar=0;
-   g_lastH1Bar=0;
-   Print("AnnaBot v1.11 initialized. Symbol=",g_symbol," Lots=",DoubleToString(InpLots,2),
-         " RR=",DoubleToString(InpRR,2)," Swing=",g_swingLen,
-         " SLBuffer=",InpSLBufferPoints," MaxOpen=",InpMaxOpenTrades);
-   return INIT_SUCCEEDED;
-  }
+   
+   // Initialize Ichimoku handles
+   handleH4_Ichimoku  = iIchimoku(_Symbol, PERIOD_H4, InpTenkan, InpKijun, InpSenkou);
+   handleM15_Ichimoku = iIchimoku(_Symbol, PERIOD_M15, InpTenkan, InpKijun, InpSenkou);
+   handleM5_Ichimoku  = iIchimoku(_Symbol, PERIOD_M5, InpTenkan, InpKijun, InpSenkou);
+   
+   if(handleH4_Ichimoku == INVALID_HANDLE || handleM15_Ichimoku == INVALID_HANDLE || handleM5_Ichimoku == INVALID_HANDLE)
+   {
+      Print("[AnnaBot v5] Error creating Ichimoku indicator handles.");
+      return(INIT_FAILED);
+   }
 
-void OnDeinit(const int reason)
-  {
-   Print("AnnaBot stopped. Reason=",reason);
-  }
+   ArrayResize(m15_demand_zones, 0);
+   ArrayResize(h4_supply_zones, 0);
 
-void OnTick()
-  {
-   bool newH1=IsNewBar(PERIOD_H1);
-   bool newM1=IsNewBar(PERIOD_M1);
-   if(newH1) BuildZones();
-   if(newM1) TryEntry();
-  }
+   Print("[AnnaBot v5] Initialized successfully.");
+   return(INIT_SUCCEEDED);
+}
+
 //+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   IndicatorRelease(handleH4_Ichimoku);
+   IndicatorRelease(handleM15_Ichimoku);
+   IndicatorRelease(handleM5_Ichimoku);
+}
+
+//+------------------------------------------------------------------+
+//| Check for New Bar                                                |
+//+------------------------------------------------------------------+
+bool IsNewBar(ENUM_TIMEFRAMES tf, datetime &lastTime)
+{
+   datetime currTime = (datetime)SeriesInfoInteger(_Symbol, tf, SERIES_LASTBAR_DATE);
+   if(currTime > lastTime)
+   {
+      lastTime = currTime;
+      return true;
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Swing High Finder                                                |
+//+------------------------------------------------------------------+
+bool FindSwingHigh(ENUM_TIMEFRAMES tf, int shift, int len, double &swHigh)
+{
+   HighRate:
+   if(shift + len >= iBars(_Symbol, tf)) return false;
+   double h = iHigh(_Symbol, tf, shift);
+   for(int i = 1; i <= len; i++)
+   {
+      if(iHigh(_Symbol, tf, shift + i) > h) return false;
+      if(iHigh(_Symbol, tf, shift - i) > h) return false;
+   }
+   swHigh = h;
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Swing Low Finder                                                 |
+//+------------------------------------------------------------------+
+bool FindSwingLow(ENUM_TIMEFRAMES tf, int shift, int len, double &swLow)
+{
+   if(shift + len >= iBars(_Symbol, tf)) return false;
+   double l = iLow(_Symbol, tf, shift);
+   for(int i = 1; i <= len; i++)
+   {
+      if(iLow(_Symbol, tf, shift + i) < l) return false;
+      if(iLow(_Symbol, tf, shift - i) < l) return false;
+   }
+   swLow = l;
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Detect Bullish CHoCH                                             |
+//+------------------------------------------------------------------+
+bool DetectBullishCHoCH(ENUM_TIMEFRAMES tf, int len, int &chochBarIndex, double &brokenHigh, double &originLow)
+{
+   int totalBars = iBars(_Symbol, tf);
+   if(totalBars < 100) return false;
+   
+   double lastSH = 0;
+   int shShift = -1;
+   
+   // Find most recent confirmed swing high
+   for(int i = len + 1; i < 50; i++)
+   {
+      double val = 0;
+      if(FindSwingHigh(tf, i, len, val))
+      {
+         lastSH = val;
+         shShift = i;
+         break;
+      }
+   }
+   
+   if(shShift < 0) return false;
+   
+   // Check if any bar from shift 1 to shShift-1 closed above lastSH
+   for(int i = shShift - 1; i >= 1; i--)
+   {
+      if(iClose(_Symbol, tf, i) > lastSH)
+      {
+         chochBarIndex = i;
+         brokenHigh = lastSH;
+         
+         // Origin low is the lowest low between the swing high and the CHoCH bar
+         double minL = iLow(_Symbol, tf, i);
+         for(int j = i; j <= shShift; j++)
+         {
+            if(iLow(_Symbol, tf, j) < minL) minL = iLow(_Symbol, tf, j);
+         }
+         originLow = minL;
+         return true;
+      }
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Ichimoku Bullish Confirmation (Corrected Senkou Offset)          |
+//+------------------------------------------------------------------+
+bool CheckIchimokuBullish(ENUM_TIMEFRAMES tf, int handle, int shift)
+{
+   double tenkan[], kijun[], senkouA[], senkouB[];
+   ArraySetAsSeries(tenkan, true);
+   ArraySetAsSeries(kijun, true);
+   ArraySetAsSeries(senkouA, true);
+   ArraySetAsSeries(senkouB, true);
+   
+   // Senkou buffers in MT5 Ichimoku are shifted forward by Kijun periods (InpKijun)
+   int dataShift = shift + InpKijun;
+   
+   if(CopyBuffer(handle, 0, shift, 1, tenkan) <= 0) return false;
+   if(CopyBuffer(handle, 1, shift, 1, kijun) <= 0) return false;
+   if(CopyBuffer(handle, 2, dataShift, 1, senkouA) <= 0) return false;
+   if(CopyBuffer(handle, 3, dataShift, 1, senkouB) <= 0) return false;
+   
+   double c = iClose(_Symbol, tf, shift);
+   double kumoTop = MathMax(senkouA[0], senkouB[0]);
+   
+   // Conditions: Price > Kumo Top, Tenkan > Kijun, Tenkan > Kumo Top
+   if(c > kumoTop && tenkan[0] > kijun[0] && tenkan[0] > kumoTop)
+   {
+      if(InpRequireTimeBreak)
+      {
+         double oldClose = iClose(_Symbol, tf, shift + InpKijun);
+         if(c <= oldClose) return false; // Temporal violation check
+      }
+      return true;
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Add Demand/Supply Zone                                           |
+//+------------------------------------------------------------------+
+void AddZone(SZone &arr[], double top, double bottom, datetime time)
+{
+   int size = ArraySize(arr);
+   if(size >= InpMaxZones)
+   {
+      // Shift array left
+      for(int i = 0; i < size - 1; i++) arr[i] = arr[i+1];
+      size = InpMaxZones - 1;
+      ArrayResize(arr, size);
+   }
+   ArrayResize(arr, size + 1);
+   arr[size].top = top;
+   arr[size].bottom = bottom;
+   arr[size].time = time;
+   arr[size].used = false;
+}
+
+//+------------------------------------------------------------------+
+//| Check if Price Touches Zone                                      |
+//+------------------------------------------------------------------+
+bool PriceTouchesZone(ENUM_TIMEFRAMES tf, int shift, const SZone &zone)
+{
+   double c = iClose(_Symbol, tf, shift);
+   double h = iHigh(_Symbol, tf, shift);
+   double l = iLow(_Symbol, tf, shift);
+   
+   // Overlap or close inside
+   return ((l <= zone.top && h >= zone.bottom) || (c >= zone.bottom && c <= zone.top));
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Lot Size based on Risk %                               |
+//+------------------------------------------------------------------+
+double CalculateLots(double slPoints)
+{
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double riskMoney = balance * (InpRiskPercent / 100.0);
+   
+   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   double point     = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   
+   if(tickValue <= 0 || tickSize <= 0 || point <= 0 || slPoints <= 0) return 0.01;
+   
+   double riskPerLot = (slPoints * point / tickSize) * tickValue;
+   if(riskPerLot <= 0) return 0.01;
+   
+   double lots = riskMoney / riskPerLot;
+   
+   double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   
+   lots = MathFloor(lots / lotStep) * lotStep;
+   if(lots < minLot) lots = minLot;
+   if(lots > maxLot) lots = maxLot;
+   
+   return lots;
+}
+
+//+------------------------------------------------------------------+
+//| Get H4 Supply Zone Target (RR between 3 and 5)                   |
+//+------------------------------------------------------------------+
+bool GetH4SupplyTarget(double entry, double sl, double &outTP, double &outRR)
+{
+   double riskDist = entry - sl;
+   if(riskDist <= 0) return false;
+   
+   double bestSupplyTop = 0;
+   int size = ArraySize(h4_supply_zones);
+   
+   // Find nearest unmitigated H4 supply zone above entry
+   for(int i = size - 1; i >= 0; i--)
+   {
+      if(!h4_supply_zones[i].used && h4_supply_zones[i].bottom > entry)
+      {
+         bestSupplyTop = h4_supply_zones[i].bottom; // conservative target at zone bottom
+         break;
+      }
+   }
+   
+   if(bestSupplyTop <= entry)
+   {
+      // Fallback if no H4 supply zone stored yet: use InpMinRR * risk
+      outTP = entry + (InpMinRR * riskDist);
+      outRR = InpMinRR;
+      return true;
+   }
+   
+   double rewardDist = bestSupplyTop - entry;
+   double rr = rewardDist / riskDist;
+   
+   if(rr < InpMinRR) return false; // Below min RR, skip trade
+   
+   if(rr > InpMaxRR)
+   {
+      // Clamp TP to Max RR
+      outTP = entry + (InpMaxRR * riskDist);
+      outRR = InpMaxRR;
+   }
+   else
+   {
+      outTP = bestSupplyTop;
+      outRR = rr;
+   }
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Count Open Positions for this Magic                              |
+//+------------------------------------------------------------------+
+int CountOpenPositions()
+{
+   int count = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == InpMagic)
+      {
+         if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) count++;
+      }
+   }
+   return count;
+}
+
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+   // Check spread filter
+   double spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   if(spread > InpMaxSpreadPoints) return;
+   
+   // Only allow 1 open position at a time
+   if(CountOpenPositions() > 0)
+   {
+      UpdatePanel("POSITION ACTIVE", 0, 0, 0, 3.0);
+      return;
+   }
+   
+   // --- 1. H4 Bias Check (New H4 bar or periodic check)
+   if(IsNewBar(PERIOD_H4, lastBarH4))
+   {
+      int chochBar = 0;
+      double brokenH = 0, originL = 0;
+      if(DetectBullishCHoCH(PERIOD_H4, InpSwingLen, chochBar, brokenH, originL))
+      {
+         // Add H4 supply zone (from last up leg before CHoCH)
+         double supTop = iHigh(_Symbol, PERIOD_H4, chochBar + 5);
+         double supBot = iLow(_Symbol, PERIOD_H4, chochBar + 1);
+         AddZone(h4_supply_zones, supTop, supBot, iTime(_Symbol, PERIOD_H4, chochBar));
+      }
+   }
+   
+   // --- 2. M15 State & Pullback Check
+   if(IsNewBar(PERIOD_M15, lastBarM15))
+   {
+      int chochBarM15 = 0;
+      double brokenHM15 = 0, originLM15 = 0;
+      
+      // Check M15 Ichimoku & CHoCH
+      if(CheckIchimokuBullish(PERIOD_M15, handleM15_Ichimoku, 1))
+      {
+         if(DetectBullishCHoCH(PERIOD_M15, InpSwingLen, chochBarM15, brokenHM15, originLM15))
+         {
+            // Create M15 demand zone
+            double zoneTop = brokenHM15;
+            double zoneBot = originLM15;
+            AddZone(m15_demand_zones, zoneTop, zoneBot, iTime(_Symbol, PERIOD_M15, chochBarM15));
+         }
+      }
+   }
+   
+   // --- 3. M5 Execution Check (Every M5 bar)
+   if(IsNewBar(PERIOD_M5, lastBarM5))
+   {
+      // Check M5 Ichimoku
+      if(!CheckIchimokuBullish(PERIOD_M5, handleM5_Ichimoku, 1)) return;
+      
+      // Check M5 CHoCH
+      int chochBarM5 = 0;
+      double brokenHM5 = 0, originLM5 = 0;
+      if(!DetectBullishCHoCH(PERIOD_M5, InpSwingLen, chochBarM5, brokenHM5, originLM5)) return;
+      
+      // Verify price touched an active M15 demand zone
+      bool inZone = false;
+      int m15Size = ArraySize(m15_demand_zones);
+      for(int i = 0; i < m15Size; i++)
+      {
+         if(!m15_demand_zones[i].used && PriceTouchesZone(PERIOD_M5, chochBarM5, m15_demand_zones[i]))
+         {
+            inZone = true;
+            m15_demand_zones[i].used = true; // Mark zone as tested/used
+            break;
+         }
+      }
+      
+      if(!inZone && m15Size > 0) return; // Must respect M15 zone pullback
+      
+      // Setup Entry, SL and TP
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double sl = originLM5 - (5 * _Point); // SL below M5 swing low origin
+      
+      // Validate SL distance
+      double slPoints = (ask - sl) / _Point;
+      if(slPoints < InpMinSlPoints || slPoints > InpMaxSlPoints) return;
+      
+      double tp = 0, rr = 0;
+      if(!GetH4SupplyTarget(ask, sl, tp, rr)) return;
+      
+      double lots = CalculateLots(slPoints);
+      
+      // Execute Buy Order
+      if(trade.Buy(lots, _Symbol, ask, sl, tp, "AnnaBot v5 Long"))
+      {
+         Print("[AnnaBot v5] Buy order executed successfully. Lots: ", lots, ", SL: ", sl, ", TP: ", tp, ", RR: ", rr);
+      }
+      else
+      {
+         Print("[AnnaBot v5] Order failed. Error: ", GetLastError());
+      }
+   }
+   
+   if(InpShowPanel) UpdatePanel("SEARCHING SETUP", 0, 0, 0, 0);
+}
+
+//+------------------------------------------------------------------+
+//| Update Info Panel on Chart                                       |
+//+------------------------------------------------------------------+
+void UpdatePanel(string status, double sl, double tp, double rr, double lots)
+{
+   string comment = "==============================\n";
+   comment += "       ANNA BOT v5 (MQL5)     \n";
+   comment += "==============================\n";
+   comment += "Status: " + status + "\n";
+   comment += "Spread: " + DoubleToString(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD), 0) + " pts\n";
+   comment += "Active Zones M15: " + IntegerToString(ArraySize(m15_demand_zones)) + "\n";
+   comment += "Active Zones H4: " + IntegerToString(ArraySize(h4_supply_zones)) + "\n";
+   comment += "==============================\n";
+   Comment(comment);
+}
+
